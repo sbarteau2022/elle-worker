@@ -36,23 +36,32 @@ queue = "elle-ingest-queue"
 max_batch_size = 10
 max_batch_timeout = 30
 
-# Cron triggers
-# Heartbeat: every minute
-# Dream cycle: 3am UTC daily (Elle processes memory during sleep)
+# ── Cron schedule — all autonomous loops ─────────────────────
+# */1  * * * *   Heartbeat — logs every minute, trims live_events
+# */15 * * * *   Trading cycle — market intelligence + Alpaca decisions
+# 0    * * * *   Research loop — curiosity research, corpus expansion
+# 0    3 * * *   Dream cycle — memory integration (3am UTC)
+# 0    20 * * *  Daily journal — market close reflection (4pm ET = 8pm UTC)
 [triggers]
-crons = ["*/1 * * * *", "0 3 * * *"]
+crons = [
+  "*/1 * * * *",
+  "*/15 * * * *",
+  "0 * * * *",
+  "0 3 * * *",
+  "0 20 * * *"
+]
 
 [vars]
 ENVIRONMENT = "production"
 
 # Secrets — set via: wrangler secret put <NAME>
 #
-# LLM providers (set all three for full routing):
-#   LLM_OPENROUTER_KEY     (openrouter.ai → Keys)
-#   LLM_GEMINI_KEY         (aistudio.google.com → Get API key)
-#   LLM_GROK_KEY           (console.x.ai → API keys — optional)
+# LLM providers:
+#   LLM_OPENROUTER_KEY     openrouter.ai → Keys
+#   LLM_GEMINI_KEY         aistudio.google.com → Get API key
+#   LLM_GROK_KEY           console.x.ai (optional)
 #
-# Model overrides (optional — defaults to free tier):
+# Model overrides (defaults to free tier if not set):
 #   LLM_MODEL_PRIMARY      nvidia/nemotron-3-ultra-550b-a55b:free
 #   LLM_MODEL_FAST         meta-llama/llama-3.3-70b-instruct:free
 #   LLM_MODEL_CODE         qwen/qwen3-coder:free
@@ -62,5 +71,9 @@ ENVIRONMENT = "production"
 #   JWT_SECRET
 #   ELLE_SERVICE_KEY
 #
-# Legacy (keep until fully migrated):
-#   ANTHROPIC_API_KEY
+# Alpaca (paper trading):
+#   ALPACA_API_KEY
+#   ALPACA_API_SECRET
+#
+# GitHub (corpus ops):
+#   GITHUB_TOKEN
