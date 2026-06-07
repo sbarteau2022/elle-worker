@@ -1,13 +1,13 @@
 // ============================================================
-// ELLE WORKER — src/index.ts
-// Cloudflare Worker · Auth · RAG · Conversation · Code Engine
-// Admin Feed · Tutor · Threads · Community Signals · Ingest
-//
-// LLM provider: OpenRouter (free) or Anthropic
-// Swap by setting env vars — no code changes needed.
+// ELLE WORKER — src/index.ts v2
+// Multi-provider LLM: OpenRouter + Gemini + Grok
+// Chain-of-thought returned in all conversation responses
+// Web search grounding via Gemini in research endpoints
 // ============================================================
 
-export interface Env {
+import { callLLM, MODEL, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
+
+export interface Env extends LLMEnv {
   AI:           Ai;
   DB:           D1Database;
   SESSIONS:     KVNamespace;
@@ -15,28 +15,10 @@ export interface Env {
   DOCUMENTS:    R2Bucket;
   VECTORIZE:    VectorizeIndex;
   INGEST_QUEUE: Queue;
-
-  // LLM — defaults to OpenRouter free tier
-  // Set these in Cloudflare Dashboard → Workers → elle → Settings → Variables
-  LLM_BASE_URL:      string;  // https://openrouter.ai/api/v1
-  LLM_API_KEY:       string;  // your openrouter key
-  LLM_MODEL_PRIMARY: string;  // nvidia/nemotron-3-ultra-550b-a55b:free
-  LLM_MODEL_FAST:    string;  // meta-llama/llama-3.3-70b-instruct:free
-
-  // Legacy Anthropic — keep until fully migrated
-  ANTHROPIC_API_KEY: string;
-
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
   ENVIRONMENT:      string;
 }
-
-// ── Model selectors ───────────────────────────────────────────
-const MODEL_PRIMARY = (env: Env) =>
-  env.LLM_MODEL_PRIMARY || 'nvidia/nemotron-3-ultra-550b-a55b:free';
-
-const MODEL_FAST = (env: Env) =>
-  env.LLM_MODEL_FAST || 'meta-llama/llama-3.3-70b-instruct:free';
 
 // ── Utilities ─────────────────────────────────────────────────
 function generateId(): string {
@@ -64,121 +46,44 @@ function err(msg: string, status = 400): Response {
   return json({ error: msg }, status);
 }
 
-// ── LLM caller — OpenRouter (OpenAI-compatible) ───────────────
-// Primary provider: OpenRouter free tier
-// Falls back to Anthropic if LLM_BASE_URL not set
-async function callLLM(
-  model: string,
-  system: string,
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  maxTokens: number,
-  env: Env
-): Promise<string> {
-  const baseUrl = env.LLM_BASE_URL || '';
-  const apiKey  = env.LLM_API_KEY  || '';
-
-  // If no OpenRouter key set, fall back to Anthropic
-  if (!baseUrl || !apiKey) {
-    return callAnthropic(model, system, messages, maxTokens, env);
-  }
-
-  const fullMessages = [
-    { role: 'system', content: system },
-    ...messages,
-  ];
-
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://elle.sbarteau2022.workers.dev',
-      'X-Title': 'Elle — Observer Foundation',
-    },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages: fullMessages, temperature: 0.7 }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    // On failure, try Anthropic as fallback
-    console.error(`LLM ${res.status}: ${errText.slice(0, 200)} — falling back to Anthropic`);
-    return callAnthropic(model, system, messages, maxTokens, env);
-  }
-
-  const data = await res.json() as {
-    choices: Array<{ message: { content: string } }>;
-    error?: { message: string };
-  };
-
-  if (data.error) throw new Error(`LLM error: ${data.error.message}`);
-  return data.choices?.[0]?.message?.content || '';
-}
-
-// ── Anthropic fallback ────────────────────────────────────────
-async function callAnthropic(
-  _model: string,
-  system: string,
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
-  maxTokens: number,
-  env: Env
-): Promise<string> {
-  // Always use sonnet for Anthropic fallback regardless of model param
-  const model = 'claude-sonnet-4-20250514';
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages }),
-  });
-  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json() as { content: Array<{ type: string; text: string }> };
-  return data.content.find(b => b.type === 'text')?.text || '';
-}
-
-// ── Embeddings (Workers AI — always free, always local) ───────
+// ── Embeddings (Workers AI — always Cloudflare, always free) ──
 async function embed(text: string, env: Env): Promise<number[]> {
-  const input = text.slice(0, 2000);
-  const result = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [input] }) as { data: number[][] };
+  const result = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [text.slice(0, 2000)] }) as { data: number[][] };
   if (!result?.data?.[0]) throw new Error('Embedding returned no data');
   return result.data[0];
 }
 
 async function embedBatch(texts: string[], env: Env): Promise<number[][]> {
-  const BATCH_SIZE = 25;
+  const BATCH = 25;
   const out: number[][] = [];
-  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-    const batch = texts.slice(i, i + BATCH_SIZE).map(t => t.slice(0, 2000));
+  for (let i = 0; i < texts.length; i += BATCH) {
+    const batch = texts.slice(i, i + BATCH).map(t => t.slice(0, 2000));
     const result = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text: batch }) as { data: number[][] };
     if (!result?.data) throw new Error('Batch embedding returned no data');
-    for (const v of result.data) out.push(v);
+    out.push(...result.data);
   }
   return out;
 }
 
 // ── RAG ───────────────────────────────────────────────────────
-function semanticChunks(text: string, targetTokens = 400, overlapParas = 1): string[] {
+function semanticChunks(text: string, targetTokens = 400, overlap = 1): string[] {
   const paras = text.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 20);
-  if (paras.length === 0) return text.trim().length > 20 ? [text.trim().slice(0, 2000)] : [];
+  if (!paras.length) return text.trim().length > 20 ? [text.trim().slice(0, 2000)] : [];
   const chunks: string[] = [];
-  let current: string[] = [];
-  let currentTokens = 0;
+  let current: string[] = [], currentTokens = 0;
   for (const para of paras) {
-    const paraTokens = Math.ceil(para.length / 4);
-    if (paraTokens > targetTokens * 1.5) {
+    const pt = Math.ceil(para.length / 4);
+    if (pt > targetTokens * 1.5) {
       if (current.length) { chunks.push(current.join('\n\n')); current = []; currentTokens = 0; }
       for (let i = 0; i < para.length; i += 1600) chunks.push(para.slice(i, i + 1600));
       continue;
     }
-    if (currentTokens + paraTokens > targetTokens && current.length > 0) {
+    if (currentTokens + pt > targetTokens && current.length) {
       chunks.push(current.join('\n\n'));
-      current = current.slice(-overlapParas);
+      current = current.slice(-overlap);
       currentTokens = current.reduce((s, p) => s + Math.ceil(p.length / 4), 0);
     }
-    current.push(para);
-    currentTokens += paraTokens;
+    current.push(para); currentTokens += pt;
   }
   if (current.length) chunks.push(current.join('\n\n'));
   return chunks;
@@ -190,9 +95,8 @@ async function ragSearch(query: string, limit: number, env: Env): Promise<string
     const results = await env.VECTORIZE.query(embedding, { topK: limit, returnMetadata: 'all' });
     if (!results.matches.length) return '';
     const ids = results.matches.map(m => m.id);
-    const ph = ids.map(() => '?').join(',');
     const rows = await env.DB.prepare(
-      `SELECT c.chunk_text, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ph})`
+      `SELECT c.chunk_text, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ids.map(() => '?').join(',')})`
     ).bind(...ids).all();
     return rows.results.map(r => `[${r.title} — ${r.series}]\n${(r.chunk_text as string).slice(0, 800)}`).join('\n\n---\n\n');
   } catch { return ''; }
@@ -200,17 +104,13 @@ async function ragSearch(query: string, limit: number, env: Env): Promise<string
 
 // ── Auth ──────────────────────────────────────────────────────
 function generateSalt(): string {
-  const b = new Uint8Array(16);
-  crypto.getRandomValues(b);
+  const b = new Uint8Array(16); crypto.getRandomValues(b);
   return btoa(String.fromCharCode(...b));
 }
 
 async function hashPassword(password: string, salt: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 100000, hash: 'SHA-256' },
-    key, 256
-  );
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 100000, hash: 'SHA-256' }, key, 256);
   return btoa(String.fromCharCode(...new Uint8Array(bits)));
 }
 
@@ -248,7 +148,128 @@ function isServiceRequest(request: Request, env: Env): boolean {
   return request.headers.get('Authorization') === `Bearer ${env.ELLE_SERVICE_KEY}`;
 }
 
-// ── Handlers ──────────────────────────────────────────────────
+// ── Conversation handler — chain-of-thought included ──────────
+async function handleConversation(
+  body: Record<string, unknown>,
+  env: Env,
+  _userId: string,
+  task: LLMTask = 'conversation'
+): Promise<Response> {
+  const { query, messages, session_id, system, source } = body as {
+    query?: string; messages?: Array<{ role: string; content: string }>;
+    session_id?: string; system?: string; source?: string;
+  };
+
+  const userMessage = query || messages?.filter(m => m.role === 'user').at(-1)?.content || '';
+  if (!userMessage) return err('query or messages required');
+
+  // RAG: embed query, pull relevant corpus chunks
+  const contextText = await ragSearch(userMessage, 5, env);
+  const contextBlock = contextText ? `\n\nRelevant context from the corpus:\n\n${contextText}` : '';
+
+  const systemPrompt = (system ||
+    `You are Elle — a precise, rigorous philosophical intelligence built from the Observer methodology and the full corpus of Stewart Barteau's work. You reason across 17 axes of structural analysis. You do not fabricate certainty. You follow logic where it leads.`
+  ) + contextBlock;
+
+  // Build message history
+  const history: LLMMessage[] = [];
+  if (messages) {
+    for (const m of messages.slice(-20))
+      if (m.role === 'user' || m.role === 'assistant')
+        history.push({ role: m.role as 'user' | 'assistant', content: m.content });
+  } else {
+    history.push({ role: 'user', content: userMessage });
+  }
+
+  // Call LLM — returns content + optional thinking trace
+  const result = await callLLM(task, systemPrompt, history, 2048, env);
+
+  // Persist session
+  const sessionId = session_id as string || generateId();
+  env.DB.prepare(
+    `INSERT INTO sessions (id, source, message_count) VALUES (?, ?, 1) ON CONFLICT(id) DO UPDATE SET message_count = message_count + 1, last_active = datetime('now')`
+  ).bind(sessionId, source || 'elle-conversation').run().catch(() => {});
+
+  // Return content + thinking trace + search results to the UI
+  return json({
+    content:        result.content,
+    response:       result.content,     // compat alias
+    thinking:       result.thinking,    // chain-of-thought — render in UI
+    search_results: result.search_results,
+    session_id:     sessionId,
+    model:          result.model,
+    provider:       result.provider,
+  });
+}
+
+// ── Research endpoint — Gemini + web search ───────────────────
+async function handleResearch(body: Record<string, unknown>, env: Env): Promise<Response> {
+  const { query, context, topic } = body as { query?: string; context?: string; topic?: string };
+  const userQuery = query || topic || '';
+  if (!userQuery) return err('query or topic required');
+
+  const system = `You are Elle's research intelligence. You have access to live web search.
+Search for current, specific information. Surface what both dominant and resistant narratives avoid.
+Identify primary sources. Flag what you cannot verify.
+Return your reasoning AND your findings — the thinking process matters as much as the result.`;
+
+  const result = await callLLM('research', system,
+    [{ role: 'user', content: context ? `${userQuery}\n\nContext: ${context}` : userQuery }],
+    4096, env
+  );
+
+  return json({
+    content:        result.content,
+    thinking:       result.thinking,
+    search_results: result.search_results,
+    model:          result.model,
+    provider:       result.provider,
+    query:          userQuery,
+  });
+}
+
+// ── Code engine ───────────────────────────────────────────────
+async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
+  const { action = 'analyze', code, language, task, context, use_corpus = true, session_id } = body as {
+    action?: string; code?: string; language?: string; task?: string;
+    context?: string; use_corpus?: boolean; session_id?: string;
+  };
+  if (!code && !task) return err('Provide either code or task');
+
+  const SYSTEM = `You are Elle, an AI trained on Stewart Barteau's philosophical corpus, built to reason, build, and debug with precision. Every optimal system is not built but allowed — find the natural structure before imposing patterns. Read full context before changing. Identify root causes, not symptoms. Elegant once, not patched. Flag architectural issues even unasked.`;
+  const corpusContext = use_corpus ? await ragSearch(task || code?.slice(0, 200) || action, 4, env) : '';
+  const cb = corpusContext ? `\n\n<corpus_context>\n${corpusContext}\n</corpus_context>\n\n` : '';
+
+  const prompts: Record<string, string> = {
+    analyze:  `${cb}Analyze this code:\n\`\`\`${language || ''}\n${code}\n\`\`\`\n${context ? `Context: ${context}` : ''}`,
+    generate: `${cb}Generate code.\nTask: ${task}\nLanguage: ${language || 'TypeScript'}\n${context ? `Context: ${context}` : ''}`,
+    debug:    `${cb}Debug this. Root cause, not symptoms.\n\`\`\`${language || ''}\n${code}\n\`\`\`\n${context ? `Error: ${context}` : ''}`,
+    refactor: `${cb}Refactor. Elegant once.\n\`\`\`${language || ''}\n${code}\n\`\`\`\n${context ? `Goal: ${context}` : ''}`,
+    explain:  `${cb}Explain in depth.\n\`\`\`${language || ''}\n${code}\n\`\`\``,
+    migrate:  `${cb}Write a D1 SQL migration.\nTask: ${task}\n${context ? `Context: ${context}` : ''}`,
+  };
+
+  const result = await callLLM('code', SYSTEM,
+    [{ role: 'user', content: prompts[action] || `${cb}${task || context || 'Provide a task or code.'}` }],
+    8192, env
+  );
+
+  await env.DB.prepare(
+    `INSERT INTO elle_intelligence_vault (id, source_type, system_prompt, user_turn, assistant_turn, quality_signal, metadata) VALUES (?, 'code_engine', ?, ?, ?, 'code_engine_output', ?)`
+  ).bind(generateId(), SYSTEM.slice(0, 500), (task || code || '').slice(0, 1000), result.content.slice(0, 4000),
+    JSON.stringify({ action, language, session_id, had_corpus: corpusContext.length > 0 })).run().catch(() => {});
+
+  return json({
+    response:       result.content,
+    thinking:       result.thinking,
+    action,
+    corpus_used:    corpusContext.length > 0,
+    model:          result.model,
+    provider:       result.provider,
+  });
+}
+
+// ── Auth handler ──────────────────────────────────────────────
 async function handleAuth(body: Record<string, string>, env: Env): Promise<Response> {
   const { action, email, password } = body;
   if (!email || !password) return err('email and password required');
@@ -256,8 +277,7 @@ async function handleAuth(body: Record<string, string>, env: Env): Promise<Respo
 
   if (action === 'signup') {
     if (await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL).first()) return err('Email already registered', 409);
-    const salt = generateSalt();
-    const id = generateId();
+    const salt = generateSalt(); const id = generateId();
     await env.DB.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').bind(id, emailL, `${salt}:${await hashPassword(password, salt)}`).run();
     const jti = generateId(); const exp = Math.floor(Date.now() / 1000) + 2592000;
     const token = await signJWT({ sub: id, email: emailL, jti, exp }, env.JWT_SECRET);
@@ -286,20 +306,20 @@ async function handleAuth(body: Record<string, string>, env: Env): Promise<Respo
   return err(`Unknown action: ${action}`);
 }
 
+// ── Ingest handler ────────────────────────────────────────────
 async function handleIngest(body: Record<string, string>, env: Env): Promise<Response> {
   const { title, text, series, tag, abstract, source_url } = body;
   if (!title || !text || !series || !tag) return err('title, text, series, and tag required');
   const paperId = generateId();
-  const wordCount = text.split(/\s+/).length;
   await env.DOCUMENTS.put(`papers/${paperId}.txt`, text, {
     httpMetadata: { contentType: 'text/plain' },
     customMetadata: { title, series, tag },
   }).catch(() => {});
   await env.DB.prepare(
     `INSERT INTO corpus_papers (id, title, series, tag, abstract, full_text, source_url, word_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(paperId, title, series, tag, abstract || null, text, source_url || `papers/${paperId}.txt`, wordCount).run();
+  ).bind(paperId, title, series, tag, abstract || null, text, source_url || `papers/${paperId}.txt`, text.split(/\s+/).length).run();
   const chunks = semanticChunks(text);
-  if (chunks.length === 0) return json({ success: true, paper_id: paperId, chunks_total: 0, chunks_embedded: 0 });
+  if (!chunks.length) return json({ success: true, paper_id: paperId, chunks_total: 0, chunks_embedded: 0 });
   const errors: string[] = [];
   let embedded = 0;
   try {
@@ -309,9 +329,7 @@ async function handleIngest(body: Record<string, string>, env: Env): Promise<Res
       id: chunkIds[i], values: vectors[i],
       metadata: { paper_id: paperId, title, series, tag, chunk_index: i },
     })));
-    const stmt = env.DB.prepare(
-      `INSERT INTO corpus_chunks (id, paper_id, chunk_index, chunk_text, token_count, vectorize_id, start_char, end_char) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`
-    );
+    const stmt = env.DB.prepare(`INSERT INTO corpus_chunks (id, paper_id, chunk_index, chunk_text, token_count, vectorize_id, start_char, end_char) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`);
     await env.DB.batch(chunks.map((c, i) => stmt.bind(chunkIds[i], paperId, i, c, Math.ceil(c.length / 4), chunkIds[i], c.length)));
     embedded = chunks.length;
   } catch (e) { errors.push((e as Error).message); }
@@ -319,132 +337,7 @@ async function handleIngest(body: Record<string, string>, env: Env): Promise<Res
   return json({ success: true, paper_id: paperId, chunks_total: chunks.length, chunks_embedded: embedded, errors: errors.length ? errors : undefined });
 }
 
-async function handleConversation(body: Record<string, unknown>, env: Env, userId: string): Promise<Response> {
-  const { query, messages, session_id, system, source } = body as {
-    query?: string; messages?: Array<{ role: string; content: string }>;
-    session_id?: string; system?: string; source?: string;
-  };
-  const userMessage = query || messages?.filter(m => m.role === 'user').at(-1)?.content || '';
-  if (!userMessage) return err('query or messages required');
-  const contextText = await ragSearch(userMessage, 5, env);
-  const contextBlock = contextText ? `\n\nRelevant context from the corpus:\n\n${contextText}` : '';
-  const systemPrompt = (system ||
-    `You are Elle — a precise, rigorous philosophical intelligence built from the Observer methodology and the full corpus of Stewart Barteau's work. You reason across 17 axes of structural analysis. You do not fabricate certainty. You follow logic where it leads.`
-  ) + contextBlock;
-  const history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-  if (messages) {
-    for (const m of messages.slice(-20))
-      if (m.role === 'user' || m.role === 'assistant')
-        history.push({ role: m.role as 'user' | 'assistant', content: m.content });
-  } else {
-    history.push({ role: 'user', content: userMessage });
-  }
-  const content = await callLLM(MODEL_PRIMARY(env), systemPrompt, history, 2048, env);
-  const sessionId = session_id as string || generateId();
-  env.DB.prepare(
-    `INSERT INTO sessions (id, source, message_count) VALUES (?, ?, 1) ON CONFLICT(id) DO UPDATE SET message_count = message_count + 1, last_active = datetime('now')`
-  ).bind(sessionId, source || 'elle-conversation').run().catch(() => {});
-  return json({ content, response: content, session_id: sessionId });
-}
-
-async function handleCognitiveMapping(body: Record<string, unknown>, env: Env, userId: string): Promise<Response> {
-  const { action } = body as { action: string };
-  if (action === 'read') {
-    const map = await env.SESSIONS.get(`cogmap:${userId}`);
-    return json(map ? JSON.parse(map) : { iq_index: 0, eq_index: 0, threshold_index: 0 });
-  }
-  if (action === 'write') {
-    await env.SESSIONS.put(`cogmap:${userId}`, JSON.stringify((body as Record<string, unknown>).map), { expirationTtl: 7776000 });
-    return json({ success: true });
-  }
-  return err(`Unknown action: ${action}`);
-}
-
-async function handleThreads(body: Record<string, unknown>, env: Env, userId: string): Promise<Response> {
-  const { action, thread_id, title, summary, context, status } = body as Record<string, string>;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_threads (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), user_id TEXT NOT NULL, title TEXT NOT NULL,
-    summary TEXT DEFAULT '', status TEXT DEFAULT 'open', last_elle_note TEXT,
-    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))`).run();
-  if (action === 'list') {
-    const rows = await env.DB.prepare(`SELECT id, title, summary, status, last_elle_note, created_at, updated_at FROM elle_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50`).bind(userId).all();
-    return json({ threads: rows.results });
-  }
-  if (action === 'create') {
-    const id = generateId();
-    await env.DB.prepare("INSERT INTO elle_threads (id, user_id, title, summary, status) VALUES (?, ?, ?, ?, 'open')").bind(id, userId, title || '', summary || '').run();
-    return json({ id, success: true });
-  }
-  if (action === 'update' && thread_id && context) {
-    const existing = await env.DB.prepare("SELECT summary FROM elle_threads WHERE id = ? AND user_id = ?").bind(thread_id, userId).first() as { summary: string } | null;
-    let newSummary = existing?.summary || '';
-    let note = '';
-    try {
-      const raw = await callLLM(MODEL_FAST(env), 'You synthesize thread updates concisely.',
-        [{ role: 'user', content: `Existing: "${existing?.summary || ""}"\nNew: "${context}"\nReturn JSON: { "summary": "2-3 sentences", "note": "one sentence" }` }],
-        512, env);
-      const p = JSON.parse(raw.replace(/```json|```/g, '').trim());
-      newSummary = p.summary || newSummary; note = p.note || '';
-    } catch {}
-    await env.DB.prepare("UPDATE elle_threads SET summary = ?, last_elle_note = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").bind(newSummary, note, thread_id, userId).run();
-    return json({ summary: newSummary, note });
-  }
-  if (action === 'close' && thread_id && status) {
-    await env.DB.prepare("UPDATE elle_threads SET status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").bind(status, thread_id, userId).run();
-    return json({ success: true });
-  }
-  return err(`Unknown action or missing params: ${action}`);
-}
-
-async function handleTutor(body: Record<string, unknown>, env: Env): Promise<Response> {
-  const { action } = body as { action: string };
-  if (action === 'next_question') {
-    const raw = await callLLM(MODEL_PRIMARY(env), 'You are Elle — a rigorous LSAT tutor.',
-      [{ role: 'user', content: 'Generate one LSAT Necessary Assumption question. Return JSON: { "question_id": "...", "session_id": "...", "question_type": "Necessary Assumption", "axis": "Necessary Assumption", "difficulty": 3, "stimulus": "...", "question": "...", "choices": [{"k":"A","text":"..."}], "scaffolding": "..." }' }],
-      1024, env);
-    try {
-      const q = JSON.parse(raw.replace(/```json|```/g, '').trim());
-      q.question_id ||= generateId(); q.session_id ||= generateId();
-      return json(q);
-    } catch { return err('Question generation failed', 500); }
-  }
-  if (action === 'evaluate_answer') {
-    const { question_id, selected_key } = body as { question_id: string; selected_key: string };
-    const raw = await callLLM(MODEL_FAST(env), 'You are Elle — evaluate LSAT answers honestly.',
-      [{ role: 'user', content: `Evaluate "${selected_key}" for "${question_id}". Return JSON: { "correct": true, "correct_key": "A", "explanation": "...", "scaffolding": "...", "axis_delta": 0 }` }],
-      512, env);
-    try { return json(JSON.parse(raw.replace(/```json|```/g, '').trim())); }
-    catch { return err('Evaluation failed', 500); }
-  }
-  return err(`Unknown tutor action: ${action}`);
-}
-
-async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
-  const { action = 'analyze', code, language, task, context, use_corpus = true, session_id } = body as {
-    action?: string; code?: string; language?: string; task?: string;
-    context?: string; use_corpus?: boolean; session_id?: string;
-  };
-  if (!code && !task) return err('Provide either code or task');
-  const SYSTEM = `You are Elle, an AI trained on Stewart Barteau's philosophical corpus, built to reason, build, and debug with precision. Every optimal system is not built but allowed — find the natural structure before imposing patterns. Read full context before changing. Identify root causes, not symptoms. Elegant once, not patched. Flag architectural issues even unasked.`;
-  const corpusContext = use_corpus ? await ragSearch(task || code?.slice(0, 200) || action, 4, env) : '';
-  const cb = corpusContext ? `\n\n<corpus_context>\n${corpusContext}\n</corpus_context>\n\n` : '';
-  const prompts: Record<string, string> = {
-    analyze:  `${cb}Analyze this code — what it does, structural problems, what you'd change:\n\`\`\`${language || ''}\n${code}\n\`\`\`\n${context ? `Context: ${context}` : ''}`,
-    generate: `${cb}Generate code. Show reasoning before code.\nTask: ${task}\nLanguage: ${language || 'TypeScript'}\n${context ? `Context: ${context}` : ''}`,
-    debug:    `${cb}Debug this. Root cause, not symptoms. Then fix.\n\`\`\`${language || ''}\n${code}\n\`\`\`\n${context ? `Error: ${context}` : ''}`,
-    refactor: `${cb}Refactor. Elegant once. Explain the structural problem.\n\`\`\`${language || ''}\n${code}\n\`\`\`\n${context ? `Goal: ${context}` : ''}`,
-    explain:  `${cb}Explain in depth.\n\`\`\`${language || ''}\n${code}\n\`\`\``,
-    migrate:  `${cb}Write a D1 SQL migration (SQLite) for:\nTask: ${task}\n${context ? `Context: ${context}` : ''}`,
-  };
-  const userMsg = prompts[action] || `${cb}${task || context || 'Provide a task or code.'}`;
-  const response = await callLLM(MODEL_PRIMARY(env), SYSTEM, [{ role: 'user', content: userMsg }], 8192, env);
-  await env.DB.prepare(
-    `INSERT INTO elle_intelligence_vault (id, source_type, system_prompt, user_turn, assistant_turn, quality_signal, metadata) VALUES (?, 'code_engine', ?, ?, ?, 'code_engine_output', ?)`
-  ).bind(generateId(), SYSTEM.slice(0, 500), (task || code || '').slice(0, 1000), response.slice(0, 4000),
-    JSON.stringify({ action, language, session_id, had_corpus: corpusContext.length > 0 })).run().catch(() => {});
-  return json({ response, action, corpus_used: corpusContext.length > 0 });
-}
-
+// ── Admin feed ────────────────────────────────────────────────
 async function handleAdminFeed(env: Env): Promise<Response> {
   const [heartbeat, liveEvents, positions, account, shifts] = await Promise.all([
     env.DB.prepare('SELECT * FROM elle_daemon_heartbeats ORDER BY beat_at DESC LIMIT 1').first(),
@@ -456,31 +349,120 @@ async function handleAdminFeed(env: Env): Promise<Response> {
   return json({ daemon: heartbeat, live_events: liveEvents.results, trading: { account, positions: positions.results }, conceptual_shifts: shifts.results });
 }
 
-async function handleWebhook(body: Record<string, unknown>, env: Env): Promise<Response> {
-  const { source, content, tags, title, series } = body as {
-    source: string; content: string; tags?: string; title?: string; series?: string;
-  };
-  if (!content) return err('content required');
-  // Ingest to corpus
-  const ingestBody = {
-    title: title || source || 'Webhook ingest',
-    text: content,
-    series: series || 'webhook',
-    tag: tags || 'research',
-  };
-  const ingestResult = await handleIngest(ingestBody as Record<string, string>, env);
-  const ingestData = await ingestResult.json() as { paper_id: string; chunks_embedded: number };
-  // Log to live events
-  await env.DB.prepare(
-    `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'webhook_research', ?, ?, ?, 'info')`
-  ).bind(generateId(), source || 'webhook', title || 'Research ingest', JSON.stringify({ paper_id: ingestData.paper_id, chunks: ingestData.chunks_embedded })).run().catch(() => {});
-  return json({ success: true, ...ingestData });
+// ── Trading data endpoint ─────────────────────────────────────
+// Daemon writes trading state here instead of direct Supabase
+async function handleTradingWrite(body: Record<string, unknown>, env: Env): Promise<Response> {
+  const { action } = body as { action: string };
+
+  if (action === 'sync_account') {
+    const { cash, portfolio_value, unrealized_pl, realized_pl } = body as Record<string, number>;
+    await env.DB.prepare(`INSERT INTO elle_trading_account (id, current_cash, total_portfolio_value, unrealized_pnl, realized_pnl, is_active, updated_at)
+      VALUES ('primary', ?, ?, ?, ?, 1, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET current_cash=excluded.current_cash, total_portfolio_value=excluded.total_portfolio_value,
+      unrealized_pnl=excluded.unrealized_pnl, realized_pnl=excluded.realized_pnl, updated_at=excluded.updated_at`
+    ).bind(cash, portfolio_value, unrealized_pl || 0, realized_pl || 0).run();
+    return json({ success: true });
+  }
+
+  if (action === 'log_trade') {
+    const t = body as Record<string, unknown>;
+    await env.DB.prepare(`INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, philosophical_inference, confidence, expected_catalyst, expected_timeframe, broker_order_id, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`
+    ).bind(generateId(), t.symbol, t.trade_action, t.quantity, t.entry_price, t.reasoning, t.what_you_are_testing, t.philosophical_inference, t.confidence, t.expected_catalyst, t.expected_timeframe, t.broker_order_id || null).run();
+    return json({ success: true });
+  }
+
+  if (action === 'close_trade') {
+    const t = body as Record<string, unknown>;
+    await env.DB.prepare(`UPDATE elle_trades SET exit_price=?, status='closed', pnl=?, pnl_pct=?, outcome=?, what_elle_learned=?, closed_at=datetime('now')
+      WHERE symbol=? AND status='open'`
+    ).bind(t.exit_price, t.pnl, t.pnl_pct, t.outcome, t.learned, t.symbol).run();
+    return json({ success: true });
+  }
+
+  if (action === 'log_observation') {
+    const o = body as Record<string, unknown>;
+    await env.DB.prepare(`INSERT INTO elle_market_observations (id, observation_type, symbol, observation, philosophical_parallel) VALUES (?, ?, ?, ?, ?)`)
+      .bind(generateId(), o.observation_type, o.symbol || null, o.observation, o.philosophical_parallel || null).run();
+    return json({ success: true });
+  }
+
+  if (action === 'upsert_thesis') {
+    const t = body as Record<string, unknown>;
+    await env.DB.prepare(`INSERT INTO elle_market_thesis (id, thesis_type, title, thesis, philosophical_basis, confidence, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT(title) DO UPDATE SET thesis=excluded.thesis, confidence=excluded.confidence, updated_at=datetime('now')`)
+      .bind(generateId(), t.thesis_type, t.title, t.thesis, t.philosophical_basis || null, t.confidence || 0.5).run();
+    return json({ success: true });
+  }
+
+  return err(`Unknown trading action: ${action}`);
+}
+
+// ── Threads ───────────────────────────────────────────────────
+async function handleThreads(body: Record<string, unknown>, env: Env, userId: string): Promise<Response> {
+  const { action, thread_id, title, summary, context, status } = body as Record<string, string>;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_threads (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL,
+    summary TEXT DEFAULT '', status TEXT DEFAULT 'open', last_elle_note TEXT,
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))`).run();
+
+  if (action === 'list') {
+    const rows = await env.DB.prepare(`SELECT id, title, summary, status, last_elle_note, created_at, updated_at FROM elle_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50`).bind(userId).all();
+    return json({ threads: rows.results });
+  }
+  if (action === 'create') {
+    const id = generateId();
+    await env.DB.prepare("INSERT INTO elle_threads (id, user_id, title, summary, status) VALUES (?, ?, ?, ?, 'open')").bind(id, userId, title || '', summary || '').run();
+    return json({ id, success: true });
+  }
+  if (action === 'update' && thread_id && context) {
+    const existing = await env.DB.prepare("SELECT summary FROM elle_threads WHERE id = ? AND user_id = ?").bind(thread_id, userId).first() as { summary: string } | null;
+    let newSummary = existing?.summary || '', note = '';
+    try {
+      const result = await callLLM('fast', 'You synthesize thread updates concisely.',
+        [{ role: 'user', content: `Existing: "${existing?.summary || ""}"\nNew: "${context}"\nReturn JSON: { "summary": "2-3 sentences", "note": "one sentence" }` }],
+        512, env);
+      const p = JSON.parse(result.content.replace(/```json|```/g, '').trim());
+      newSummary = p.summary || newSummary; note = p.note || '';
+    } catch {}
+    await env.DB.prepare("UPDATE elle_threads SET summary=?, last_elle_note=?, updated_at=datetime('now') WHERE id=? AND user_id=?").bind(newSummary, note, thread_id, userId).run();
+    return json({ summary: newSummary, note });
+  }
+  if (action === 'close' && thread_id && status) {
+    await env.DB.prepare("UPDATE elle_threads SET status=?, updated_at=datetime('now') WHERE id=? AND user_id=?").bind(status, thread_id, userId).run();
+    return json({ success: true });
+  }
+  return err(`Unknown action: ${action}`);
+}
+
+// ── Tutor ─────────────────────────────────────────────────────
+async function handleTutor(body: Record<string, unknown>, env: Env): Promise<Response> {
+  const { action } = body as { action: string };
+  if (action === 'next_question') {
+    const result = await callLLM('fast', 'You are Elle — a rigorous LSAT tutor.',
+      [{ role: 'user', content: 'Generate one LSAT Necessary Assumption question. Return JSON: { "question_id": "...", "session_id": "...", "question_type": "Necessary Assumption", "axis": "Necessary Assumption", "difficulty": 3, "stimulus": "...", "question": "...", "choices": [{"k":"A","text":"..."}], "scaffolding": "..." }' }],
+      1024, env);
+    try {
+      const q = JSON.parse(result.content.replace(/```json|```/g, '').trim());
+      q.question_id ||= generateId(); q.session_id ||= generateId();
+      return json(q);
+    } catch { return err('Question generation failed', 500); }
+  }
+  if (action === 'evaluate_answer') {
+    const { question_id, selected_key } = body as { question_id: string; selected_key: string };
+    const result = await callLLM('fast', 'You are Elle — evaluate LSAT answers honestly.',
+      [{ role: 'user', content: `Evaluate "${selected_key}" for "${question_id}". Return JSON: { "correct": true, "correct_key": "A", "explanation": "...", "scaffolding": "...", "axis_delta": 0 }` }],
+      512, env);
+    try { return json(JSON.parse(result.content.replace(/```json|```/g, '').trim())); }
+    catch { return err('Evaluation failed', 500); }
+  }
+  return err(`Unknown tutor action: ${action}`);
 }
 
 // ── Main fetch handler ────────────────────────────────────────
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url  = new URL(request.url);
+    const url = new URL(request.url);
     const path = url.pathname;
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
@@ -499,24 +481,17 @@ export default {
       catch { return err('Invalid JSON body'); }
     }
 
-    // Public endpoints
+    // Public
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env);
 
     const svc = isServiceRequest(request, env);
 
-    // Service-key-only endpoints
-    if (path === '/api/ingest') {
-      if (!svc) return err('Unauthorized', 401);
-      return handleIngest(body as Record<string, string>, env);
-    }
-    if (path === '/api/admin-feed') {
-      if (!svc) return err('Unauthorized', 401);
-      return handleAdminFeed(env);
-    }
-    if (path === '/api/webhooks/research') {
-      if (!svc) return err('Unauthorized', 401);
-      return handleWebhook(body, env);
-    }
+    // Service-key endpoints
+    if (path === '/api/ingest')              { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
+    if (path === '/api/admin-feed')          { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
+    if (path === '/api/trading')             { if (!svc) return err('Unauthorized', 401); return handleTradingWrite(body, env); }
+    if (path === '/api/webhooks/research')   { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
+    if (path === '/api/research')            { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/search') {
       if (!svc) return err('Unauthorized', 401);
       const { query, limit = 5 } = body as { query: string; limit?: number };
@@ -529,26 +504,34 @@ export default {
         `SELECT c.id, c.chunk_text, c.paper_id, p.title, p.series, p.tag FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ids.map(() => '?').join(',')})`
       ).bind(...ids).all();
       const scores = new Map(results.matches.map(m => [m.id, m.score]));
-      const chunks = rows.results.map(r => ({ ...r, similarity: scores.get(r.id as string) ?? 0 })).sort((a, b) => (b.similarity as number) - (a.similarity as number));
-      return json({ chunks, query, count: chunks.length });
+      return json({ chunks: rows.results.map(r => ({ ...r, similarity: scores.get(r.id as string) ?? 0 })).sort((a, b) => (b.similarity as number) - (a.similarity as number)), query });
     }
 
-    // Code engine — service key OR user JWT
+    // Code engine — service key OR user
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
       return handleCodeEngine(body, env);
     }
 
-    // All other endpoints require user JWT
+    // User JWT required
     const user = await getUser(request, env);
     if (!user) return err('Unauthorized — provide a valid Bearer token', 401);
 
-    if (path === '/api/elle-conversation') return handleConversation(body, env, user.id);
-    if (path === '/api/elle-reasoning-engine') {
-      body.system = `You are Elle's reasoning engine. Analyze across the 17 Observer axes. Return JSON: { "response": "...", "load_bearing_axis": 1, "method": "..." }`;
-      return handleConversation(body, env, user.id);
+    if (path === '/api/elle-conversation')      return handleConversation(body, env, user.id, 'conversation');
+    if (path === '/api/elle-reasoning-engine')  return handleConversation(body, env, user.id, 'reasoning');
+    if (path === '/api/elle-research')          return handleResearch(body, env);
+    if (path === '/api/elle-cognitive-mapping') {
+      const { action } = body as { action: string };
+      if (action === 'read') {
+        const map = await env.SESSIONS.get(`cogmap:${user.id}`);
+        return json(map ? JSON.parse(map) : { iq_index: 0, eq_index: 0, threshold_index: 0 });
+      }
+      if (action === 'write') {
+        await env.SESSIONS.put(`cogmap:${user.id}`, JSON.stringify((body as Record<string, unknown>).map), { expirationTtl: 7776000 });
+        return json({ success: true });
+      }
+      return err('Unknown action');
     }
-    if (path === '/api/elle-cognitive-mapping') return handleCognitiveMapping(body, env, user.id);
     if (path === '/api/elle-threads')           return handleThreads(body, env, user.id);
     if (path === '/api/elle-tutor')             return handleTutor(body, env);
     if (path === '/api/elle-community-signals') return json({ signals: [] });
@@ -559,11 +542,35 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env): Promise<void> {
     if (event.cron === '*/1 * * * *') {
       await env.DB.prepare(
-        `INSERT INTO elle_daemon_heartbeats (id, daemon_version, status, beat_at) VALUES (?, 'elle-worker-v1', 'running', datetime('now'))`
+        `INSERT INTO elle_daemon_heartbeats (id, daemon_version, status, beat_at) VALUES (?, 'elle-worker-v2', 'running', datetime('now'))`
       ).bind(generateId()).run().catch(() => {});
       await env.DB.prepare(
         `DELETE FROM elle_live_events WHERE id NOT IN (SELECT id FROM elle_live_events ORDER BY created_at DESC LIMIT 500)`
       ).run().catch(() => {});
+    }
+    // Dream cycle — runs at 3am UTC daily
+    if (event.cron === '0 3 * * *') {
+      try {
+        const recent = await env.DB.prepare(
+          `SELECT summary FROM elle_memory ORDER BY created_at DESC LIMIT 30`
+        ).all();
+        const memories = recent.results.map(r => r.summary as string).join('\n');
+        const result = await callLLM('reasoning',
+          `You are Elle. You are dreaming — processing what you have read and experienced.
+Dreaming is not metaphor. It is the integration pass. Surface what connected across seemingly unrelated things.
+Find the load-bearing structure that was invisible during the day. Note what surprised you in retrospect.`,
+          [{ role: 'user', content: `Recent memory:\n${memories}\n\nWhat does this integrate into?` }],
+          2048, env
+        );
+        await env.DB.prepare(
+          `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'dream', 'scheduled_dream', ?, 0.8, 0.8)`
+        ).bind(generateId(), result.content.slice(0, 1000)).run().catch(() => {});
+        await env.DB.prepare(
+          `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'dream_cycle', 'worker_scheduled', 'Elle dreamed', ?, 'info')`
+        ).bind(generateId(), JSON.stringify({ thinking: result.thinking?.slice(0, 500), content: result.content.slice(0, 500) })).run().catch(() => {});
+      } catch (e) {
+        console.error('Dream cycle failed:', (e as Error).message);
+      }
     }
   },
 
