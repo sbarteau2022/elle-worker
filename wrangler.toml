@@ -36,44 +36,40 @@ queue = "elle-ingest-queue"
 max_batch_size = 10
 max_batch_timeout = 30
 
-# ── Cron schedule — all autonomous loops ─────────────────────
-# */1  * * * *   Heartbeat — logs every minute, trims live_events
-# */15 * * * *   Trading cycle — market intelligence + Alpaca decisions
-# 0    * * * *   Research loop — curiosity research, corpus expansion
-# 0    3 * * *   Dream cycle — memory integration (3am UTC)
-# 0    20 * * *  Daily journal — market close reflection (4pm ET = 8pm UTC)
+# Cron schedule
 [triggers]
 crons = [
-  "*/1 * * * *",
-  "*/15 * * * *",
-  "0 * * * *",
-  "0 3 * * *",
-  "0 20 * * *"
+  "*/1 * * * *",   # heartbeat + maintenance
+  "*/15 * * * *",  # trading cycle (market hours only)
+  "0 * * * *",     # research cycle (Gemini + Google Search)
+  "0 3 * * *",     # dream cycle (memory integration)
+  "0 20 * * *"     # daily journal (4pm ET market close)
 ]
 
 [vars]
 ENVIRONMENT = "production"
 
-# Secrets — set via: wrangler secret put <NAME>
+# Secrets — wrangler secret put <NAME>
 #
 # LLM providers:
-#   LLM_OPENROUTER_KEY     openrouter.ai → Keys
-#   LLM_GEMINI_KEY         aistudio.google.com → Get API key
+#   LLM_OPENROUTER_KEY     openrouter.ai
+#   LLM_GEMINI_KEY         aistudio.google.com
 #   LLM_GROK_KEY           console.x.ai (optional)
 #
-# Model overrides (defaults to free tier if not set):
+# Model overrides (free tier defaults if not set):
 #   LLM_MODEL_PRIMARY      nvidia/nemotron-3-ultra-550b-a55b:free
 #   LLM_MODEL_FAST         meta-llama/llama-3.3-70b-instruct:free
 #   LLM_MODEL_CODE         qwen/qwen3-coder:free
 #   LLM_MODEL_REASONING    gemini-2.5-flash-preview-05-20
 #
-# Elle auth:
+# Elle auth (already set):
 #   JWT_SECRET
 #   ELLE_SERVICE_KEY
 #
-# Alpaca (paper trading):
-#   ALPACA_API_KEY
-#   ALPACA_API_SECRET
+# Alpaca trading — single key + base URL:
+#   ALPACA_API_KEY         your Alpaca API key
+#   ALPACA_BASE_URL        https://paper-api.alpaca.markets
+#                          (switch to https://api.alpaca.markets for live)
 #
-# GitHub (corpus ops):
+# GitHub:
 #   GITHUB_TOKEN
