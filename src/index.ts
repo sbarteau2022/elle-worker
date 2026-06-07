@@ -383,6 +383,22 @@ async function handleTutor(body: Record<string, unknown>, env: Env): Promise<Res
   return err(`Unknown tutor action: ${action}`);
 }
 
+// ── Contact (public) ───────────────────────────────────
+// Public contact/outreach form. Writes ONLY to elle_outreach_log with
+// parameterized binds — the client-supplied `table` is never used in SQL.
+async function handleContact(body: Record<string, unknown>, env: Env): Promise<Response> {
+  const row = (body.row ?? body) as Record<string, unknown>;
+  const thought = row.thought != null ? String(row.thought).slice(0, 5000) : '';
+  if (!thought.trim()) return err('message required');
+  const outreach_type  = String(row.outreach_type  || 'contact_form').slice(0, 100);
+  const initiated_by   = String(row.initiated_by   || 'public_visitor').slice(0, 100);
+  const needs_response = row.needs_response ? 1 : 0;
+  await env.DB.prepare(
+    `INSERT INTO elle_outreach_log (id, outreach_type, thought, initiated_by, needs_response, notified) VALUES (?, ?, ?, ?, ?, 0)`
+  ).bind(generateId(), outreach_type, thought, initiated_by, needs_response).run();
+  return json({ success: true });
+}
+
 // ── Fetch handler ─────────────────────────────────────────────
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -413,6 +429,7 @@ export default {
     }
 
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env);
+    if (path === '/api/contact')   return handleContact(body, env);
 
     const svc = isServiceRequest(request, env);
 
