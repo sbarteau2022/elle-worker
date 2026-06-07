@@ -1,0 +1,49 @@
+name = "elle"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "elle-corpus"
+database_id = "4ed6773a-e5c5-4708-8738-73ae9f57fc9b"
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "b659cdfdac084cbc9d502c4f26962047"
+
+[[kv_namespaces]]
+binding = "AUTH_TOKENS"
+id = "eaef117dc6e74e17b8c4c4717ea3727b"
+
+[[r2_buckets]]
+binding = "DOCUMENTS"
+bucket_name = "elle-documents"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "elle-corpus-vectors"
+
+[[queues.producers]]
+binding = "INGEST_QUEUE"
+queue = "elle-ingest-queue"
+
+[[queues.consumers]]
+queue = "elle-ingest-queue"
+max_batch_size = 10
+max_batch_timeout = 30
+
+[vars]
+ENVIRONMENT = "production"
+
+# Secrets — set via: wrangler secret put <NAME>
+# ANTHROPIC_API_KEY
+# JWT_SECRET
+# ELLE_SERVICE_KEY
+# LLM_BASE_URL       (https://openrouter.ai/api/v1)
+# LLM_API_KEY        (openrouter key)
+# LLM_MODEL_PRIMARY  (nvidia/nemotron-3-ultra-550b-a55b:free)
+# LLM_MODEL_FAST     (meta-llama/llama-3.3-70b-instruct:free)
