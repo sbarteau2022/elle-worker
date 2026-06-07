@@ -36,14 +36,31 @@ queue = "elle-ingest-queue"
 max_batch_size = 10
 max_batch_timeout = 30
 
+# Cron triggers
+# Heartbeat: every minute
+# Dream cycle: 3am UTC daily (Elle processes memory during sleep)
+[triggers]
+crons = ["*/1 * * * *", "0 3 * * *"]
+
 [vars]
 ENVIRONMENT = "production"
 
 # Secrets — set via: wrangler secret put <NAME>
-# ANTHROPIC_API_KEY
-# JWT_SECRET
-# ELLE_SERVICE_KEY
-# LLM_BASE_URL       (https://openrouter.ai/api/v1)
-# LLM_API_KEY        (openrouter key)
-# LLM_MODEL_PRIMARY  (nvidia/nemotron-3-ultra-550b-a55b:free)
-# LLM_MODEL_FAST     (meta-llama/llama-3.3-70b-instruct:free)
+#
+# LLM providers (set all three for full routing):
+#   LLM_OPENROUTER_KEY     (openrouter.ai → Keys)
+#   LLM_GEMINI_KEY         (aistudio.google.com → Get API key)
+#   LLM_GROK_KEY           (console.x.ai → API keys — optional)
+#
+# Model overrides (optional — defaults to free tier):
+#   LLM_MODEL_PRIMARY      nvidia/nemotron-3-ultra-550b-a55b:free
+#   LLM_MODEL_FAST         meta-llama/llama-3.3-70b-instruct:free
+#   LLM_MODEL_CODE         qwen/qwen3-coder:free
+#   LLM_MODEL_REASONING    gemini-2.5-flash-preview-05-20
+#
+# Elle auth:
+#   JWT_SECRET
+#   ELLE_SERVICE_KEY
+#
+# Legacy (keep until fully migrated):
+#   ANTHROPIC_API_KEY
