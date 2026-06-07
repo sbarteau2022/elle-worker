@@ -522,6 +522,12 @@ Surface what connected across seemingly unrelated things. Find the load-bearing 
         ).bind(generateId(), JSON.stringify({ thinking: result.thinking?.slice(0, 500), content: result.content.slice(0, 500) })).run().catch(() => {});
         console.log('[DREAM] Cycle complete');
       } catch (e) { console.error('[DREAM] Failed:', (e as Error).message); }
+      // Fire rapid2ai daily integrity sweep — folds the rapid2ai-ingestion cron slot into elle
+      fetch('https://rapid2ai-ingestion.sbarteau2022.workers.dev/internal/trigger-sweep', {
+        method: 'POST',
+        headers: { 'X-Worker': 'elle' },
+      }).then(r => console.log(`[SWEEP] rapid2ai sweep triggered: ${r.status}`))
+        .catch(e => console.error('[SWEEP] rapid2ai sweep failed:', e.message));
       return;
     }
 
