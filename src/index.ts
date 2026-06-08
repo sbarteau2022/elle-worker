@@ -188,6 +188,18 @@ async function handleAuth(body: Record<string, string>, env: Env): Promise<Respo
     return json({ access_token: token, user: { id: user.id, email: user.email } });
   }
 
+  // Service-key-gated password reset — for admin use only
+  if (action === 'reset') {
+    if (!isServiceRequest(request, env)) return err('Forbidden', 403);
+    if (!email || !password) return err('email and password required');
+    const user = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL).first() as { id: string } | null;
+    if (!user) return err('User not found', 404);
+    const salt = generateSalt();
+    await env.DB.prepare('UPDATE users SET password_hash = ?, updated_at = datetime(\'now\') WHERE email = ?')
+      .bind(`${salt}:${await hashPassword(password, salt)}`, emailL).run();
+    return json({ success: true, email: emailL });
+  }
+
   if (action === 'verify') {
     const pl = await verifyJWT(body.token || '', env.JWT_SECRET);
     if (!pl || !await env.AUTH_TOKENS.get(`token:${pl.jti}`)) return err('Invalid or expired token', 401);
