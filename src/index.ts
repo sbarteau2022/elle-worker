@@ -11,6 +11,11 @@
 // ============================================================
 
 import { callLLM, MODEL, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
+import {
+  handleDuelEngine, handleTutor, handleDoctrine,
+  handleCohort, handleReplays, bootstrapLawSchema,
+  type LawEnv,
+} from './law';
 import { runTradingCycle, runDailyJournal } from './trading';
 import { runResearchCycle } from './research';
 
@@ -348,12 +353,12 @@ async function handleAdminFeed(env: Env): Promise<Response> {
 async function handleThreads(body: Record<string, unknown>, env: Env, userId: string): Promise<Response> {
   const { action, thread_id, title, summary, context, status } = body as Record<string, string>;
   if (action === 'list') {
-    const rows = await env.DB.prepare(`SELECT id, title, summary, status, last_elle_note, created_at, updated_at FROM elle_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50`).bind(userId).all();
+    const rows = await env.DB.prepare(`SELECT id, title, summary, status, last_elle_note, created_at, updated_at FROM law_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50`).bind(userId).all();
     return json({ threads: rows.results });
   }
   if (action === 'create') {
     const id = generateId();
-    await env.DB.prepare("INSERT INTO elle_threads (id, user_id, title, summary, status) VALUES (?, ?, ?, ?, 'open')").bind(id, userId, title || '', summary || '').run();
+    await env.DB.prepare("INSERT INTO law_threads (id, user_id, title, summary, status) VALUES (?, ?, ?, ?, 'open')").bind(id, userId, title || '', summary || '').run();
     return json({ id, success: true });
   }
   if (action === 'update' && thread_id && context) {
@@ -365,35 +370,17 @@ async function handleThreads(body: Record<string, unknown>, env: Env, userId: st
       const p = JSON.parse(r.content.replace(/```json|```/g, '').trim());
       newSummary = p.summary || newSummary; note = p.note || '';
     } catch {}
-    await env.DB.prepare("UPDATE elle_threads SET summary=?, last_elle_note=?, updated_at=datetime('now') WHERE id=? AND user_id=?").bind(newSummary, note, thread_id, userId).run();
+    await env.DB.prepare("UPDATE law_threads SET summary=?, last_elle_note=?, updated_at=datetime('now') WHERE id=? AND user_id=?").bind(newSummary, note, thread_id, userId).run();
     return json({ summary: newSummary, note });
   }
   if (action === 'close' && thread_id) {
-    await env.DB.prepare("UPDATE elle_threads SET status=?, updated_at=datetime('now') WHERE id=? AND user_id=?").bind(status || 'closed', thread_id, userId).run();
+    await env.DB.prepare("UPDATE law_threads SET status=?, updated_at=datetime('now') WHERE id=? AND user_id=?").bind(status || 'closed', thread_id, userId).run();
     return json({ success: true });
   }
   return err(`Unknown action: ${action}`);
 }
 
-async function handleTutor(body: Record<string, unknown>, env: Env): Promise<Response> {
-  const { action } = body as { action: string };
-  if (action === 'next_question') {
-    const r = await callLLM('fast', 'You are Elle — a rigorous LSAT tutor.',
-      [{ role: 'user', content: 'Generate one LSAT Necessary Assumption question. Return JSON: { "question_id": "...", "session_id": "...", "question_type": "Necessary Assumption", "difficulty": 3, "stimulus": "...", "question": "...", "choices": [{"k":"A","text":"..."}], "scaffolding": "..." }' }],
-      1024, env);
-    try { const q = JSON.parse(r.content.replace(/```json|```/g, '').trim()); q.question_id ||= generateId(); q.session_id ||= generateId(); return json(q); }
-    catch { return err('Question generation failed', 500); }
-  }
-  if (action === 'evaluate_answer') {
-    const { question_id, selected_key } = body as { question_id: string; selected_key: string };
-    const r = await callLLM('fast', 'Evaluate LSAT answers honestly.',
-      [{ role: 'user', content: `Evaluate "${selected_key}" for "${question_id}". Return JSON: { "correct": true, "correct_key": "A", "explanation": "...", "scaffolding": "...", "axis_delta": 0 }` }],
-      512, env);
-    try { return json(JSON.parse(r.content.replace(/```json|```/g, '').trim())); }
-    catch { return err('Evaluation failed', 500); }
-  }
-  return err(`Unknown tutor action: ${action}`);
-}
+// handleTutor — now in law.ts
 
 // ── Contact (public) ───────────────────────────────────
 // Public contact/outreach form. Writes ONLY to elle_outreach_log with
@@ -477,6 +464,14 @@ export default {
       if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, 'svc', 'reasoning');
     }
 
+    // Bootstrap schema (idempotent — safe to call anytime)
+    if (path === '/api/_bootstrap') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      await bootstrapLawSchema(env as unknown as LawEnv);
+      return json({ ok: true, user: u.email });
+    }
+
     const user = await getUser(request, env);
     if (!user) return err('Unauthorized — provide a valid Bearer token', 401);
 
@@ -490,7 +485,12 @@ export default {
       return err('Unknown action');
     }
     if (path === '/api/elle-threads')           return handleThreads(body, env, user.id);
-    if (path === '/api/elle-tutor')             return handleTutor(body, env);
+    if (path === '/api/elle-duel-engine')       return handleDuelEngine(body, env as unknown as LawEnv, user.id);
+    if (path === '/api/elle-tutor')             return handleTutor(body, env as unknown as LawEnv, user.id);
+    if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
+    if (path === '/api/elle-cohort')            return handleCohort(body, env as unknown as LawEnv, user.id);
+    if (path === '/api/elle-replays')           return handleReplays(body, env as unknown as LawEnv, user.id);
+    // elle-tutor handled above via law.ts
     if (path === '/api/elle-community-signals') return json({ signals: [] });
 
     return err(`Unknown endpoint: ${path}`, 404);
