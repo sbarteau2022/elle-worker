@@ -319,10 +319,20 @@ export async function callLLM(
       return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
     }
 
-    // Conversation: Nemotron Ultra free — primary voice of Elle
+    // Conversation: Nemotron Ultra free — primary voice of Elle.
+    // Falls back to Gemini (free, much larger daily quota) when OpenRouter
+    // is rate-limited (free tier = 50/day), so Elle stays queryable.
     case 'conversation':
     default: {
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      try {
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter conversation failed, falling back to Gemini:', (e as Error).message);
+        if (env.LLM_GEMINI_KEY) {
+          return callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false });
+        }
+        throw e;
+      }
     }
   }
 }
