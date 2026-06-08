@@ -20,8 +20,9 @@ function generateId(): string {
 
 function alpacaHeaders(env: Env): Record<string, string> {
   return {
-    'APCA-API-KEY-ID': env.ALPACA_API_KEY || '',
-    'Content-Type':    'application/json',
+    'APCA-API-KEY-ID':     env.ALPACA_API_KEY || '',
+    'APCA-API-SECRET-KEY': env.ALPACA_SECRET_KEY || '',
+    'Content-Type':        'application/json',
   };
 }
 
@@ -99,7 +100,7 @@ async function gatherMarketData(env: Env) {
 }
 
 export async function runTradingCycle(env: Env): Promise<void> {
-  if (!env.ALPACA_API_KEY) {
+  if (!env.ALPACA_API_KEY || !env.ALPACA_SECRET_KEY) {
     console.log('[TRADING] ALPACA_API_KEY not set — skipping');
     return;
   }
@@ -247,7 +248,7 @@ Return ONLY valid JSON:
 }
 
 export async function runDailyJournal(env: Env): Promise<void> {
-  if (!env.ALPACA_API_KEY) return;
+  if (!env.ALPACA_API_KEY || !env.ALPACA_SECRET_KEY) return;
 
   const account = await getAccount(env);
   if (!account) return;

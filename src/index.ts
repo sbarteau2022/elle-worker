@@ -32,6 +32,7 @@ export interface Env extends LLMEnv {
   ENVIRONMENT:      string;
   // Alpaca — paper trading
   ALPACA_API_KEY?:    string;
+  ALPACA_SECRET_KEY?: string;
   ALPACA_BASE_URL?: string;  // https://paper-api.alpaca.markets or https://api.alpaca.markets
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
