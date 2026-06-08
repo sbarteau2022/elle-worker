@@ -459,6 +459,12 @@ export default {
       return handleCodeEngine(body, env);
     }
 
+    // Service key bypass — allows dev UI and trusted internal callers
+    if (isServiceRequest(request, env)) {
+      if (path === '/api/elle-conversation')     return handleConversation(body, env, 'svc', 'conversation');
+      if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, 'svc', 'reasoning');
+    }
+
     const user = await getUser(request, env);
     if (!user) return err('Unauthorized — provide a valid Bearer token', 401);
 
