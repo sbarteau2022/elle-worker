@@ -430,6 +430,8 @@ export default {
 
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env);
     if (path === '/api/contact')   return handleContact(body, env);
+    // Public chat — no auth, session tracked by session_id (used by public site ElleTalk)
+    if (path === '/api/chat')      return handleConversation(body, env, 'guest', 'conversation');
 
     const svc = isServiceRequest(request, env);
 
