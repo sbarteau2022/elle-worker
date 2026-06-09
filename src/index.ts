@@ -153,13 +153,13 @@ async function verifyJWT(token: string, secret: string): Promise<Record<string, 
   } catch { return null; }
 }
 
-async function getUser(request: Request, env: Env): Promise<{ id: string; email: string } | null> {
+async function getUser(request: Request, env: Env): Promise<{ id: string; email: string; tier: string } | null> {
   const auth = request.headers.get('Authorization');
   if (!auth?.startsWith('Bearer ')) return null;
   const pl = await verifyJWT(auth.slice(7), env.JWT_SECRET);
   if (!pl?.sub || typeof pl.sub !== 'string') return null;
   if (!await env.AUTH_TOKENS.get(`token:${pl.jti}`)) return null;
-  return { id: pl.sub, email: pl.email as string };
+  return { id: pl.sub, email: pl.email as string, tier: (pl.tier as string) || 'standard' };
 }
 
 function isServiceRequest(request: Request, env: Env): boolean {
@@ -177,21 +177,22 @@ async function handleAuth(body: Record<string, string>, env: Env): Promise<Respo
     const salt = generateSalt(); const id = generateId();
     await env.DB.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').bind(id, emailL, `${salt}:${await hashPassword(password, salt)}`).run();
     const jti = generateId(); const exp = Math.floor(Date.now() / 1000) + 2592000;
-    const token = await signJWT({ sub: id, email: emailL, jti, exp }, env.JWT_SECRET);
+    const token = await signJWT({ sub: id, email: emailL, tier: 'standard', jti, exp }, env.JWT_SECRET);
     await env.AUTH_TOKENS.put(`token:${jti}`, id, { expirationTtl: 2592000 });
-    return json({ access_token: token, user: { id, email: emailL }, confirmed: true });
+    return json({ access_token: token, user: { id, email: emailL, tier: 'standard' }, confirmed: true });
   }
 
   if (action === 'login') {
-    const user = await env.DB.prepare('SELECT id, email, password_hash FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; password_hash: string } | null;
+    const user = await env.DB.prepare('SELECT id, email, password_hash, access_tier FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; password_hash: string; access_tier: string } | null;
     if (!user) return err('Invalid credentials', 401);
     const [salt, stored] = user.password_hash.split(':');
     if (await hashPassword(password, salt) !== stored) return err('Invalid credentials', 401);
     await env.DB.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").bind(user.id).run();
     const jti = generateId(); const exp = Math.floor(Date.now() / 1000) + 2592000;
-    const token = await signJWT({ sub: user.id, email: user.email, jti, exp }, env.JWT_SECRET);
+    const tier = user.access_tier || 'standard';
+    const token = await signJWT({ sub: user.id, email: user.email, tier, jti, exp }, env.JWT_SECRET);
     await env.AUTH_TOKENS.put(`token:${jti}`, user.id, { expirationTtl: 2592000 });
-    return json({ access_token: token, user: { id: user.id, email: user.email } });
+    return json({ access_token: token, user: { id: user.id, email: user.email, tier } });
   }
 
   // Service-key-gated password reset — for admin use only
@@ -209,7 +210,7 @@ async function handleAuth(body: Record<string, string>, env: Env): Promise<Respo
   if (action === 'verify') {
     const pl = await verifyJWT(body.token || '', env.JWT_SECRET);
     if (!pl || !await env.AUTH_TOKENS.get(`token:${pl.jti}`)) return err('Invalid or expired token', 401);
-    return json({ valid: true, user: { id: pl.sub, email: pl.email } });
+    return json({ valid: true, user: { id: pl.sub, email: pl.email, tier: (pl.tier as string) || 'standard' } });
   }
 
   return err(`Unknown action: ${action}`);
