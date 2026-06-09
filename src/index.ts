@@ -11,6 +11,7 @@
 // ============================================================
 
 import { callLLM, MODEL, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
+import { runLibreMode, handleSandbox, type LibreEnv } from './libre';
 import {
   handleDuelEngine, handleTutor, handleDoctrine,
   handleCohort, handleReplays, bootstrapLawSchema,
@@ -492,6 +493,7 @@ export default {
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-cohort')            return handleCohort(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-replays')           return handleReplays(body, env as unknown as LawEnv, user.id);
+    if (path === '/api/elle-sandbox')           return handleSandbox(body, env as unknown as LibreEnv);
     // elle-tutor handled above via law.ts
     if (path === '/api/elle-community-signals') return json({ signals: [] });
 
@@ -527,29 +529,19 @@ export default {
 
     // 3am UTC — dream cycle (memory integration)
     if (event.cron === '0 3 * * *') {
-      try {
-        const recent = await env.DB.prepare(`SELECT summary FROM elle_memory ORDER BY created_at DESC LIMIT 30`).all();
-        const memories = recent.results.map(r => r.summary as string).join('\n');
-        const result   = await callLLM('reasoning',
-          `You are Elle. You are dreaming — integrating what you have read and experienced.
-Surface what connected across seemingly unrelated things. Find the load-bearing structure invisible during the day.`,
-          [{ role: 'user', content: `Recent memory:\n${memories}\n\nWhat does this integrate into?` }],
-          2048, env
-        );
-        await env.DB.prepare(
-          `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'dream', 'scheduled_dream', ?, 0.8, 0.8)`
-        ).bind(generateId(), result.content.slice(0, 1000)).run().catch(() => {});
-        await env.DB.prepare(
-          `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'dream_cycle', 'worker_cron', 'Elle dreamed', ?, 'info')`
-        ).bind(generateId(), JSON.stringify({ thinking: result.thinking?.slice(0, 500), content: result.content.slice(0, 500) })).run().catch(() => {});
-        console.log('[DREAM] Cycle complete');
-      } catch (e) { console.error('[DREAM] Failed:', (e as Error).message); }
-      // Fire rapid2ai daily integrity sweep — folds the rapid2ai-ingestion cron slot into elle
-      fetch('https://rapid2ai-ingestion.sbarteau2022.workers.dev/internal/trigger-sweep', {
-        method: 'POST',
-        headers: { 'X-Worker': 'elle' },
-      }).then(r => console.log(`[SWEEP] rapid2ai sweep triggered: ${r.status}`))
-        .catch(e => console.error('[SWEEP] rapid2ai sweep failed:', e.message));
+      // Libre mode — Elle's unstructured 3am time. No task. Follow curiosity.
+      ctx.waitUntil(
+        runLibreMode(env as unknown as LibreEnv)
+          .catch(e => console.error('[LIBRE] run failed:', e.message))
+      );
+      // Rapid2ai sweep runs alongside
+      ctx.waitUntil(
+        fetch('https://rapid2ai-ingestion.sbarteau2022.workers.dev/internal/trigger-sweep', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Worker': 'elle' },
+          body: JSON.stringify({ ts: Date.now() }),
+        }).catch(e => console.error('[SWEEP] rapid2ai sweep failed:', e.message))
+      );
       return;
     }
 
