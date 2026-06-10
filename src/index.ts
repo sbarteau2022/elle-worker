@@ -19,6 +19,7 @@ import {
 } from './law';
 import { runTradingCycle, runDailyJournal } from './trading';
 import { runResearchCycle } from './research';
+import { WIDGET_JS } from './widget';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -424,10 +425,32 @@ export default {
       });
     }
 
+    // Embeddable consumer widget — one script tag on any hub page
+    if (path === '/widget.js' && request.method === 'GET') {
+      return new Response(WIDGET_JS, {
+        headers: {
+          'Content-Type': 'application/javascript; charset=utf-8',
+          'Cache-Control': 'public, max-age=300',
+          ...corsHeaders(),
+        },
+      });
+    }
+
     let body: Record<string, unknown> = {};
     if (request.method === 'POST') {
       try { body = await request.json(); }
       catch { return err('Invalid JSON body'); }
+    }
+
+    // Public widget chat — no key required; service key stays server-side.
+    // Rate limited per IP: 30 requests/hour via KV.
+    if (path === '/api/widget-chat') {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rlKey = `widget-rl:${ip}`;
+      const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+      if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
+      await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
+      return handleConversation(body, env, 'widget', 'conversation');
     }
 
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env);
@@ -568,3 +591,4 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
