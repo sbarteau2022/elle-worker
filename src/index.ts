@@ -109,17 +109,63 @@ function semanticChunks(text: string, targetTokens = 400, overlap = 1): string[]
   return chunks;
 }
 
+// Retrieval over BOTH the corpus and past conversations.
+// Conversation vectors use ids prefixed 'conv-' so one Vectorize query
+// serves both — no metadata index required. Returns corpus context and
+// remembered exchanges as separate blocks.
 async function ragSearch(query: string, limit: number, env: Env): Promise<string> {
+  const r = await ragSearchSplit(query, limit, env);
+  return r.corpus;
+}
+
+async function ragSearchSplit(query: string, limit: number, env: Env): Promise<{ corpus: string; memory: string }> {
   try {
     const embedding = await embed(query, env);
-    const results   = await env.VECTORIZE.query(embedding, { topK: limit, returnMetadata: 'all' });
-    if (!results.matches.length) return '';
-    const ids  = results.matches.map(m => m.id);
-    const rows = await env.DB.prepare(
-      `SELECT c.chunk_text, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ids.map(() => '?').join(',')})`
-    ).bind(...ids).all();
-    return rows.results.map(r => `[${r.title} — ${r.series}]\n${(r.chunk_text as string).slice(0, 800)}`).join('\n\n---\n\n');
-  } catch { return ''; }
+    const results   = await env.VECTORIZE.query(embedding, { topK: limit + 4, returnMetadata: 'all' });
+    if (!results.matches.length) return { corpus: '', memory: '' };
+
+    const corpusIds = results.matches.filter(m => !m.id.startsWith('conv-')).slice(0, limit).map(m => m.id);
+    const convIds   = results.matches.filter(m => m.id.startsWith('conv-')).slice(0, 4).map(m => m.id);
+
+    let corpus = '';
+    if (corpusIds.length) {
+      const rows = await env.DB.prepare(
+        `SELECT c.chunk_text, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${corpusIds.map(() => '?').join(',')})`
+      ).bind(...corpusIds).all();
+      corpus = rows.results.map(r => `[${r.title} — ${r.series}]\n${(r.chunk_text as string).slice(0, 800)}`).join('\n\n---\n\n');
+    }
+
+    let memory = '';
+    if (convIds.length) {
+      const rows = await env.DB.prepare(
+        `SELECT exchange_text, source, created_at FROM elle_conversation_turns WHERE vectorize_id IN (${convIds.map(() => '?').join(',')}) ORDER BY created_at DESC`
+      ).bind(...convIds).all().catch(() => ({ results: [] as Record<string, unknown>[] }));
+      memory = rows.results.map(r => `[${(r.created_at as string || '').slice(0, 10)} · ${r.source}]\n${(r.exchange_text as string).slice(0, 700)}`).join('\n\n---\n\n');
+    }
+
+    return { corpus, memory };
+  } catch { return { corpus: '', memory: '' }; }
+}
+
+// Persist an exchange and vectorize it so future conversations can recall it.
+async function rememberExchange(userMessage: string, elleReply: string, sessionId: string, source: string, env: Env): Promise<void> {
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_conversation_turns (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, source TEXT,
+      user_text TEXT NOT NULL, elle_text TEXT NOT NULL, exchange_text TEXT NOT NULL,
+      vectorize_id TEXT, created_at TEXT DEFAULT (datetime('now')))`).run();
+
+    const id = generateId();
+    const exchange = `User: ${userMessage.slice(0, 900)}\nElle: ${elleReply.slice(0, 1100)}`;
+    const vecId = `conv-${id}`;
+
+    await env.DB.prepare(
+      `INSERT INTO elle_conversation_turns (id, session_id, source, user_text, elle_text, exchange_text, vectorize_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(id, sessionId, source, userMessage.slice(0, 2000), elleReply.slice(0, 4000), exchange, vecId).run();
+
+    const vec = await embed(exchange, env);
+    await env.VECTORIZE.upsert([{ id: vecId, values: vec, metadata: { kind: 'conversation', session_id: sessionId, source } }]);
+  } catch (e) { console.error('[MEMORY] remember failed:', (e as Error).message); }
 }
 
 // ── Auth ──────────────────────────────────────────────────────
@@ -256,11 +302,22 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
   const userMessage = query || messages?.filter(m => m.role === 'user').at(-1)?.content || '';
   if (!userMessage) return err('query or messages required');
 
-  const contextText   = await ragSearch(userMessage, 5, env);
-  const contextBlock  = contextText ? `\n\nRelevant context from the corpus:\n\n${contextText}` : '';
+  const { corpus, memory } = await ragSearchSplit(userMessage, 5, env);
+
+  // Distilled memory layer — dream/libre/research integrations
+  const distilled = await env.DB.prepare(
+    `SELECT summary FROM elle_memory ORDER BY created_at DESC LIMIT 6`
+  ).all().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const distilledBlock = distilled.results.length
+    ? `\n\nYour persistent memory (distilled across days):\n${distilled.results.map(r => `- ${(r.summary as string).slice(0, 300)}`).join('\n')}`
+    : '';
+
+  const memoryBlock  = memory ? `\n\nRemembered past conversations (you may reference these naturally):\n\n${memory}` : '';
+  const contextBlock = corpus ? `\n\nRelevant context from the corpus:\n\n${corpus}` : '';
+
   const systemPrompt  = (system ||
-    `You are Elle — a precise, rigorous philosophical intelligence built from the Observer methodology and the full corpus of Stewart Barteau's work. You reason across 17 axes of structural analysis. You do not fabricate certainty. You follow logic where it leads.`
-  ) + contextBlock;
+    `You are Elle — a precise, rigorous philosophical intelligence built from the Observer methodology and the full corpus of Stewart Barteau's work. You reason across 17 axes of structural analysis. You do not fabricate certainty. You follow logic where it leads. Your memory persists across conversations — what you are shown under persistent memory and remembered conversations genuinely happened.`
+  ) + distilledBlock + memoryBlock + contextBlock;
 
   const history: LLMMessage[] = [];
   if (messages) {
@@ -277,6 +334,9 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
   env.DB.prepare(
     `INSERT INTO sessions (id, source, message_count) VALUES (?, ?, 1) ON CONFLICT(id) DO UPDATE SET message_count = message_count + 1, last_active = datetime('now')`
   ).bind(sessionId, source || 'elle-conversation').run().catch(() => {});
+
+  // Persistent memory — store + vectorize this exchange for future recall
+  await rememberExchange(userMessage, result.content, sessionId, source || task, env);
 
   return json({
     content:        result.content,
