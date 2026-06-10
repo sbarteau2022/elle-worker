@@ -75,7 +75,11 @@ var msgs = panel.querySelector('.elw-msgs');
 var ta = panel.querySelector('.elw-ta');
 var sendBtn = panel.querySelector('.elw-send');
 var history = [];
-var sessionId = 'w-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+var sessionId;
+try {
+  sessionId = localStorage.getItem('elle_widget_session');
+  if (!sessionId){ sessionId = 'w-' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('elle_widget_session', sessionId); }
+} catch(e){ sessionId = 'w-' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
 var loading = false;
 
 function addMsg(role, text, cls){
