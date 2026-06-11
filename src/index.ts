@@ -268,9 +268,11 @@ async function loadSessionHistory(sessionId: string, env: Env): Promise<LLMMessa
 async function recallPastConversations(query: string, currentSession: string, env: Env): Promise<string> {
   try {
     const embedding = await embed(query, env);
-    const results   = await env.VECTORIZE.query(embedding, { topK: 8, returnMetadata: 'all' });
+    // High topK so conversation vectors surface alongside the 7k+ corpus chunks
+    // (no metadata-index dependency — filter by id prefix in code).
+    const results = await env.VECTORIZE.query(embedding, { topK: 60, returnMetadata: 'all' });
     const convIds = results.matches
-      .filter(m => m.id.startsWith('conv-') && (m.metadata as Record<string, unknown>)?.session_id !== currentSession && m.score > 0.55)
+      .filter(m => m.id.startsWith('conv-') && (m.metadata as Record<string, unknown>)?.session_id !== currentSession && m.score > 0.4)
       .slice(0, 3)
       .map(m => m.id.slice(5));
     if (!convIds.length) return '';
