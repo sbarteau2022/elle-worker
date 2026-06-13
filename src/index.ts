@@ -20,6 +20,7 @@ import {
 import { runTradingCycle, runDailyJournal } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
+import { handleDiagnose } from './diagnose';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -533,6 +534,9 @@ export default {
     if (path === '/api/contact')   return handleContact(body, env);
     // Public chat — no auth, session tracked by session_id (used by public site ElleTalk)
     if (path === '/api/chat')      return handleConversation(body, env, 'guest', 'conversation');
+    // Build-posture error diagnosis — public in v1 (like /api/chat); moves behind
+    // auth in v2 when it gains live-infra context. Takes an error string, returns a fix.
+    if (path === '/api/diagnose')  return handleDiagnose(body, env);
 
     const svc = isServiceRequest(request, env);
 
