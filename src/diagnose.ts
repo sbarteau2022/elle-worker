@@ -101,7 +101,20 @@ ${error.slice(0, 6000)}
 Diagnose the root cause on this Cloudflare stack and return the JSON.`;
 }
 
-// Tolerant JSON extraction — models sometimes wrap in fences or add prose.
+// Tolerant JSON extraction — models wrap in fences, add prose, or emit
+// thinking braces. Scan all balanced {...} spans and prefer the one that
+// actually looks like a diagnosis (has root_cause).
+function balancedObjects(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0, start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '{') { if (depth === 0) start = i; depth++; }
+    else if (c === '}') { depth--; if (depth === 0 && start !== -1) { out.push(text.slice(start, i + 1)); start = -1; } }
+  }
+  return out;
+}
+
 function parseDiagnosis(text: string): {
   root_cause: string;
   solution: string;
@@ -109,27 +122,27 @@ function parseDiagnosis(text: string): {
   confidence: string;
   _raw?: string;
 } {
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start !== -1 && end > start) {
-    try {
-      const o = JSON.parse(cleaned.slice(start, end + 1));
-      return {
-        root_cause: String(o.root_cause ?? '').trim() || 'No root cause identified.',
-        solution: String(o.solution ?? '').trim(),
-        actions: Array.isArray(o.actions)
-          ? o.actions.slice(0, 5).map((a: Record<string, unknown>) => ({
-              label: String(a.label ?? 'Action').slice(0, 60),
-              kind: ['deploy', 'patch_env', 'run_sql', 'edit_file', 'rerun', 'none'].includes(String(a.kind)) ? String(a.kind) : 'none',
-              detail: a.detail ? String(a.detail).slice(0, 300) : undefined,
-            }))
-          : [],
-        confidence: ['high', 'medium', 'low'].includes(String(o.confidence)) ? String(o.confidence) : 'medium',
-      };
-    } catch { /* fall through */ }
+  const stripped = text.replace(/```json|```/g, '');
+  const candidates = balancedObjects(stripped)
+    .map(s => { try { return JSON.parse(s); } catch { return null; } })
+    .filter((o): o is Record<string, unknown> => !!o);
+  // Prefer an object that carries a diagnosis shape.
+  const o = candidates.find(c => 'root_cause' in c || 'solution' in c) || candidates[0];
+  if (o) {
+    return {
+      root_cause: String(o.root_cause ?? '').trim() || 'No distinct root cause stated.',
+      solution: String(o.solution ?? '').trim() || text.trim(),
+      actions: Array.isArray(o.actions)
+        ? (o.actions as Array<Record<string, unknown>>).slice(0, 5).map(a => ({
+            label: String(a.label ?? 'Action').slice(0, 60),
+            kind: ['deploy', 'patch_env', 'run_sql', 'edit_file', 'rerun', 'none'].includes(String(a.kind)) ? String(a.kind) : 'none',
+            detail: a.detail ? String(a.detail).slice(0, 300) : undefined,
+          }))
+        : [],
+      confidence: ['high', 'medium', 'low'].includes(String(o.confidence)) ? String(o.confidence) : 'medium',
+    };
   }
-  // Fallback: hand back the model's prose as the solution so nothing is lost.
+  // Fallback: hand back the prose as the solution so nothing is lost.
   return { root_cause: 'Returned as unstructured analysis.', solution: text.trim(), actions: [], confidence: 'low', _raw: text };
 }
 
@@ -149,7 +162,10 @@ export async function handleDiagnose(body: Record<string, unknown>, env: Diagnos
 
   let res;
   try {
-    res = await callLLM('reasoning', sys, [{ role: 'user', content: usr }], 1400, env);
+    // 'conversation' = OpenRouter primary, falling back to Gemini WITHOUT thinking.
+    // Most resilient: survives free-tier 429s, and the no-thinking path gives the
+    // full token budget to the JSON (the 'reasoning' task truncates it).
+    res = await callLLM('conversation', sys, [{ role: 'user', content: usr }], 1500, env);
   } catch (e) {
     return j({ error: 'Diagnosis failed: ' + (e as Error).message, classification }, 502);
   }
