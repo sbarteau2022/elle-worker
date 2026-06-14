@@ -70,6 +70,6 @@ ENVIRONMENT = "production"
 #   ALPACA_API_KEY         PKK7O6LABQSOLE2HHVMAENH5ZJ
 #   ALPACA_BASE_URL        https://paper-api.alpaca.markets
 #                          (switch to https://api.alpaca.markets for live)
-#.  CLOUDFARE_API_TOKEN    cfat_FFk1wRL44OVaNxTvc9hzkLLIa4kFpe05an4DXjQTbdad7634
+#.  CLOUDFLARE_API_TOKEN    cfat_FFk1wRL44OVaNxTvc9hzkLLIa4kFpe05an4DXjQTbdad7634
 # GitHub:
 #   GITHUB_TOKEN           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
