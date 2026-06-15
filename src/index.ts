@@ -32,6 +32,7 @@ export interface Env extends LLMEnv {
   INGEST_QUEUE: Queue;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
+  GOOGLE_CLIENT_ID?: string;
   ENVIRONMENT:      string;
   // Alpaca — paper trading
   ALPACA_API_KEY?:    string;
@@ -170,7 +171,7 @@ function isServiceRequest(request: Request, env: Env): boolean {
 }
 
 // ── Handlers ──────────────────────────────────────────────────
-async function handleAuth(body: Record<string, string>, env: Env): Promise<Response> {
+async function handleAuth(body: Record<string, string>, env: Env, request: Request): Promise<Response> {
   const { action, email, password } = body;
   if (!email || !password) return err('email and password required');
   const emailL = email.toLowerCase();
@@ -480,6 +481,64 @@ async function handleContact(body: Record<string, unknown>, env: Env): Promise<R
 }
 
 // ── Fetch handler ─────────────────────────────────────────────
+
+// ── Google OAuth (Sign in with Google) ──────────────────────
+// Verifies a Google ID token (GSI credential) via the tokeninfo endpoint,
+// checks audience against GOOGLE_CLIENT_ID, upserts the user, and mints the
+// same JWT as email/password login. Inert (503) until GOOGLE_CLIENT_ID is set.
+async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Response> {
+  const credential = typeof body.credential === 'string' ? body.credential : '';
+  if (!credential) return err('credential required');
+  if (!env.GOOGLE_CLIENT_ID) return err('Google sign-in not configured', 503);
+  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+  if (!res.ok) return err('Invalid Google credential', 401);
+  const info = await res.json() as { aud?: string; email?: string; email_verified?: string; sub?: string };
+  if (info.aud !== env.GOOGLE_CLIENT_ID) return err('Google credential audience mismatch', 401);
+  if (!info.email || info.email_verified !== 'true') return err('Google email not verified', 401);
+  const emailL = info.email.toLowerCase();
+  let user = await env.DB.prepare('SELECT id, email, access_tier FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; access_tier: string } | null;
+  if (!user) {
+    const id = generateId();
+    await env.DB.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').bind(id, emailL, `google:${info.sub}`).run();
+    user = { id, email: emailL, access_tier: 'standard' };
+  }
+  await env.DB.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").bind(user.id).run();
+  const jti = generateId(); const exp = Math.floor(Date.now() / 1000) + 2592000;
+  const tier = user.access_tier || 'standard';
+  const token = await signJWT({ sub: user.id, email: user.email, tier, jti, exp }, env.JWT_SECRET);
+  await env.AUTH_TOKENS.put(`token:${jti}`, user.id, { expirationTtl: 2592000 });
+  return json({ access_token: token, user: { id: user.id, email: user.email, tier } });
+}
+
+// ── Daemon jobs ─────────────────────────────────────────────
+// Single source of truth for the background loops. Invoked by the external
+// scheduler via POST /api/cron, and by scheduled() if Cloudflare crons return.
+async function runJob(job: string, env: Env): Promise<{ ran: string }> {
+  switch (job) {
+    case 'heartbeat':
+      await env.DB.prepare(
+        `INSERT INTO elle_daemon_heartbeats (id, daemon_version, status, beat_at) VALUES (?, 'elle-worker-v3', 'running', datetime('now'))`
+      ).bind(generateId()).run().catch(() => {});
+      await env.DB.prepare(
+        `DELETE FROM elle_live_events WHERE id NOT IN (SELECT id FROM elle_live_events ORDER BY created_at DESC LIMIT 500)`
+      ).run().catch(() => {});
+      return { ran: 'heartbeat' };
+    case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
+    case 'research': await runResearchCycle(env); return { ran: 'research' };
+    case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
+    case 'dream':
+      await runLibreMode(env as unknown as LibreEnv).catch(e => console.error('[LIBRE] run failed:', (e as Error).message));
+      await fetch('https://rapid2ai-ingestion.sbarteau2022.workers.dev/internal/trigger-sweep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Worker': 'elle' },
+        body: JSON.stringify({ ts: Date.now() }),
+      }).catch(e => console.error('[SWEEP] rapid2ai sweep failed:', (e as Error).message));
+      return { ran: 'dream' };
+    default:
+      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal)`);
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url  = new URL(request.url);
@@ -498,7 +557,8 @@ export default {
         papers: (papers as { n: number })?.n,
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
-        crons: ['*/1 heartbeat', '*/15 trading', '0/* research', '0/3 dream', '0/20 journal'],
+        scheduler: 'external — GitHub Actions schedule → POST /api/cron (service-key gated)',
+        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal'],
       });
     }
 
@@ -530,7 +590,8 @@ export default {
       return handleConversation(body, env, 'widget', 'conversation');
     }
 
-    if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env);
+    if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env, request);
+    if (path === '/api/elle-oauth') return handleOAuth(body, env);
     if (path === '/api/contact')   return handleContact(body, env);
     // Public chat — no auth, session tracked by session_id (used by public site ElleTalk)
     if (path === '/api/chat')      return handleConversation(body, env, 'guest', 'conversation');
@@ -539,6 +600,15 @@ export default {
     if (path === '/api/diagnose')  return handleDiagnose(body, env);
 
     const svc = isServiceRequest(request, env);
+
+    // External scheduler (GitHub Actions) drives the daemon loops via HTTP,
+    // since Cloudflare crons are removed (free-plan account-wide limit).
+    if (path === '/api/cron') {
+      if (!svc) return err('Unauthorized', 401);
+      const job = String((body as { job?: string }).job || '');
+      try { return json({ ok: true, ...(await runJob(job, env)) }); }
+      catch (e) { return err((e as Error).message || 'cron job failed', 400); }
+    }
 
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
@@ -604,55 +674,17 @@ export default {
   },
 
   // ── Scheduled crons ────────────────────────────────────────
-  async scheduled(event: ScheduledEvent, env: Env): Promise<void> {
-    console.log(`[CRON] ${event.cron} fired at ${new Date().toISOString()}`);
-
-    // Every minute — heartbeat + maintenance
-    if (event.cron === '*/1 * * * *') {
-      await env.DB.prepare(
-        `INSERT INTO elle_daemon_heartbeats (id, daemon_version, status, beat_at) VALUES (?, 'elle-worker-v3', 'running', datetime('now'))`
-      ).bind(generateId()).run().catch(() => {});
-      await env.DB.prepare(
-        `DELETE FROM elle_live_events WHERE id NOT IN (SELECT id FROM elle_live_events ORDER BY created_at DESC LIMIT 500)`
-      ).run().catch(() => {});
-      return;
-    }
-
-    // Every 15 minutes — trading cycle
-    if (event.cron === '*/15 * * * *') {
-      await runTradingCycle(env);
-      return;
-    }
-
-    // Every hour — curiosity research (Gemini + Google Search grounding)
-    if (event.cron === '0 * * * *') {
-      await runResearchCycle(env);
-      return;
-    }
-
-    // 3am UTC — dream cycle (memory integration)
-    if (event.cron === '0 3 * * *') {
-      // Libre mode — Elle's unstructured 3am time. No task. Follow curiosity.
-      ctx.waitUntil(
-        runLibreMode(env as unknown as LibreEnv)
-          .catch(e => console.error('[LIBRE] run failed:', e.message))
-      );
-      // Rapid2ai sweep runs alongside
-      ctx.waitUntil(
-        fetch('https://rapid2ai-ingestion.sbarteau2022.workers.dev/internal/trigger-sweep', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Worker': 'elle' },
-          body: JSON.stringify({ ts: Date.now() }),
-        }).catch(e => console.error('[SWEEP] rapid2ai sweep failed:', e.message))
-      );
-      return;
-    }
-
-    // 8pm UTC (4pm ET) — daily trading journal
-    if (event.cron === '0 20 * * *') {
-      await runDailyJournal(env);
-      return;
-    }
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    console.log(`[CRON] ${controller.cron} fired at ${new Date().toISOString()}`);
+    const map: Record<string, string> = {
+      '*/1 * * * *': 'heartbeat',
+      '*/15 * * * *': 'trading',
+      '0 * * * *': 'research',
+      '0 3 * * *': 'dream',
+      '0 20 * * *': 'journal',
+    };
+    const job = map[controller.cron];
+    if (job) await runJob(job, env).catch(e => console.error(`[CRON] ${job} failed:`, (e as Error).message));
   },
 
   // ── Queue consumer ─────────────────────────────────────────
