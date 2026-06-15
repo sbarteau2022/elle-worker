@@ -162,7 +162,7 @@ Open with a confident 2-3 sentence argument. Deploy the rhetorical tactic: "${ta
     // Cerberus responds
     const tactic = OPPONENT_TACTICS[Math.floor(Math.random() * OPPONENT_TACTICS.length)];
     const history = (turns.results ?? []).map((t: Record<string,unknown>) => ({
-      role: t.side === 'u' ? 'user' : 'assistant',
+      role: (t.side === 'u' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: String(t.text),
     }));
     history.push({role:'user',content:user_text});
@@ -389,7 +389,7 @@ export async function handleCohort(body: Record<string,unknown>, env: LawEnv, us
       };
     }).sort((a: {idx:number},b: {idx:number}) => b.idx - a.idx).map((r: Record<string,unknown>,i: number) => ({...r,rank:i+1}));
 
-    const yourRank = rows.findIndex((r: {you:boolean}) => r.you) + 1;
+    const yourRank = rows.findIndex((r) => !!(r as unknown as { you?: boolean }).you) + 1;
     return json({rows, your_rank: yourRank || null, total: rows.length});
   }
 
@@ -436,7 +436,7 @@ export async function handleReplays(body: Record<string,unknown>, env: LawEnv, u
     }));
 
     // Generate autopsy
-    const transcript = turnList.map((t: {side:string;text:unknown}) => `${t.side==='u'?'YOU':'CERBERUS'}: ${t.text}`).join('\n\n');
+    const transcript = turnList.map((t: { side: unknown; text: unknown }) => `${t.side === 'u' ? 'YOU' : 'CERBERUS'}: ${String(t.text)}`).join('\n\n');
     const autopsyResult = await callLLM('reasoning',
       `Analyze this LSAT debate transcript. Return JSON:
 {"pattern":"2-sentence behavioral pattern","key_moments":[{"turn":1,"label":"...","analysis":"..."}],"recommendation":"Next focus area"}`,
