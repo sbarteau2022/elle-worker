@@ -36,40 +36,14 @@ queue = "elle-ingest-queue"
 max_batch_size = 10
 max_batch_timeout = 30
 
-# Cron schedule
+# Free plan: 3 cron max
+# Trading (*/15) + research (0 *) dropped -- call via /api/webhooks/* HTTP
 [triggers]
 crons = [
-  "*/1 * * * *",   # heartbeat + maintenance
-  "*/15 * * * *",  # trading cycle (market hours only)
-  "0 * * * *",     # research cycle (Gemini + Google Search)
-  "0 3 * * *",     # dream cycle (memory integration)
-  "0 20 * * *"     # daily journal (4pm ET market close)
+  "*/1 * * * *",
+  "0 3 * * *",
+  "0 20 * * *"
 ]
 
 [vars]
 ENVIRONMENT = "production"
-
-# Secrets — wrangler secret put <NAME>
-#
-# LLM providers:
-#   LLM_OPENROUTER_KEY     openrouter.ai
-#   LLM_GEMINI_KEY         aistudio.google.com
-#   LLM_GROK_KEY           console.x.ai (optional)
-#
-# Model overrides (free tier defaults if not set):
-#   LLM_MODEL_PRIMARY      nvidia/nemotron-3-ultra-550b-a55b:free
-#   LLM_MODEL_FAST         meta-llama/llama-3.3-70b-instruct:free
-#   LLM_MODEL_CODE         qwen/qwen3-coder:free
-#   LLM_MODEL_REASONING    gemini-2.5-flash-preview-05-20
-#
-# Elle auth (already set):
-#   JWT_SECRET
-#   ELLE_SERVICE_KEY       eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyODQzMGFiZTk3NmVhYjg1OTliNTEwM2Q1OGJmNDE5MiIsImVtYWlsIjoic2JhcnRlYXUyMDIyQGdtYWlsLmNvbSIsImp0aSI6IjBjMDM4YzVkN2FkNDQ2ZmNmZTY3MTY4ZDJkMzFiYzMzIiwiZXhwIjoxNzgzMzE2OTk5fQ.sv4AY2JUni43fEHkwtTkD94Z19QH1LlpNljs1X20hUg
-#
-# Alpaca trading — single key + base URL:
-#   ALPACA_API_KEY         PKK7O6LABQSOLE2HHVMAENH5ZJ
-#   ALPACA_BASE_URL        https://paper-api.alpaca.markets
-#                          (switch to https://api.alpaca.markets for live)
-#.  CLOUDFLARE_API_TOKEN    cfat_FFk1wRL44OVaNxTvc9hzkLLIa4kFpe05an4DXjQTbdad7634
-# GitHub:
-#   GITHUB_TOKEN           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
