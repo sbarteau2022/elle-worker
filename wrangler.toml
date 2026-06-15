@@ -36,13 +36,11 @@ queue = "elle-ingest-queue"
 max_batch_size = 10
 max_batch_timeout = 30
 
-# Free plan: 3 cron max
-# Trading (*/15) + research (0 *) dropped -- call via /api/webhooks/* HTTP
+# 1 cron only -- free plan account-wide limit exceeded at 3
+# dream (0 3) + journal (0 20) + trading (*/15) + research (0 *) all HTTP-triggered
 [triggers]
 crons = [
-  "*/1 * * * *",
-  "0 3 * * *",
-  "0 20 * * *"
+  "*/1 * * * *"
 ]
 
 [vars]
