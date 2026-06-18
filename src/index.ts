@@ -444,7 +444,7 @@ async function handleThreads(body: Record<string, unknown>, env: Env, userId: st
     return json({ id, success: true });
   }
   if (action === 'update' && thread_id && context) {
-    const existing = await env.DB.prepare("SELECT summary FROM elle_threads WHERE id = ? AND user_id = ?").bind(thread_id, userId).first() as { summary: string } | null;
+    const existing = await env.DB.prepare("SELECT summary FROM law_threads WHERE id = ? AND user_id = ?").bind(thread_id, userId).first() as { summary: string } | null;
     let newSummary = existing?.summary || '', note = '';
     try {
       const r = await callLLM('fast', 'Synthesize thread updates concisely.',
