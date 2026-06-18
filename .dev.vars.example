@@ -1,13 +1,11 @@
 # Copy to .dev.vars (gitignored) for local development
 # wrangler dev will load these automatically
 
-ANTHROPIC_API_KEY=
-JWT_SECRET=
-ELLE_SERVICE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyODQzMGFiZTk3NmVhYjg1OTliNTEwM2Q1OGJmNDE5MiIsImVtYWlsIjoic2JhcnRlYXUyMDIyQGdtYWlsLmNvbSIsImp0aSI6IjBjMDM4YzVkN2FkNDQ2ZmNmZTY3MTY4ZDJkMzFiYzMzIiwiZXhwIjoxNzgzMzE2OTk5fQ.sv4AY2JUni43fEHkwtTkD94Z19QH1LlpNljs1X20hUg
-#
+JWT_SECRET=P3DN-hiZ9wherjZOjWiMirJ-nlBkPA1akvC3Wjgfu3iI_jassBYw6dfDyKi3tqdT
+ELLE_SERVICE_KEY=elle_svc_5H2mewCEcT4NjxoiAi0pl2lFiRwTofpcleYSKpStRqm2BWoU
 
 # OpenRouter (free frontier models)
 LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_API_KEY=
+LLM_API_KEY=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
 LLM_MODEL_PRIMARY=nvidia/nemotron-3-ultra-550b-a55b:free
 LLM_MODEL_FAST=meta-llama/llama-3.3-70b-instruct:free
