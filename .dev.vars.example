@@ -9,3 +9,6 @@ LLM_BASE_URL=https://openrouter.ai/api/v1
 LLM_API_KEY=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
 LLM_MODEL_PRIMARY=nvidia/nemotron-3-ultra-550b-a55b:free
 LLM_MODEL_FAST=meta-llama/llama-3.3-70b-instruct:free
+
+CLOUDFLARE_ACCOUNT_ID=f60c2e6068e002f5dbad7cd562a5c165
+CLOUDFLARE_API_TOKEN=cfat_YhsiB8eXlEO1COKUXexmdEqaV22Hmjdpstb3n9Tx69d7a933
