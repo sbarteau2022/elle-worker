@@ -538,16 +538,20 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       return { ran: 'dream' };
     case 'backfill': {
       // Embed papers that have no chunks yet (daemon research output first) so the
-      // daemon's own new papers become RAG-queryable. Bounded per run for plan limits.
+      // daemon's own new papers become RAG-queryable. Subrequest-budgeted to stay
+      // under the Workers Free 50-subrequests/invocation cap.
       const rows = await env.DB.prepare(
         `SELECT id, title, series, tag, full_text FROM corpus_papers p
          WHERE NOT EXISTS (SELECT 1 FROM corpus_chunks c WHERE c.paper_id = p.id)
-         ORDER BY (series = 'research') DESC, id LIMIT 25`
+         ORDER BY (series = 'research') DESC, id LIMIT 40`
       ).all();
-      let done = 0;
+      let done = 0, sub = 1; // 1 = the SELECT above
+      const BUDGET = 45;     // free plan hard limit is 50 subrequests/invocation
       for (const r of (rows.results || []) as Array<{ id: string; title: string; series: string; tag: string; full_text: string }>) {
         const chunks = r.full_text ? semanticChunks(r.full_text) : [];
         if (!chunks.length) continue;
+        const cost = Math.ceil(chunks.length / 25) + 2; // embedBatch AI calls + upsert + db.batch
+        if (sub + cost > BUDGET) break;
         const vectors = await embedBatch(chunks, env);
         const chunkIds = chunks.map(() => generateId());
         await env.VECTORIZE.upsert(chunks.map((_, i) => ({
@@ -556,7 +560,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
         })));
         const stmt = env.DB.prepare(`INSERT INTO corpus_chunks (id, paper_id, chunk_index, chunk_text, token_count, vectorize_id, start_char, end_char) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`);
         await env.DB.batch(chunks.map((c, i) => stmt.bind(chunkIds[i], r.id, i, c, Math.ceil(c.length / 4), chunkIds[i], c.length)));
-        done++;
+        sub += cost; done++;
       }
       return { ran: `backfill:${done}` };
     }
