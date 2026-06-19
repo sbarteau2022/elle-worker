@@ -514,6 +514,8 @@ async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Res
 // Single source of truth for the background loops. Invoked by the external
 // scheduler via POST /api/cron, and by scheduled() if Cloudflare crons return.
 async function runJob(job: string, env: Env): Promise<{ ran: string }> {
+  const started = Date.now();
+  try {
   switch (job) {
     case 'heartbeat':
       await env.DB.prepare(
@@ -537,6 +539,14 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     default:
       throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal)`);
   }
+  } catch (e) {
+    const emsg = (e as Error).message || String(e);
+    console.error(`[JOB] ${job} failed:`, emsg);
+    await env.DB.prepare(
+      `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'job_error', 'worker_cron', ?, ?, 'error')`
+    ).bind(generateId(), `${job} failed`, JSON.stringify({ job, error: emsg.slice(0, 500), ms: Date.now() - started })).run().catch(() => {});
+    throw e;
+  }
 }
 
 export default {
@@ -557,7 +567,7 @@ export default {
         papers: (papers as { n: number })?.n,
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
-        scheduler: 'external — GitHub Actions schedule → POST /api/cron (service-key gated)',
+        scheduler: 'native — Cloudflare cron */1 tick → clock-dispatch in scheduled()',
         jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal'],
       });
     }
@@ -674,17 +684,20 @@ export default {
   },
 
   // ── Scheduled crons ────────────────────────────────────────
-  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    console.log(`[CRON] ${controller.cron} fired at ${new Date().toISOString()}`);
-    const map: Record<string, string> = {
-      '*/1 * * * *': 'heartbeat',
-      '*/15 * * * *': 'trading',
-      '0 * * * *': 'research',
-      '0 3 * * *': 'dream',
-      '0 20 * * *': 'journal',
-    };
-    const job = map[controller.cron];
-    if (job) await runJob(job, env).catch(e => console.error(`[CRON] ${job} failed:`, (e as Error).message));
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const now = new Date();
+    const m = now.getUTCMinutes();
+    const h = now.getUTCHours();
+    console.log(`[CRON] tick ${controller.cron} @ ${now.toISOString()} (h=${h} m=${m})`);
+    // A single */1 cron trigger drives every loop (uses 1 of the 5-per-account
+    // cron budget). Job selection is by the clock; each runs independently.
+    const fire = (job: string) =>
+      ctx.waitUntil(runJob(job, env).catch(e => console.error(`[CRON] ${job} failed:`, (e as Error).message)));
+    fire('heartbeat');                        // every minute
+    if (m % 15 === 0) fire('trading');        // :00 :15 :30 :45 (market-gated server-side)
+    if (m === 0) fire('research');            // top of the hour
+    if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
+    if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
   },
 
   // ── Queue consumer ─────────────────────────────────────────

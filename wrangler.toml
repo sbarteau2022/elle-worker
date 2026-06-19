@@ -36,8 +36,13 @@ queue = "elle-ingest-queue"
 max_batch_size = 10
 max_batch_timeout = 30
 
-# Crons removed -- account-wide free-plan limit (5) already consumed by other workers.
-# Heartbeat/dream/journal triggered externally via GitHub Actions schedule -> HTTP.
+# A single */1 cron trigger drives all daemon loops via clock-dispatch in
+# scheduled() (heartbeat every min; trading :*/15; research hourly; dream 03:00
+# UTC; journal 20:00 UTC). Uses 1 of the 5-per-account cron budget, not 5.
+# IMPORTANT: keep this block — `wrangler deploy` reconciles triggers to this file,
+# so removing it deletes the live cron and silently stops the daemon.
+[triggers]
+crons = ["*/1 * * * *"]
 
 [vars]
 ENVIRONMENT = "production"
