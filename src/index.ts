@@ -536,6 +536,30 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
         body: JSON.stringify({ ts: Date.now() }),
       }).catch(e => console.error('[SWEEP] rapid2ai sweep failed:', (e as Error).message));
       return { ran: 'dream' };
+    case 'backfill': {
+      // Embed papers that have no chunks yet (daemon research output first) so the
+      // daemon's own new papers become RAG-queryable. Bounded per run for plan limits.
+      const rows = await env.DB.prepare(
+        `SELECT id, title, series, tag, full_text FROM corpus_papers p
+         WHERE NOT EXISTS (SELECT 1 FROM corpus_chunks c WHERE c.paper_id = p.id)
+         ORDER BY (series = 'research') DESC, id LIMIT 25`
+      ).all();
+      let done = 0;
+      for (const r of (rows.results || []) as Array<{ id: string; title: string; series: string; tag: string; full_text: string }>) {
+        const chunks = r.full_text ? semanticChunks(r.full_text) : [];
+        if (!chunks.length) continue;
+        const vectors = await embedBatch(chunks, env);
+        const chunkIds = chunks.map(() => generateId());
+        await env.VECTORIZE.upsert(chunks.map((_, i) => ({
+          id: chunkIds[i], values: vectors[i],
+          metadata: { paper_id: r.id, title: r.title, series: r.series, tag: r.tag, chunk_index: i },
+        })));
+        const stmt = env.DB.prepare(`INSERT INTO corpus_chunks (id, paper_id, chunk_index, chunk_text, token_count, vectorize_id, start_char, end_char) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`);
+        await env.DB.batch(chunks.map((c, i) => stmt.bind(chunkIds[i], r.id, i, c, Math.ceil(c.length / 4), chunkIds[i], c.length)));
+        done++;
+      }
+      return { ran: `backfill:${done}` };
+    }
     default:
       throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal)`);
   }
@@ -696,6 +720,7 @@ export default {
     fire('heartbeat');                        // every minute
     if (m % 15 === 0) fire('trading');        // :00 :15 :30 :45 (market-gated server-side)
     if (m === 0) fire('research');            // top of the hour
+    if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
     if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
     if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
   },
