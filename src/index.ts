@@ -408,10 +408,15 @@ async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promis
     migrate:  `${cb}D1 SQL migration.\nTask: ${task}\n${context ? `Context: ${context}` : ''}`,
   };
 
-  const result = await callLLM('code', SYSTEM,
-    [{ role: 'user', content: prompts[action] || `${cb}${task || context || 'Provide a task or code.'}` }],
-    8192, env
-  );
+  let result;
+  try {
+    result = await callLLM('code', SYSTEM,
+      [{ role: 'user', content: prompts[action] || `${cb}${task || context || 'Provide a task or code.'}` }],
+      8192, env
+    );
+  } catch (e) {
+    return err('Code engine LLM failed: ' + (e as Error).message, 502);
+  }
 
   await env.DB.prepare(
     `INSERT INTO elle_intelligence_vault (id, source_type, system_prompt, user_turn, assistant_turn, quality_signal, metadata) VALUES (?, 'code_engine', ?, ?, ?, 'code_engine_output', ?)`

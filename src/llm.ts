@@ -297,9 +297,18 @@ export async function callLLM(
       return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
     }
 
-    // Code: Qwen3-Coder with /think prefix
+    // Code: Qwen3-Coder. Falls back to Gemini (or OpenRouter primary) when the
+    // free Qwen endpoint is rate-limited/unavailable, so the code engine never 1101s.
     case 'code': {
-      return callOpenRouter(MODEL.code(env), system, messages, maxTokens, env);
+      try {
+        return await callOpenRouter(MODEL.code(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter code (qwen) failed, falling back:', (e as Error).message);
+        if (env.LLM_GEMINI_KEY) {
+          return callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false });
+        }
+        return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      }
     }
 
     // Fast: Llama 3.3 70B — tutor, thread summaries
