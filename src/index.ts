@@ -170,6 +170,15 @@ function isServiceRequest(request: Request, env: Env): boolean {
   return request.headers.get('Authorization') === `Bearer ${env.ELLE_SERVICE_KEY}`;
 }
 
+// Privileged caller: the master service key (break-glass) OR a valid, unrevoked
+// admin/superadmin-tier user JWT. This is the single gate for every internal/admin
+// endpoint, so the dev console can run on an admin JWT instead of the raw key.
+async function isAdmin(request: Request, env: Env): Promise<boolean> {
+  if (isServiceRequest(request, env)) return true;
+  const u = await getUser(request, env);
+  return !!u && (u.tier === 'admin' || u.tier === 'superadmin');
+}
+
 // ── Handlers ──────────────────────────────────────────────────
 async function handleAuth(body: Record<string, string>, env: Env, request: Request): Promise<Response> {
   const { action, email, password } = body;
@@ -642,7 +651,9 @@ export default {
     // auth in v2 when it gains live-infra context. Takes an error string, returns a fix.
     if (path === '/api/diagnose')  return handleDiagnose(body, env);
 
-    const svc = isServiceRequest(request, env);
+    // "svc" = privileged caller: master service key (break-glass) OR an
+    // admin/superadmin-tier JWT. Gates every internal/admin endpoint below.
+    const svc = await isAdmin(request, env);
 
     // External scheduler (GitHub Actions) drives the daemon loops via HTTP,
     // since Cloudflare crons are removed (free-plan account-wide limit).
@@ -677,8 +688,8 @@ export default {
       return handleCodeEngine(body, env);
     }
 
-    // Service key bypass — allows dev UI and trusted internal callers
-    if (isServiceRequest(request, env)) {
+    // Privileged bypass (service key or admin JWT) — dev console + internal callers
+    if (svc) {
       if (path === '/api/elle-conversation')     return handleConversation(body, env, 'svc', 'conversation');
       if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, 'svc', 'reasoning');
     }
