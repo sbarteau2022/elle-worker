@@ -21,6 +21,7 @@ import { runTradingCycle, runDailyJournal } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
+import { runRouter } from './router';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -608,6 +609,54 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
   }
 }
 
+// Natural-language corpus resolve — turn a plain-text request into the right paper.
+// Embeds the query, aggregates Vectorize chunk hits up to the paper level, and either
+// auto-opens a clear winner (full text) or returns a ranked candidate list. No ids,
+// no exact titles, no method/verb knowledge required from the caller.
+async function handleCorpusResolve(
+  body: { q?: string; query?: string; open?: boolean; topK?: number },
+  env: Env,
+): Promise<Response> {
+  const q = String(body.q || body.query || '').trim();
+  if (!q) return err('q (natural-language request) required');
+  const wantOpen = body.open !== false; // default: auto-open a clear winner
+  const topK = Math.min(Math.max(Number(body.topK) || 40, 10), 60);
+
+  const embedding = await embed(q, env);
+  const results = await env.VECTORIZE.query(embedding, { topK, returnMetadata: 'all' });
+
+  // Aggregate corpus chunk hits to the paper level. Skip conversation vectors
+  // (id prefixed 'conv-', and they carry no paper_id) and anything without a paper_id.
+  const byPaper = new Map<string, { id: string; title: string; series: string; top: number; hits: number }>();
+  for (const m of results.matches) {
+    if (m.id.startsWith('conv-')) continue;
+    const md = (m.metadata || {}) as Record<string, unknown>;
+    const pid = typeof md.paper_id === 'string' ? md.paper_id : undefined;
+    if (!pid) continue;
+    const prev = byPaper.get(pid) || { id: pid, title: String(md.title || ''), series: String(md.series || ''), top: 0, hits: 0 };
+    prev.hits += 1;
+    if (m.score > prev.top) prev.top = m.score;
+    byPaper.set(pid, prev);
+  }
+
+  const ranked = [...byPaper.values()].sort((a, b) => b.top - a.top);
+  const candidates = ranked.slice(0, 5).map(c => ({
+    id: c.id, title: c.title, series: c.series,
+    score: Number(c.top.toFixed(3)), matches: c.hits,
+  }));
+  if (!candidates.length) return json({ query: q, auto_opened: false, paper: null, candidates: [] });
+
+  // Auto-open only when the top match clearly dominates — otherwise let the caller pick.
+  const clearWinner = candidates.length === 1 || (candidates[0].score - (candidates[1]?.score ?? 0)) > 0.05;
+  if (wantOpen && clearWinner) {
+    const paper = await env.DB.prepare(
+      `SELECT id, title, series, tag, abstract, full_text, source_url, word_count FROM corpus_papers WHERE id = ?`
+    ).bind(candidates[0].id).first();
+    if (paper) return json({ query: q, auto_opened: true, paper, candidates });
+  }
+  return json({ query: q, auto_opened: false, paper: null, candidates });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url  = new URL(request.url);
@@ -700,6 +749,20 @@ export default {
       return json({ chunks: rows.results.map(r => ({ ...r, similarity: scores.get(r.id as string) ?? 0 })).sort((a, b) => (b.similarity as number) - (a.similarity as number)), query });
     }
 
+    // Natural-language router — admin only. One question → the LLM orchestrates
+    // every capability (corpus, SQL, web, code, trading, RAPID²AI) and answers.
+    if (path === '/api/elle-router') {
+      if (!svc) return err('Unauthorized', 401);
+      const rb = body as { q?: string; query?: string; max_steps?: number };
+      const q = String(rb.q || rb.query || '').trim();
+      if (!q) return err('q (question) required');
+      const out = await runRouter(q, env, {
+        embed, ragSearch, recallPastConversations,
+        handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
+      }, { maxSteps: Number(rb.max_steps) || 6 });
+      return json(out);
+    }
+
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
       return handleCodeEngine(body, env);
@@ -764,6 +827,10 @@ export default {
       if (!paper) return err('Paper not found', 404);
       return json({ paper });
     }
+    // Corpus resolve — natural language → the right paper (semantic, paper-level).
+    // Auto-opens a clear winner (full text) or returns a ranked candidate list.
+    if (path === '/api/corpus-resolve')
+      return handleCorpusResolve(body as { q?: string; query?: string; open?: boolean; topK?: number }, env);
     if (path === '/api/elle-duel-engine')       return handleDuelEngine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-tutor')             return handleTutor(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
