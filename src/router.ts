@@ -27,6 +27,10 @@ export interface RouterDeps {
   handleDiagnose: (body: any, env: Env) => Promise<Response>;
   handleResearch: (body: any, env: Env) => Promise<Response>;
   runLibreMode: (env: Env) => Promise<void>;
+  journalWrite: (env: Env, embed: any, args: any) => Promise<any>;
+  journalRead: (env: Env, embed: any, args: any) => Promise<any>;
+  journalThread: (env: Env, args: any) => Promise<any>;
+  journalAnnotate: (env: Env, args: any) => Promise<any>;
 }
 
 export interface RouterStep {
@@ -79,6 +83,10 @@ query_rapid2ai(question) — ask the RAPID²AI hospitality worker about US Foods
 ingest_paper(title,text,series,tag,abstract?,source_url?) — WRITE: add a paper to the corpus.
 trigger_dream() — WRITE: run one libre/dream cycle now.
 trade_execute(action,symbol,qty?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). buy/sell need qty; close exits the whole position.
+journal_read(q) — semantic search over the Optimus journal/manuscript (ON-RECORD entries only; off-record is never surfaced). Returns entries with their phase state (κ, reserve, velocity, accel).
+journal_thread(thread_id) — full manuscript for one thread: ordered entries + phase-state series + marginalia.
+journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.
+journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.
 `.trim();
 
 function systemPrompt(): string {
@@ -168,7 +176,7 @@ async function alpacaOrder(env: Env, action: string, symbol: string, qty?: numbe
 }
 
 // ── tool dispatch ────────────────────────────────────────────
-async function runTool(name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps): Promise<string> {
+async function runTool(name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps, ctxUserId: string): Promise<string> {
   const a = args || {};
   try {
     switch (name) {
@@ -231,6 +239,22 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
         const out = await alpacaOrder(env, String(a.action || ''), String(a.symbol || ''), Number(a.qty));
         return clip(JSON.stringify(out));
       }
+      case 'journal_read': {
+        const r = await deps.journalRead(env, deps.embed, { q: a.q || a.query, thread_id: a.thread_id, include_off_record: false, limit: a.limit });
+        return clip(JSON.stringify(r));
+      }
+      case 'journal_thread': {
+        const r = await deps.journalThread(env, { thread_id: a.thread_id });
+        return clip(JSON.stringify(r));
+      }
+      case 'journal_write': {
+        const r = await deps.journalWrite(env, deps.embed, { thread_id: a.thread_id, role: a.role || 'reader', content: a.content, off_record: a.off_record, anchor_topic: a.anchor_topic, user_id: ctxUserId });
+        return clip(JSON.stringify(r));
+      }
+      case 'journal_annotate': {
+        const r = await deps.journalAnnotate(env, { entry_id: a.entry_id, anchor_para: a.anchor_para, note: a.note, off_record: a.off_record });
+        return clip(JSON.stringify(r));
+      }
       default:
         return `unknown tool "${name}"`;
     }
@@ -240,8 +264,9 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string } = {}): Promise<RouterResult> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
+  const ctxUserId = opts.userId || 'router';
   const trace: RouterStep[] = [];
   const messages: LLMMessage[] = [{ role: 'user', content: question }];
 
@@ -258,7 +283,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
-      const obs = await runTool(parsed.tool, args, env, deps);
+      const obs = await runTool(parsed.tool, args, env, deps, ctxUserId);
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800) });
       messages.push({ role: 'assistant', content: JSON.stringify({ tool: parsed.tool, args }) });
       messages.push({ role: 'user', content: `OBSERVATION (${parsed.tool}):\n${obs}` });

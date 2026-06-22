@@ -22,6 +22,7 @@ import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
 import { runRouter } from './router';
+import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate } from './journal';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -756,10 +757,12 @@ export default {
       const rb = body as { q?: string; query?: string; max_steps?: number };
       const q = String(rb.q || rb.query || '').trim();
       if (!q) return err('q (question) required');
+      const routerUser = await getUser(request, env);
       const out = await runRouter(q, env, {
         embed, ragSearch, recallPastConversations,
         handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
-      }, { maxSteps: Number(rb.max_steps) || 6 });
+        journalWrite, journalRead, journalThread, journalAnnotate,
+      }, { maxSteps: Number(rb.max_steps) || 6, userId: routerUser?.id || 'superadmin' });
       return json(out);
     }
 
@@ -831,6 +834,10 @@ export default {
     // Auto-opens a clear winner (full text) or returns a ranked candidate list.
     if (path === '/api/corpus-resolve')
       return handleCorpusResolve(body as { q?: string; query?: string; open?: boolean; topK?: number }, env);
+    // Optimus journal — the manuscript/phase-state layer. User-gated: the
+    // reader owns their journal. off_record + κ rules enforced in journal.ts.
+    if (path === '/api/optimus-journal')
+      return handleOptimusJournal(body, env, embed, user.id);
     if (path === '/api/elle-duel-engine')       return handleDuelEngine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-tutor')             return handleTutor(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
