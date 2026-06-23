@@ -8,6 +8,7 @@
 //   0    * * * *   Research cycle (Gemini + Google Search grounding)
 //   0    3 * * *   Dream cycle (memory integration)
 //   0    20 * * *  Daily journal (market close reflection)
+//   0    7  * * *  Optimus canvas (Elle's unprompted daily journal + reads reader)
 // ============================================================
 
 import { callLLM, MODEL, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
@@ -22,7 +23,7 @@ import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
 import { runRouter } from './router';
-import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate } from './journal';
+import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal } from './journal';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -561,6 +562,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
+    case 'optimus':  await runOptimusJournal(env, embed); return { ran: 'optimus' };
     case 'dream':
       await runLibreMode(env as unknown as LibreEnv).catch(e => console.error('[LIBRE] run failed:', (e as Error).message));
       await fetch('https://rapid2ai-ingestion.sbarteau2022.workers.dev/internal/trigger-sweep', {
@@ -598,7 +600,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       return { ran: `backfill:${done}` };
     }
     default:
-      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal)`);
+      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus)`);
   }
   } catch (e) {
     const emsg = (e as Error).message || String(e);
@@ -677,7 +679,7 @@ export default {
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
         scheduler: 'native — Cloudflare cron */1 tick → clock-dispatch in scheduled()',
-        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal'],
+        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus'],
       });
     }
 
@@ -866,6 +868,7 @@ export default {
     if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
     if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
     if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
+    if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
   },
 
   // ── Queue consumer ─────────────────────────────────────────

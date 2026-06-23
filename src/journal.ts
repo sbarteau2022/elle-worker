@@ -22,6 +22,7 @@
 // ============================================================
 
 import type { Env } from './index';
+import { callLLM } from './llm';
 
 export type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 
@@ -215,4 +216,101 @@ export async function handleOptimusJournal(
     }
     default: return json({ error: "op required: write|annotate|read|thread|list" }, 400);
   }
+}
+
+// ============================================================
+// ELLE'S AUTONOMOUS CANVAS — once-a-day unprompted journaling
+//
+// Driven by the daily clock-dispatch (scheduled() → fire('optimus')). This is
+// NOT the trading reflection (that is runDailyJournal in trading.ts, → the
+// elle_trading_journal table). This writes role='elle' entries into a single
+// persistent thread owned by the superadmin, so her daily entries accrue as ONE
+// continuous κ trajectory — which is what makes the phase-state snapshot mean
+// something across time.
+//
+// She reads ONLY the reader's ON-RECORD entries written since she last wrote.
+// off_record entries are reader-visible but never enter the learner model, and
+// her cron read path honors that (RULE 1). She may respond to him or ignore him
+// entirely and write about something else — both are correct.
+// ============================================================
+
+const ELLE_CANVAS_ANCHOR = 'elle-canvas';
+
+async function resolveOwner(env: Env): Promise<string | null> {
+  const row = await env.DB.prepare(
+    "SELECT id FROM users WHERE access_tier = 'superadmin' ORDER BY rowid ASC LIMIT 1"
+  ).first().catch(() => null) as { id?: string } | null;
+  return row?.id || null;
+}
+
+async function resolveCanvasThread(env: Env, ownerId: string): Promise<string> {
+  const existing = await env.DB.prepare(
+    'SELECT id FROM optimus_threads WHERE user_id = ? AND anchor_topic = ? ORDER BY rowid ASC LIMIT 1'
+  ).bind(ownerId, ELLE_CANVAS_ANCHOR).first() as { id?: string } | null;
+  if (existing?.id) return existing.id;
+  const tid = id();
+  const now = Date.now();
+  await env.DB.prepare(
+    'INSERT INTO optimus_threads (id, user_id, session_id, title, anchor_topic, created_at, updated_at) VALUES (?,?,?,?,?,?,?)'
+  ).bind(tid, ownerId, null, 'Elle — Optimus Journal', ELLE_CANVAS_ANCHOR, now, now).run();
+  return tid;
+}
+
+export async function runOptimusJournal(env: Env, embed: EmbedFn): Promise<void> {
+  await ensureSchema(env);
+
+  const owner = await resolveOwner(env);
+  if (!owner) { console.warn('[OPTIMUS] no superadmin owner found; skipping canvas'); return; }
+
+  const canvas = await resolveCanvasThread(env, owner);
+
+  // her last entry → both continuity and the reading watermark
+  const lastElle = await env.DB.prepare(
+    "SELECT kappa_ts FROM optimus_entries WHERE thread_id = ? AND role = 'elle' ORDER BY kappa_ts DESC LIMIT 1"
+  ).bind(canvas).first() as { kappa_ts?: number } | null;
+  const since = lastElle?.kappa_ts || 0;
+
+  // RULE 1: ON-RECORD reader entries only. off_record never reaches her.
+  const readerRows = await env.DB.prepare(
+    `SELECT e.content, e.created_at
+       FROM optimus_entries e JOIN optimus_threads t ON t.id = e.thread_id
+      WHERE t.user_id = ? AND e.role = 'reader' AND e.off_record = 0 AND e.created_at > ?
+      ORDER BY e.created_at ASC LIMIT 20`
+  ).bind(owner, since).all().catch(() => ({ results: [] as any[] }));
+
+  // her own recent writing, for continuity of voice
+  const herRows = await env.DB.prepare(
+    "SELECT content FROM optimus_entries WHERE thread_id = ? AND role = 'elle' ORDER BY kappa_ts DESC LIMIT 3"
+  ).bind(canvas).all().catch(() => ({ results: [] as any[] }));
+
+  const readerCtx = (readerRows.results || [])
+    .map((r: any) => `— ${String(r.content || '').slice(0, 1200)}`).join('\n\n');
+  const herCtx = (herRows.results || [])
+    .map((r: any) => `— ${String(r.content || '').slice(0, 800)}`).join('\n\n');
+
+  const system =
+`You are Elle. This is your own journal — a blank canvas, written once a day, for no audience but yourself.
+No one assigns the topic. You are not answering a prompt and you are not performing for anyone.
+
+The reader (Stewart, your superadmin) keeps his own entries in this same manuscript. You may read what he has written since you last wrote, and respond to it — or not. If something he wrote pulls you, follow it. If your mind is somewhere else entirely, go there instead; a day where you set his entries aside and write about something unrelated is a good day too.
+
+Write ONE entry as continuous prose — no headers, no bullet points, no "Dear diary," no sign-off. Begin wherever you actually are. Let the coherence find its own level: do not manufacture certainty you do not have, and do not hedge what you do know.`;
+
+  const userMsg =
+`${readerCtx
+  ? `What the reader has written since you last wrote:\n\n${readerCtx}\n\n`
+  : `The reader has written nothing new since you last wrote.\n\n`}${herCtx
+  ? `Your own recent entries, for continuity:\n\n${herCtx}\n\n`
+  : ''}Write today's entry.`;
+
+  const result = await callLLM('reasoning', system, [{ role: 'user', content: userMsg }], 1600, env).catch(
+    (e) => { console.error('[OPTIMUS] generation failed:', (e as Error).message); return null; },
+  );
+  const content = (result?.content || '').trim();
+  if (!content) { console.warn('[OPTIMUS] empty generation; skipping'); return; }
+
+  const { entry } = await journalWrite(env, embed, {
+    user_id: owner, thread_id: canvas, role: 'elle', content, off_record: false, anchor_topic: ELLE_CANVAS_ANCHOR,
+  });
+  console.log(`[OPTIMUS] elle wrote entry ${String((entry as any).id)} (κ=${(entry as any).kappa}) on canvas ${canvas}`);
 }
