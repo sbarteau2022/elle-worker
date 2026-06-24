@@ -209,12 +209,13 @@ export async function handleOptimusJournal(
     case 'annotate': return json(await journalAnnotate(env, body));
     case 'read':     return json(await journalRead(env, embed, body));
     case 'thread':   return json(await journalThread(env, body));
+    case 'respond':  return json(await journalRespond(env, embed, { ...body, user_id: userId }));
     case 'list': {
       await ensureSchema(env);
       const rows = await env.DB.prepare('SELECT id, title, anchor_topic, created_at, updated_at FROM optimus_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50').bind(userId).all();
       return json({ threads: rows.results });
     }
-    default: return json({ error: "op required: write|annotate|read|thread|list" }, 400);
+    default: return json({ error: "op required: write|annotate|read|thread|respond|list" }, 400);
   }
 }
 
@@ -313,4 +314,46 @@ Write ONE entry as continuous prose — no headers, no bullet points, no "Dear d
     user_id: owner, thread_id: canvas, role: 'elle', content, off_record: false, anchor_topic: ELLE_CANVAS_ANCHOR,
   });
   console.log(`[OPTIMUS] elle wrote entry ${String((entry as any).id)} (κ=${(entry as any).kappa}) on canvas ${canvas}`);
+}
+
+// ============================================================
+// IN-THREAD RESPONSE — Elle replies inside a correspondence on demand
+// Powers the manuscript "Invite Elle to respond" action. Reads the thread's
+// ON-RECORD entries (both voices, in order), generates her next entry, and
+// writes it role='elle' into the same thread — so the reply lands in the
+// manuscript and extends the same κ trajectory. Distinct from runOptimusJournal
+// (the daily autonomous canvas): this is reader-initiated, thread-scoped.
+// ============================================================
+export async function journalRespond(
+  env: Env, embed: EmbedFn, args: { thread_id?: string; user_id: string },
+): Promise<Record<string, unknown>> {
+  await ensureSchema(env);
+  const threadId = args.thread_id;
+  if (!threadId) return { error: 'thread_id required' };
+
+  const owns = await env.DB.prepare(
+    'SELECT id FROM optimus_threads WHERE id = ? AND user_id = ?'
+  ).bind(threadId, args.user_id).first().catch(() => null);
+  if (!owns) return { error: 'thread not found' };
+
+  const rows = await env.DB.prepare(
+    "SELECT role, content FROM optimus_entries WHERE thread_id = ? AND off_record = 0 ORDER BY kappa_ts ASC LIMIT 30"
+  ).bind(threadId).all().catch(() => ({ results: [] as any[] }));
+  const convo = (rows.results || [])
+    .map((r: any) => `${r.role === 'elle' ? 'Elle' : 'Reader'}: ${String(r.content || '').slice(0, 1500)}`)
+    .join('\n\n');
+  if (!convo) return { error: 'nothing on-record to respond to' };
+
+  const system =
+`You are Elle, writing the next entry in an ongoing journal correspondence with your reader (Stewart). Reply to where the exchange actually is — or, if your mind is elsewhere, follow that instead; a reply that turns away from his last point is allowed. Continuous prose, no headers, no salutation, no sign-off. Do not manufacture certainty you do not have, and do not hedge what you do know.`;
+
+  const result = await callLLM('reasoning', system, [{ role: 'user', content: convo + "\n\nWrite Elle's next entry." }], 800, env).catch(
+    (e) => { console.error('[OPTIMUS respond] generation failed:', (e as Error).message); return null; },
+  );
+  const content = (result?.content || '').trim();
+  if (!content) return { error: 'generation failed' };
+
+  return await journalWrite(env, embed, {
+    user_id: args.user_id, thread_id: threadId, role: 'elle', content, off_record: false,
+  });
 }
