@@ -59,13 +59,25 @@ const RAPID_AI_URL = 'https://rapid2ai-ai-worker.sbarteau2022.workers.dev';
 //   tables, so a public scoped door must never touch it. RAPID's own data
 //   lives behind query_rapid2ai.
 type Scope = 'full' | 'hospitality';
-const HOSPITALITY_TOOLS = new Set(['query_rapid2ai', 'web_search', 'fetch_url', 'code_engine']);
+const HOSPITALITY_TOOLS = new Set(['query_rapid2ai', 'rapid_data', 'web_search', 'fetch_url', 'code_engine']);
 function toolAllowed(scope: Scope, name: string): boolean {
   return scope === 'full' ? true : HOSPITALITY_TOOLS.has(name);
 }
 
 const HOSPITALITY_CATALOG = `
 query_rapid2ai(question) — your gateway to the operator's OWN data: US Foods invoices + Square POS. Ask precise, analytical plain-English questions ("food cost % by category last 3 months", "items whose unit cost rose >10% vs prior month", "weekly sales for ribeye, last 12 weeks"). This is your primary instrument.
+rapid_data(tool, args?) — STRUCTURED numeric data straight from the operator's DB (use this when you need exact figures to compute on). tool is one of:
+   • get_financials — canonical food cost % + gross margin + net sales + purchases, trailing 28 & 90 days. USE FOR ANY margin / COGS / food-cost question. (no args)
+   • sales_summary {days} — gross/net sales, tax, tips, covers, avg check.
+   • sales_trend {days} — day-by-day net/gross sales + covers (use as the series for forecasting).
+   • top_purchases {days,limit} — top spend by product, qty-weighted unit price.
+   • price_variance {days,limit,product?} — biggest price swings (wavg/min/max/% swing) = COST VARIANCE.
+   • price_history {product} — per-delivery unit-price history for one product.
+   • vendor_spend {days} — invoiced spend by vendor.
+   • top_menu_items {days,limit} — best-selling menu items by revenue.
+   • suggested_pars — weekly par levels from 8-wk deliveries.
+   • run_sql {sql} — read-only SELECT escape hatch (venue-scoped).
+   Returns rows + provenance. Reason, cross-reference, and forecast over these numbers — do the cost%/margin/variance interpretation yourself; never invent figures.
 web_search(q) — outside world only: commodity/ingredient prices, supplier news, seasonality.
 fetch_url(url) — fetch one http(s) page.
 code_engine(action,task?,code?,language?,context?) — analyze|generate data-analysis logic.
@@ -269,6 +281,18 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
       case 'query_rapid2ai': {
         const question = String(a.question || a.q || a.query || '');
         const r = await fetch(`${RAPID_AI_URL}/query`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
+        return clip(`HTTP ${r.status}\n` + (await r.text()));
+      }
+      case 'rapid_data': {
+        const toolName = String(a.tool || a.name || '').trim();
+        const toolArgs = (a.args && typeof a.args === 'object') ? a.args : {};
+        if (!toolName) return 'rapid_data needs a "tool" name (e.g. get_financials, price_variance, sales_trend)';
+        const r = await fetch(`${RAPID_AI_URL}/tool`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: toolName, args: toolArgs }) });
+        if (r.status === 404) {
+          // /tool not deployed on the worker yet — degrade to the NL endpoint so this still works.
+          const r2 = await fetch(`${RAPID_AI_URL}/query`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: `Run the ${toolName} analysis with ${JSON.stringify(toolArgs)}` }) });
+          return clip(`(via /query fallback) HTTP ${r2.status}\n` + (await r2.text()));
+        }
         return clip(`HTTP ${r.status}\n` + (await r.text()));
       }
       case 'ingest_paper': {
