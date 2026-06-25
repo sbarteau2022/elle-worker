@@ -711,6 +711,28 @@ export default {
       return handleConversation(body, env, 'widget', 'conversation');
     }
 
+    // RAPID / Atlas consumer door — public, rate-limited, HOSPITALITY-SCOPED.
+    // Runs the tool router but only the data tools (query_rapid2ai, web,
+    // fetch_url, code_engine). Corpus + journal/phase GEOMETRY are unreachable
+    // here by construction (see Scope in router.ts). Returns { content } so the
+    // existing widget/Atlas client parses it unchanged.
+    if (path === '/api/atlas') {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rlKey = `atlas-rl:${ip}`;
+      const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+      if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
+      await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
+      const ab = body as { query?: string; q?: string; max_steps?: number };
+      const q = String(ab.query || ab.q || '').trim();
+      if (!q) return err('query required');
+      const out = await runRouter(q, env, {
+        embed, ragSearch, recallPastConversations,
+        handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
+        journalWrite, journalRead, journalThread, journalAnnotate,
+      }, { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: 'atlas' });
+      return json({ content: out.answer, trace: out.trace, steps: out.steps });
+    }
+
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env, request);
     if (path === '/api/elle-oauth') return handleOAuth(body, env);
     if (path === '/api/contact')   return handleContact(body, env);
