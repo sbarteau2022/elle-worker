@@ -352,7 +352,12 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
-      const obs = await runTool(parsed.tool, args, env, deps, ctxUserId, scope);
+      let obs: string;
+      try {
+        obs = await runTool(parsed.tool, args, env, deps, ctxUserId, scope);
+      } catch (e) {
+        obs = `tool error (${parsed.tool}): ${e instanceof Error ? e.message : String(e)}`;
+      }
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800) });
       messages.push({ role: 'assistant', content: JSON.stringify({ tool: parsed.tool, args }) });
       messages.push({ role: 'user', content: `OBSERVATION (${parsed.tool}):\n${obs}` });
