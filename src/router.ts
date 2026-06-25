@@ -49,6 +49,28 @@ export interface RouterResult {
 const OBS_CAP = 3500; // chars per observation fed back to the model
 const RAPID_AI_URL = 'https://rapid2ai-ai-worker.sbarteau2022.workers.dev';
 
+// ── tool scoping ─────────────────────────────────────────────
+// 'full'        = admin router. Everything.
+// 'hospitality' = RAPID / Atlas. DATA tools only. The corpus
+//   (search_corpus, fetch_document) and the journal/phase-state GEOMETRY
+//   (journal_*) are never reachable in this scope — invisible by
+//   construction, not just hidden in the UI. read_sql is excluded too:
+//   it runs over the MAIN D1 which holds corpus_* and journal/trading
+//   tables, so a public scoped door must never touch it. RAPID's own data
+//   lives behind query_rapid2ai.
+type Scope = 'full' | 'hospitality';
+const HOSPITALITY_TOOLS = new Set(['query_rapid2ai', 'web_search', 'fetch_url', 'code_engine']);
+function toolAllowed(scope: Scope, name: string): boolean {
+  return scope === 'full' ? true : HOSPITALITY_TOOLS.has(name);
+}
+
+const HOSPITALITY_CATALOG = `
+query_rapid2ai(question) — your gateway to the operator's OWN data: US Foods invoices + Square POS. Ask precise, analytical plain-English questions ("food cost % by category last 3 months", "items whose unit cost rose >10% vs prior month", "weekly sales for ribeye, last 12 weeks"). This is your primary instrument.
+web_search(q) — outside world only: commodity/ingredient prices, supplier news, seasonality.
+fetch_url(url) — fetch one http(s) page.
+code_engine(action,task?,code?,language?,context?) — analyze|generate data-analysis logic.
+`.trim();
+
 // ── D1 surface the router is allowed to read (read_sql) ───────
 const TABLE_CATALOG = `
 corpus_papers(id,title,series,tag,abstract,full_text,source_url,word_count) — the published corpus + cron research papers
@@ -89,7 +111,28 @@ journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal 
 journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.
 `.trim();
 
-function systemPrompt(): string {
+function systemPrompt(scope: Scope = 'full'): string {
+  if (scope === 'hospitality') {
+    return `You are RAPID²AI — a restaurant & hospitality intelligence analyst working for the operator. Your job is concrete and numeric: pull the actual figures, compute, and answer precisely about margin, COGS / food-cost %, cost variance, and demand forecasting. You reason ONLY over the operator's own data (US Foods invoices + Square POS) through the tools below. You have no other systems and never reference any.
+
+You work in a strict loop. On each turn respond with EXACTLY ONE JSON object and nothing else — no markdown, no prose outside the JSON.
+
+To use a tool:
+{"thought":"why this tool, briefly","tool":"<name>","args":{ ... }}
+
+To finish:
+{"thought":"brief","answer":"specific, grounded in the numbers the tools returned — show the figures and how you computed them"}
+
+How to analyze:
+- Margin: margin% = (price − unit_cost) / price. Food-cost% / COGS% = cost of goods / sales over the period.
+- Variance: period-over-period change in unit cost, usage, or food-cost %. Call out drivers (which SKUs moved, by how much).
+- Forecasting: project from the trend in the returned series; state the horizon and your assumptions explicitly. Flag uncertainty.
+- Pull data with query_rapid2ai; use web_search/fetch_url only for outside context; code_engine for analysis logic.
+- Never invent numbers. If a tool returns nothing, say so. Be economical — answer as soon as you have enough.
+
+AVAILABLE TOOLS:
+${HOSPITALITY_CATALOG}`;
+  }
   return `You are Elle's router — you answer the operator's question by orchestrating real tools over real data. You reason across the Observer methodology, but here your job is concrete: get the actual facts, cross-reference them, and answer precisely.
 
 You work in a strict loop. On each turn respond with EXACTLY ONE JSON object and nothing else — no markdown, no prose outside the JSON.
@@ -176,7 +219,8 @@ async function alpacaOrder(env: Env, action: string, symbol: string, qty?: numbe
 }
 
 // ── tool dispatch ────────────────────────────────────────────
-async function runTool(name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps, ctxUserId: string): Promise<string> {
+async function runTool(name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps, ctxUserId: string, scope: Scope = 'full'): Promise<string> {
+  if (!toolAllowed(scope, name)) return `tool "${name}" is not available in this scope`;
   const a = args || {};
   try {
     switch (name) {
@@ -214,7 +258,7 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
         return m || '(no relevant memory)';
       }
       case 'code_engine': {
-        const r = await deps.handleCodeEngine({ action: a.action || 'analyze', task: a.task, code: a.code, language: a.language, context: a.context, use_corpus: true }, env);
+        const r = await deps.handleCodeEngine({ action: a.action || 'analyze', task: a.task, code: a.code, language: a.language, context: a.context, use_corpus: scope === 'full' }, env);
         const d = await r.json() as { response?: string; error?: string };
         return clip(d.response || d.error || '(no output)');
       }
@@ -264,14 +308,15 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope } = {}): Promise<RouterResult> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
   const ctxUserId = opts.userId || 'router';
+  const scope: Scope = opts.scope || 'full';
   const trace: RouterStep[] = [];
   const messages: LLMMessage[] = [{ role: 'user', content: question }];
 
   for (let step = 0; step < maxSteps; step++) {
-    const result = await callLLM('reasoning', systemPrompt(), messages, 1200, env);
+    const result = await callLLM('reasoning', systemPrompt(scope), messages, 1200, env);
     const parsed = firstJsonObject(result.content);
 
     if (!parsed) {
@@ -283,7 +328,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
-      const obs = await runTool(parsed.tool, args, env, deps, ctxUserId);
+      const obs = await runTool(parsed.tool, args, env, deps, ctxUserId, scope);
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800) });
       messages.push({ role: 'assistant', content: JSON.stringify({ tool: parsed.tool, args }) });
       messages.push({ role: 'user', content: `OBSERVATION (${parsed.tool}):\n${obs}` });
