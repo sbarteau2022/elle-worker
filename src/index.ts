@@ -776,20 +776,24 @@ export default {
 
     // Natural-language router — admin only. One question → the LLM orchestrates
     // every capability (corpus, SQL, web, code, trading, RAPID²AI) and answers.
-    if (path === '/api/elle-router') {
-      if (!svc) return err('Unauthorized', 401);
-      const rb = body as { q?: string; query?: string; max_steps?: number };
-      const q = String(rb.q || rb.query || '').trim();
-      if (!q) return err('q (question) required');
-      const routerUser = await getUser(request, env);
-      const out = await runRouter(q, env, {
-        embed, ragSearch, recallPastConversations,
-        handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
-        journalWrite, journalRead, journalThread, journalAnnotate,
-      }, { maxSteps: Number(rb.max_steps) || 6, userId: routerUser?.id || 'superadmin' });
-      return json(out);
-    }
-
+   if (path === '/api/elle-router') {
+  if (!svc) return err('Unauthorized', 401);
+  const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string };
+  const q = String(rb.q || rb.query || '').trim();
+  if (!q) return err('q (question) required');
+  const routerUser = await getUser(request, env);
+  const out = await runRouter(q, env, {
+    embed, ragSearch, recallPastConversations,
+    handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
+    journalWrite, journalRead, journalThread, journalAnnotate,
+  }, {
+    maxSteps: Number(rb.max_steps) || 6,
+    userId: routerUser?.id || 'superadmin',
+    sessionId: rb.session_id || null,   // NEW
+    source: 'elle-router',              // NEW
+  });
+  return json(out);
+}
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
       return handleCodeEngine(body, env);
