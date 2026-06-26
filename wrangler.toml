@@ -1,6 +1,11 @@
 name = "elle-worker"
 main = "src/index.ts"
-compatibility_date = "2026-06-26"
+# Must be <= the latest compatibility date the Cloudflare runtime has released
+# (the bundled workerd is 1.20260625 → max supported date is 2026-06-25). A date
+# set to "today" (2026-06-26) is newer than the released runtime, so `wrangler
+# deploy` is rejected by the API even though `--dry-run` (no API validation)
+# passes — that was the Workers Builds "Deployment failed" on this project.
+compatibility_date = "2026-06-25"
 compatibility_flags = ["nodejs_compat"]
 
 [ai]
