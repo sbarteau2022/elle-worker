@@ -370,7 +370,16 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   };
 
   for (let step = 0; step < maxSteps; step++) {
-    const result = await callLLM('reasoning', systemPrompt(scope), messages, 2048, env);
+    // Model router first. If the whole provider chain is unreachable, degrade to a
+    // clean message instead of throwing — the route handler would otherwise turn
+    // the throw into a 500 (a "load or request failure") for the dev console.
+    let result;
+    try {
+      result = await callLLM('reasoning', systemPrompt(scope), messages, 2048, env);
+    } catch (e) {
+      console.error('[ROUTER] model layer unreachable:', (e as Error).message);
+      return finish('I could not reach a model to work through that just now. Give it a moment and try again.', step);
+    }
     const parsed = firstJsonObject(result.content);
 
     if (!parsed) {
@@ -404,9 +413,15 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   }
 
   // Steps exhausted — force a synthesis from what we gathered.
-  const final = await callLLM('reasoning',
-    'Give your final answer now as a single JSON object: {"answer":"..."}. Ground it strictly in the observations so far. If the evidence is incomplete, say what is missing.',
-    messages, 2048, env);
+  let final;
+  try {
+    final = await callLLM('reasoning',
+      'Give your final answer now as a single JSON object: {"answer":"..."}. Ground it strictly in the observations so far. If the evidence is incomplete, say what is missing.',
+      messages, 2048, env);
+  } catch (e) {
+    console.error('[ROUTER] final synthesis model call failed:', (e as Error).message);
+    return finish('I gathered what I could but could not reach a model to synthesize the final answer. Try again in a moment.', maxSteps);
+  }
   const fj = firstJsonObject(final.content);
   const synthesized = (fj && typeof fj.answer === 'string')
     ? fj.answer
