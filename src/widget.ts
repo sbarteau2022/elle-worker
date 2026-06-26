@@ -44,7 +44,10 @@ css.textContent = '\\
 .elw-m.user{align-self:flex-end;background:'+ACCENT+'1f;border:1px solid '+ACCENT+'38;color:#F5F0E8;border-bottom-right-radius:4px}\\
 .elw-m.err{color:#e08585}\\
 .elw-think-btn{align-self:flex-start;background:none;border:1px solid '+ACCENT+'30;border-radius:6px;color:'+ACCENT+';font-size:10px;font-family:"JetBrains Mono",monospace;padding:2px 8px;cursor:pointer;margin:-4px 0 0 2px}\\
-.elw-think{align-self:flex-start;max-width:86%;font-size:11px;font-family:"JetBrains Mono",monospace;color:#F5F0E877;background:rgba(245,240,232,.03);border:1px solid '+ACCENT+'1a;border-radius:8px;padding:8px 11px;line-height:1.6;white-space:pre-wrap;max-height:180px;overflow-y:auto}\\
+.elw-think{align-self:flex-start;max-width:86%;font-size:11px;font-family:"JetBrains Mono",monospace;color:#F5F0E877;background:rgba(245,240,232,.03);border:1px solid '+ACCENT+'1a;border-radius:8px;padding:8px 11px;line-height:1.6;white-space:pre-wrap;max-height:180px;overflow-y:auto}\
+.elw-acts{align-self:flex-start;display:flex;gap:6px;flex-wrap:wrap;margin:-3px 0 2px 2px}\
+.elw-act{background:none;border:1px solid '+ACCENT+'30;border-radius:6px;color:'+ACCENT+';font-size:10px;font-family:"JetBrains Mono",monospace;padding:3px 9px;cursor:pointer;transition:background .12s}\
+.elw-act:hover{background:'+ACCENT+'1f}\\
 .elw-typing{align-self:flex-start;display:flex;gap:4px;padding:12px 14px}\\
 .elw-typing i{width:5px;height:5px;border-radius:50%;background:'+ACCENT+';animation:elwB 1.2s infinite}\\
 .elw-typing i:nth-child(2){animation-delay:.15s}.elw-typing i:nth-child(3){animation-delay:.3s}\\
@@ -100,6 +103,49 @@ function addThinking(t){
   msgs.appendChild(b); msgs.appendChild(box);
 }
 
+// ── Artifacts: every Elle answer can be saved, printed, or emailed straight
+// from the chat surface. All client-side — no extra server round-trip.
+function stamp(){ var d=new Date(); function p(n){return (n<10?'0':'')+n;} return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes()); }
+
+function saveArtifact(text){
+  try {
+    var blob = new Blob([text], { type:'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'elle-' + stamp() + '.txt';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 0);
+  } catch(e){}
+}
+
+function printArtifact(text){
+  var w = window.open('', '_blank');
+  if (!w){ return; }
+  var esc = String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Elle</title><style>body{font:14px/1.7 Georgia,serif;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 24px;white-space:pre-wrap}h1{font:600 12px monospace;color:#888;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid #ddd;padding-bottom:8px}</style></head><body><h1>Elle \\u00b7 '+new Date().toLocaleString()+'</h1>'+esc+'</body></html>');
+  w.document.close(); w.focus();
+  setTimeout(function(){ try{ w.print(); }catch(e){} }, 250);
+}
+
+function emailArtifact(text){
+  var subject = 'Elle \\u2014 ' + stamp();
+  var body = String(text);
+  if (body.length > 1800) body = body.slice(0,1800) + '\\n\\n[\\u2026truncated \\u2014 use Save for the full text]';
+  window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+}
+
+function addArtifactActions(text){
+  if (!text) return;
+  var row = document.createElement('div');
+  row.className = 'elw-acts';
+  function mk(label, fn){ var b=document.createElement('button'); b.className='elw-act'; b.type='button'; b.textContent=label; b.onclick=fn; row.appendChild(b); }
+  mk('\\u2193 save',  function(){ saveArtifact(text); });
+  mk('\\u2399 print', function(){ printArtifact(text); });
+  mk('\\u2709 email', function(){ emailArtifact(text); });
+  msgs.appendChild(row);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
 function setTyping(on){
   var t = msgs.querySelector('.elw-typing');
   if (on && !t){ t = document.createElement('div'); t.className='elw-typing'; t.innerHTML='<i></i><i></i><i></i>'; msgs.appendChild(t); msgs.scrollTop = msgs.scrollHeight; }
@@ -125,6 +171,7 @@ function send(){
     if (res.d.thinking) addThinking(res.d.thinking);
     var content = res.d.content || res.d.response || '';
     addMsg('elle', content);
+    addArtifactActions(content);   // save / print / email this answer
     history.push({ role:'assistant', content: content });
   }).catch(function(){ setTyping(false); addMsg('elle','Connection failed. Try again.','err'); })
   .finally(function(){ loading = false; sendBtn.disabled = false; ta.focus(); });
