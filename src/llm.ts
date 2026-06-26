@@ -12,10 +12,14 @@
 //   LLM_OPENROUTER_KEY     = sk-or-v1-...       (openrouter.ai)
 //   LLM_GEMINI_KEY         = AIza...             (aistudio.google.com)
 //   LLM_GROK_KEY           = xai-...             (console.x.ai — optional)
-//   LLM_MODEL_PRIMARY      = nvidia/nemotron-3-ultra-550b-a55b:free
+//   LLM_MODEL_PRIMARY      = nvidia/llama-3.1-nemotron-ultra-253b-v1:free
 //   LLM_MODEL_FAST         = meta-llama/llama-3.3-70b-instruct:free
 //   LLM_MODEL_CODE         = qwen/qwen3-coder:free
-//   LLM_MODEL_REASONING    = gemini-2.5-flash-preview-05-20
+//   LLM_MODEL_REASONING    = gemini-2.5-flash
+//
+// NOTE: model ids are validated/remapped through normalizeModel() below, so a
+// stale or invalid id in a Worker secret (e.g. a Nemotron id OpenRouter 404s on)
+// is corrected at call time instead of taking the whole conversation path down.
 // ============================================================
 
 export interface LLMEnv {
@@ -46,11 +50,34 @@ export interface LLMResponse {
 }
 
 // ── Model name helpers ────────────────────────────────────────
+// Defaults are the live, currently-valid ids for each tier.
+const DEFAULT_PRIMARY   = 'nvidia/llama-3.1-nemotron-ultra-253b-v1:free';
+const DEFAULT_FAST      = 'meta-llama/llama-3.3-70b-instruct:free';
+const DEFAULT_CODE      = 'qwen/qwen3-coder:free';
+const DEFAULT_REASONING = 'gemini-2.5-flash';
+
+// Known-dead / legacy model ids that a stale Worker secret may still carry.
+// They are remapped to the live id at call time so a bad secret can never take
+// the conversation path down — the single biggest cause of "load or request
+// failure" in the chat + dev console.
+const MODEL_ALIASES: Record<string, string> = {
+  'nvidia/nemotron-3-ultra-550b-a55b:free': DEFAULT_PRIMARY,
+  'nvidia/nemotron-3-ultra-550b-a55b':      DEFAULT_PRIMARY,
+  'gemini-2.5-flash-preview-05-20':         DEFAULT_REASONING,
+  'gemini-2.5-flash-preview':               DEFAULT_REASONING,
+  'gemini-1.5-flash':                       DEFAULT_REASONING,
+};
+
+function normalizeModel(id: string | undefined, fallback: string): string {
+  const v = (id || '').trim() || fallback;
+  return MODEL_ALIASES[v] || v;
+}
+
 export const MODEL = {
-  primary:   (e: LLMEnv) => e.LLM_MODEL_PRIMARY   || 'nvidia/nemotron-3-ultra-550b-a55b:free',
-  fast:      (e: LLMEnv) => e.LLM_MODEL_FAST       || 'meta-llama/llama-3.3-70b-instruct:free',
-  code:      (e: LLMEnv) => e.LLM_MODEL_CODE       || 'qwen/qwen3-coder:free',
-  reasoning: (e: LLMEnv) => e.LLM_MODEL_REASONING  || 'gemini-2.5-flash-preview-05-20',
+  primary:   (e: LLMEnv) => normalizeModel(e.LLM_MODEL_PRIMARY,   DEFAULT_PRIMARY),
+  fast:      (e: LLMEnv) => normalizeModel(e.LLM_MODEL_FAST,      DEFAULT_FAST),
+  code:      (e: LLMEnv) => normalizeModel(e.LLM_MODEL_CODE,      DEFAULT_CODE),
+  reasoning: (e: LLMEnv) => normalizeModel(e.LLM_MODEL_REASONING, DEFAULT_REASONING),
 };
 
 // ── OpenRouter (general conversation, code, fast) ─────────────
@@ -369,4 +396,51 @@ export async function callLLM(
       return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env);
     }
   }
+}
+
+// ── Response hygiene ──────────────────────────────────────────
+// Free models occasionally wrap a reply in the ReAct protocol envelope
+// ({"thought":...,"answer":"..."}) or a ```json fence even when told not to.
+// sanitizeAnswer() guarantees that NONE of that scaffolding reaches the chat
+// surface: it unwraps a known content field out of a leaked JSON object and
+// strips stray fences, returning clean prose. It is intentionally conservative
+// — if the text is already prose, it is returned untouched.
+
+// Balanced extractor: the first complete top-level {...} object in `text`.
+function firstJsonObjectFrom(text: string): Record<string, unknown> | null {
+  const s = text.replace(/```json|```/g, '');
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') { if (depth === 0) start = i; depth++; }
+    else if (c === '}') { depth--; if (depth === 0 && start !== -1) { try { return JSON.parse(s.slice(start, i + 1)); } catch { return null; } } }
+  }
+  return null;
+}
+
+export function sanitizeAnswer(raw: string): string {
+  let s = (raw || '').trim();
+  if (!s) return s;
+  // Only treat the message as a protocol envelope when the WHOLE thing is a JSON
+  // object (or a fenced one) — never unwrap prose that merely mentions braces.
+  if (s.startsWith('{') || s.startsWith('```')) {
+    const obj = firstJsonObjectFrom(s);
+    if (obj) {
+      const inner = obj.answer ?? obj.content ?? obj.response ?? obj.text ?? obj.message;
+      if (typeof inner === 'string' && inner.trim()) return inner.trim();
+      // Pure scaffolding ({"tool":...} / {"thought":...}) with no textual field:
+      // drop it entirely rather than leak the blob to the user.
+      if ('tool' in obj || 'thought' in obj || 'action' in obj) return '';
+    }
+  }
+  // Strip a stray code fence wrapping otherwise-plain prose.
+  s = s.replace(/^```(?:json|text|markdown)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  return s;
 }

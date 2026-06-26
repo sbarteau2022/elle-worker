@@ -11,7 +11,7 @@
 //   0    7  * * *  Optimus canvas (Elle's unprompted daily journal + reads reader)
 // ============================================================
 
-import { callLLM, MODEL, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
+import { callLLM, MODEL, sanitizeAnswer, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
 import { runLibreMode, handleSandbox, type LibreEnv } from './libre';
 import {
   handleDuelEngine, handleTutor, handleDoctrine,
@@ -381,18 +381,37 @@ Write in plain prose. The surface renders plain text: no markdown, no asterisks,
     history = [...stored, { role: 'user', content: userMessage }];
   }
 
-  const result = await callLLM(task, systemPrompt, history, 2048, env);
+  // Model router: callLLM picks the provider/model for this task and runs every
+  // fallback tier internally. If the whole chain still fails we return a clean,
+  // user-facing message (HTTP 200) rather than letting the throw bubble to an
+  // unhandled 500 — that 500 is what surfaces as "load or request failure".
+  let result;
+  try {
+    result = await callLLM(task, systemPrompt, history, 2048, env);
+  } catch (e) {
+    console.error('[CONVERSATION] all providers failed:', (e as Error).message);
+    return json({
+      content:    'I could not reach a model just now. Give me a moment and try again.',
+      response:   'I could not reach a model just now. Give me a moment and try again.',
+      session_id: sessionId,
+      error:      'llm_unavailable',
+    }, 200);
+  }
+
+  // Guarantee no protocol scaffolding (leaked JSON / fences) reaches the surface.
+  const clean = sanitizeAnswer(result.content) ||
+    'I could not produce a clean answer to that. Try rephrasing it.';
 
   env.DB.prepare(
     `INSERT INTO sessions (id, source, message_count) VALUES (?, ?, 1) ON CONFLICT(id) DO UPDATE SET message_count = message_count + 1, last_active = datetime('now')`
   ).bind(sessionId, src).run().catch(() => {});
 
   // Persist the exchange — fire and forget keeps response latency flat
-  await persistExchange(sessionId, src, userMessage, result.content, env);
+  await persistExchange(sessionId, src, userMessage, clean, env);
 
   return json({
-    content:        result.content,
-    response:       result.content,
+    content:        clean,
+    response:       clean,
     thinking:       result.thinking,
     search_results: result.search_results,
     session_id:     sessionId,
@@ -407,14 +426,23 @@ async function handleResearch(body: Record<string, unknown>, env: Env): Promise<
   const userQuery = query || '';
   if (!userQuery) return err('query required');
 
-  const result = await callLLM('research',
-    `You are Elle's research intelligence. Search for current, specific information. Surface bilateral suppression — what both sides avoid. Cite primary sources. Flag what you cannot verify.`,
-    [{ role: 'user', content: context ? `${userQuery}\n\nContext: ${context}` : userQuery }],
-    4096, env
-  );
+  let result;
+  try {
+    result = await callLLM('research',
+      `You are Elle's research intelligence. Search for current, specific information. Surface bilateral suppression — what both sides avoid. Cite primary sources. Flag what you cannot verify.`,
+      [{ role: 'user', content: context ? `${userQuery}\n\nContext: ${context}` : userQuery }],
+      4096, env
+    );
+  } catch (e) {
+    console.error('[RESEARCH] all providers failed:', (e as Error).message);
+    return json({ content: 'Research is unavailable right now — the model could not be reached. Try again shortly.', error: 'llm_unavailable', query: userQuery }, 200);
+  }
+
+  const clean = sanitizeAnswer(result.content);
 
   return json({
-    content:        result.content,
+    content:        clean,
+    response:       clean,
     thinking:       result.thinking,
     search_results: result.search_results,
     model:          result.model,
@@ -668,6 +696,7 @@ async function handleCorpusResolve(
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+   try {
     const url  = new URL(request.url);
     const path = url.pathname;
 
@@ -882,6 +911,13 @@ export default {
     if (path === '/api/elle-community-signals') return json({ signals: [] });
 
     return err(`Unknown endpoint: ${path}`, 404);
+   } catch (e) {
+    // Last line of defense: any uncaught error becomes a clean JSON 500 with CORS
+    // headers instead of a raw Worker exception. The chat + dev console parse this
+    // as { error } rather than failing the fetch with "load or request failure".
+    console.error('[FETCH] unhandled error:', (e as Error)?.stack || (e as Error)?.message || String(e));
+    return err((e as Error)?.message || 'Internal error', 500);
+   }
   },
 
   // ── Scheduled crons ────────────────────────────────────────
