@@ -14,7 +14,7 @@
 // read_sql, trade_execute and trigger_dream reach everything.
 // ============================================================
 
-import { callLLM, type LLMMessage } from './llm';
+import { callLLM, sanitizeAnswer, type LLMMessage } from './llm';
 import type { Env } from './index';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
@@ -359,7 +359,10 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
-  const finish = async (answer: string, steps: number): Promise<RouterResult> => {
+  // sanitizeAnswer is the final guard: even if the model slipped protocol JSON
+  // into its "answer" string, the caller only ever sees clean prose.
+  const finish = async (rawAnswer: string, steps: number): Promise<RouterResult> => {
+    const answer = sanitizeAnswer(rawAnswer) || rawAnswer;
     if (sessionId && deps.persistExchange) {
       try { await deps.persistExchange(sessionId, source, question, answer, env); } catch { /* best-effort */ }
     }
