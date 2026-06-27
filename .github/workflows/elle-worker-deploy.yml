@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Only one deploy of this worker at a time. Prevents a push and a manual
+# run (or rapid pushes) from racing two `wrangler deploy` calls against the
+# same worker, which makes one of them fail.
+concurrency:
+  group: deploy-elle-worker
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
