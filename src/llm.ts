@@ -7,6 +7,9 @@
 //   research        → Gemini 2.5 Flash (thinking + Google Search grounding)
 //   code            → Qwen3-Coder free (1M ctx, /think prefix)
 //   fast/tutor      → OpenRouter Llama 3.3 70B free
+//   LAST RESORT     → Cloudflare Workers AI (@cf/meta/llama-3.3-70b → 8b)
+//                     bound via env.AI — a free pool independent of OpenRouter,
+//                     so Elle survives an exhausted OpenRouter free tier.
 //
 // Env vars (set in Cloudflare Worker secrets):
 //   LLM_OPENROUTER_KEY     = sk-or-v1-...       (openrouter.ai)
@@ -30,6 +33,11 @@ export interface LLMEnv {
   LLM_MODEL_FAST:      string;
   LLM_MODEL_CODE:      string;
   LLM_MODEL_REASONING: string;
+  // Cloudflare Workers AI binding — an INDEPENDENT free inference pool bound
+  // directly to the worker. Used as the true last resort: when OpenRouter's
+  // shared free tier is exhausted (every :free model draws on ONE daily quota)
+  // and Gemini/Grok are unavailable, this keeps Elle answerable with no new key.
+  AI?: { run(model: string, inputs: Record<string, unknown>): Promise<unknown> };
   // Legacy fallback
   ANTHROPIC_API_KEY?:  string;
   LLM_BASE_URL?:       string;
@@ -55,6 +63,10 @@ const DEFAULT_PRIMARY   = 'nvidia/llama-3.1-nemotron-ultra-253b-v1:free';
 const DEFAULT_FAST      = 'meta-llama/llama-3.3-70b-instruct:free';
 const DEFAULT_CODE      = 'qwen/qwen3-coder:free';
 const DEFAULT_REASONING = 'gemini-2.5-flash';
+// Cloudflare Workers AI — separate free pool, no external key. 70B first, then
+// the cheap 8B if the larger model is over its neuron budget.
+const DEFAULT_WORKERS_AI = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const WORKERS_AI_SMALL   = '@cf/meta/llama-3.1-8b-instruct';
 
 // Known-dead / legacy model ids that a stale Worker secret may still carry.
 // They are remapped to the live id at call time so a bad secret can never take
@@ -279,6 +291,34 @@ export async function callGrok(
   };
 }
 
+// ── Cloudflare Workers AI — independent free pool, no external key ─────────────
+// OpenAI-style messages in, { response } out. Bound to the worker via env.AI, so
+// it has a SEPARATE free allocation from OpenRouter — the only fallback that
+// still works when OpenRouter's whole free tier is rate-limited for the day.
+export async function callWorkersAI(
+  system: string,
+  messages: LLMMessage[],
+  maxTokens: number,
+  env: LLMEnv,
+  model: string = DEFAULT_WORKERS_AI,
+): Promise<LLMResponse> {
+  if (!env.AI) throw new Error('Workers AI binding (env.AI) not set');
+  const run = async (m: string): Promise<string> => {
+    const out = await env.AI!.run(m, {
+      messages: [{ role: 'system', content: system }, ...messages],
+      max_tokens: maxTokens,
+    }) as { response?: string };
+    return out?.response || '';
+  };
+  try {
+    return { content: await run(model), model, provider: 'workers-ai' };
+  } catch (e) {
+    // 70B over its neuron budget → fall to the 8B model before giving up.
+    console.error('Workers AI 70B failed, trying 8B:', (e as Error).message);
+    return { content: await run(WORKERS_AI_SMALL), model: WORKERS_AI_SMALL, provider: 'workers-ai' };
+  }
+}
+
 // ── Master router ─────────────────────────────────────────────
 // Called by all handlers. Routes to the right provider based on task.
 export type LLMTask = 'conversation' | 'reasoning' | 'research' | 'code' | 'fast' | 'trading';
@@ -308,8 +348,13 @@ export async function callLLM(
           console.error('Grok research failed, falling back:', (e as Error).message);
         }
       }
-      // Last resort: OpenRouter without search
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      // OpenRouter without search, then Workers AI (independent free pool)
+      try {
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter research fallback failed, trying Workers AI:', (e as Error).message);
+      }
+      return callWorkersAI(system, messages, maxTokens, env);
     }
 
     // Reasoning: Gemini thinking mode, no search
@@ -321,7 +366,12 @@ export async function callLLM(
           console.error('Gemini reasoning failed, falling back:', (e as Error).message);
         }
       }
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      try {
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter reasoning fallback failed, trying Workers AI:', (e as Error).message);
+      }
+      return callWorkersAI(system, messages, maxTokens, env);
     }
 
     // Code: Qwen3-Coder → Gemini → Nemotron primary. Each tier is independently
@@ -347,12 +397,22 @@ export async function callLLM(
           console.error('Grok code fallback failed, falling back to OpenRouter primary:', (e as Error).message);
         }
       }
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      try {
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter code fallback failed, trying Workers AI:', (e as Error).message);
+      }
+      return callWorkersAI(system, messages, maxTokens, env);
     }
 
-    // Fast: Llama 3.3 70B — tutor, thread summaries
+    // Fast: Llama 3.3 70B — tutor, thread summaries. Workers AI if OR is down.
     case 'fast': {
-      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env);
+      try {
+        return await callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter fast failed, trying Workers AI:', (e as Error).message);
+      }
+      return callWorkersAI(system, messages, maxTokens, env);
     }
 
     // Trading: Gemini thinking (no search — uses Alpaca data directly)
@@ -364,7 +424,12 @@ export async function callLLM(
           console.error('Gemini trading failed, falling back:', (e as Error).message);
         }
       }
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      try {
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter trading fallback failed, trying Workers AI:', (e as Error).message);
+      }
+      return callWorkersAI(system, messages, maxTokens, env);
     }
 
     // Conversation: Nemotron Ultra free — primary voice of Elle.
@@ -391,9 +456,16 @@ export async function callLLM(
           console.error('Grok conversation fallback failed, falling back to Llama:', (e as Error).message);
         }
       }
-      // Last resort: Llama 3.3 70B — a separate free pool from Nemotron, so Elle
-      // stays queryable even when the primary, Gemini, and Grok are all unavailable.
-      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env);
+      // Llama 3.3 70B — a separate OpenRouter model, but the SAME shared free
+      // quota, so it also fails once OpenRouter's free tier is spent for the day.
+      try {
+        return await callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env);
+      } catch (e) {
+        console.error('OpenRouter fast (llama) failed, falling back to Workers AI:', (e as Error).message);
+      }
+      // True last resort: Cloudflare Workers AI — an independent free pool, so
+      // Elle stays answerable even when every OpenRouter free model is exhausted.
+      return callWorkersAI(system, messages, maxTokens, env);
     }
   }
 }
