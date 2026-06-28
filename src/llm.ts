@@ -23,6 +23,10 @@
 //   LLM_OLLAMA_KEY         = <bearer>                      (optional, if gated)
 //   LLM_MODEL_OLLAMA       = llama3.3:70b                  (70B instruct)
 //
+// Universal safety net (always on, no config) — Cloudflare Workers AI bound via
+// env.AI: a free pool independent of OpenRouter, tried when every hosted free
+// tier AND the optional Ollama box are exhausted. @cf/meta/llama-3.3-70b → 8b.
+//
 // NOTE: model ids are validated/remapped through normalizeModel() below, so a
 // stale or invalid id in a Worker secret (e.g. a Nemotron id OpenRouter 404s on)
 // is corrected at call time instead of taking the whole conversation path down.
@@ -41,6 +45,11 @@ export interface LLMEnv {
   LLM_OLLAMA_URL?:     string;
   LLM_OLLAMA_KEY?:     string;
   LLM_MODEL_OLLAMA?:   string;
+  // Cloudflare Workers AI binding — an INDEPENDENT free inference pool bound
+  // directly to the worker. The universal safety net: when OpenRouter's shared
+  // free tier is exhausted (every :free model draws on ONE daily quota) and
+  // Gemini/Grok/Ollama are unavailable, this keeps Elle answerable with no key.
+  AI?: { run(model: string, inputs: Record<string, unknown>): Promise<unknown> };
   // Legacy fallback
   ANTHROPIC_API_KEY?:  string;
   LLM_BASE_URL?:       string;
@@ -67,6 +76,10 @@ const DEFAULT_FAST      = 'meta-llama/llama-3.3-70b-instruct:free';
 const DEFAULT_CODE      = 'qwen/qwen3-coder:free';
 const DEFAULT_REASONING = 'gemini-2.5-flash';
 const DEFAULT_OLLAMA    = 'llama3.3:70b'; // 70B instruct; override per host with LLM_MODEL_OLLAMA
+// Cloudflare Workers AI — separate free pool, no external key. 70B first, then
+// the cheap 8B if the larger model is over its neuron budget.
+const DEFAULT_WORKERS_AI = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const WORKERS_AI_SMALL   = '@cf/meta/llama-3.1-8b-instruct';
 
 // Known-dead / legacy model ids that a stale Worker secret may still carry.
 // They are remapped to the live id at call time so a bad secret can never take
@@ -342,6 +355,34 @@ export async function callOllama(
   return { content, thinking, model, provider: 'ollama' };
 }
 
+// ── Cloudflare Workers AI — independent free pool, no external key ─────────────
+// OpenAI-style messages in, { response } out. Bound to the worker via env.AI, so
+// it has a SEPARATE free allocation from OpenRouter — the only fallback that
+// still works when OpenRouter's whole free tier is rate-limited for the day.
+export async function callWorkersAI(
+  system: string,
+  messages: LLMMessage[],
+  maxTokens: number,
+  env: LLMEnv,
+  model: string = DEFAULT_WORKERS_AI,
+): Promise<LLMResponse> {
+  if (!env.AI) throw new Error('Workers AI binding (env.AI) not set');
+  const run = async (m: string): Promise<string> => {
+    const out = await env.AI!.run(m, {
+      messages: [{ role: 'system', content: system }, ...messages],
+      max_tokens: maxTokens,
+    }) as { response?: string };
+    return out?.response || '';
+  };
+  try {
+    return { content: await run(model), model, provider: 'workers-ai' };
+  } catch (e) {
+    // 70B over its neuron budget → fall to the 8B model before giving up.
+    console.error('Workers AI 70B failed, trying 8B:', (e as Error).message);
+    return { content: await run(WORKERS_AI_SMALL), model: WORKERS_AI_SMALL, provider: 'workers-ai' };
+  }
+}
+
 // ── Master router ─────────────────────────────────────────────
 // Called by all handlers. Routes to the right provider based on task.
 export type LLMTask = 'conversation' | 'reasoning' | 'research' | 'code' | 'fast' | 'trading';
@@ -361,9 +402,21 @@ export async function callLLM(
     return await routeLLM(task, system, messages, maxTokens, env);
   } catch (e) {
     const msg = (e as Error).message;
+    // 1) Self-hosted Ollama 70B first when configured — the user's own box, no
+    //    quota and best quality. If it errors, fall through to Workers AI.
     if (env.LLM_OLLAMA_URL) {
-      console.error(`All hosted providers failed for ${task}; falling back to Ollama:`, msg);
-      return callOllama(MODEL.ollama(env), system, messages, maxTokens, env);
+      try {
+        console.error(`All hosted providers failed for ${task}; falling back to Ollama:`, msg);
+        return await callOllama(MODEL.ollama(env), system, messages, maxTokens, env);
+      } catch (e2) {
+        console.error('Ollama fallback failed, trying Workers AI:', (e2 as Error).message);
+      }
+    }
+    // 2) Cloudflare Workers AI — the always-on free safety net (independent of
+    //    OpenRouter's quota), so a request never dead-ends as a load failure.
+    if (env.AI) {
+      console.error(`Falling back to Workers AI for ${task}:`, msg);
+      return callWorkersAI(system, messages, maxTokens, env);
     }
     throw e;
   }
