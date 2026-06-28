@@ -51,7 +51,7 @@ export interface LLMResponse {
 
 // ── Model name helpers ────────────────────────────────────────
 // Defaults are the live, currently-valid ids for each tier.
-const DEFAULT_PRIMARY   = 'nvidia/llama-3.1-nemotron-ultra-253b-v1:free';
+const DEFAULT_PRIMARY   = 'meta-llama/llama-3.3-70b-instruct:free';
 const DEFAULT_FAST      = 'meta-llama/llama-3.3-70b-instruct:free';
 const DEFAULT_CODE      = 'qwen/qwen3-coder:free';
 const DEFAULT_REASONING = 'gemini-2.5-flash';
@@ -61,6 +61,10 @@ const DEFAULT_REASONING = 'gemini-2.5-flash';
 // the conversation path down — the single biggest cause of "load or request
 // failure" in the chat + dev console.
 const MODEL_ALIASES: Record<string, string> = {
+  // Retired OpenRouter free model — returned 404 "No endpoints found" and took
+  // the whole conversation/reasoning chain down. Remap to the live primary.
+  'nvidia/llama-3.1-nemotron-ultra-253b-v1:free': DEFAULT_PRIMARY,
+  'nvidia/llama-3.1-nemotron-ultra-253b-v1':      DEFAULT_PRIMARY,
   'nvidia/nemotron-3-ultra-550b-a55b:free': DEFAULT_PRIMARY,
   'nvidia/nemotron-3-ultra-550b-a55b':      DEFAULT_PRIMARY,
   'gemini-2.5-flash-preview-05-20':         DEFAULT_REASONING,
@@ -106,7 +110,7 @@ export async function callOpenRouter(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${key}`,
       'HTTP-Referer': 'https://elle.sbarteau2022.workers.dev',
-      'X-Title': 'Elle — Observer Foundation',
+      'X-Title': 'Elle - Observer Foundation',
     },
     body: JSON.stringify({
       model,
