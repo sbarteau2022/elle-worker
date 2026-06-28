@@ -17,6 +17,12 @@
 //   LLM_MODEL_CODE         = qwen/qwen3-coder:free
 //   LLM_MODEL_REASONING    = gemini-2.5-flash
 //
+// Self-hosted last resort — used ONLY when every hosted free tier above is
+// rate-limited/exhausted at once (see callLLM):
+//   LLM_OLLAMA_URL         = https://<your-ollama-host>   (e.g. a CF Tunnel)
+//   LLM_OLLAMA_KEY         = <bearer>                      (optional, if gated)
+//   LLM_MODEL_OLLAMA       = llama3.3:70b                  (70B instruct)
+//
 // NOTE: model ids are validated/remapped through normalizeModel() below, so a
 // stale or invalid id in a Worker secret (e.g. a Nemotron id OpenRouter 404s on)
 // is corrected at call time instead of taking the whole conversation path down.
@@ -30,6 +36,11 @@ export interface LLMEnv {
   LLM_MODEL_FAST:      string;
   LLM_MODEL_CODE:      string;
   LLM_MODEL_REASONING: string;
+  // Self-hosted Ollama last resort (optional). When LLM_OLLAMA_URL is unset the
+  // fallback is skipped and the original hosted-provider error is surfaced.
+  LLM_OLLAMA_URL?:     string;
+  LLM_OLLAMA_KEY?:     string;
+  LLM_MODEL_OLLAMA?:   string;
   // Legacy fallback
   ANTHROPIC_API_KEY?:  string;
   LLM_BASE_URL?:       string;
@@ -55,6 +66,7 @@ const DEFAULT_PRIMARY   = 'nvidia/llama-3.1-nemotron-ultra-253b-v1:free';
 const DEFAULT_FAST      = 'meta-llama/llama-3.3-70b-instruct:free';
 const DEFAULT_CODE      = 'qwen/qwen3-coder:free';
 const DEFAULT_REASONING = 'gemini-2.5-flash';
+const DEFAULT_OLLAMA    = 'llama3.3:70b'; // 70B instruct; override per host with LLM_MODEL_OLLAMA
 
 // Known-dead / legacy model ids that a stale Worker secret may still carry.
 // They are remapped to the live id at call time so a bad secret can never take
@@ -78,6 +90,7 @@ export const MODEL = {
   fast:      (e: LLMEnv) => normalizeModel(e.LLM_MODEL_FAST,      DEFAULT_FAST),
   code:      (e: LLMEnv) => normalizeModel(e.LLM_MODEL_CODE,      DEFAULT_CODE),
   reasoning: (e: LLMEnv) => normalizeModel(e.LLM_MODEL_REASONING, DEFAULT_REASONING),
+  ollama:    (e: LLMEnv) => normalizeModel(e.LLM_MODEL_OLLAMA,    DEFAULT_OLLAMA),
 };
 
 // ── OpenRouter (general conversation, code, fast) ─────────────
@@ -279,11 +292,80 @@ export async function callGrok(
   };
 }
 
+// ── Ollama (self-hosted last resort) ──────────────────────────
+// Native Ollama chat API. Reached only when every hosted free tier is
+// rate-limited/exhausted (see callLLM). Requires LLM_OLLAMA_URL to point at a
+// publicly reachable Ollama server (e.g. a 70B instruct model behind a
+// Cloudflare Tunnel); LLM_OLLAMA_KEY is an optional bearer if it's gated.
+export async function callOllama(
+  model: string,
+  system: string,
+  messages: LLMMessage[],
+  maxTokens: number,
+  env: LLMEnv
+): Promise<LLMResponse> {
+  const base = (env.LLM_OLLAMA_URL || '').replace(/\/+$/, '');
+  if (!base) throw new Error('LLM_OLLAMA_URL not set');
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (env.LLM_OLLAMA_KEY) headers['Authorization'] = `Bearer ${env.LLM_OLLAMA_KEY}`;
+
+  const res = await fetch(`${base}/api/chat`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model,
+      stream: false,
+      messages: [{ role: 'system', content: system }, ...messages],
+      options: { temperature: 0.7, num_predict: maxTokens },
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
+
+  const data = await res.json() as { message?: { content?: string }; error?: string };
+  if (data.error) throw new Error(`Ollama error: ${data.error}`);
+
+  let content = data.message?.content || '';
+  let thinking: string | undefined;
+  // Reasoning models (e.g. a distilled R1 70B) wrap CoT in <think>…</think>.
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+  if (thinkMatch) {
+    thinking = thinkMatch[1].trim();
+    content = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+  }
+
+  return { content, thinking, model, provider: 'ollama' };
+}
+
 // ── Master router ─────────────────────────────────────────────
 // Called by all handlers. Routes to the right provider based on task.
 export type LLMTask = 'conversation' | 'reasoning' | 'research' | 'code' | 'fast' | 'trading';
 
+// Public entry point. Runs the hosted-provider chain for the task; if the ENTIRE
+// chain fails — typically every free tier rate-limited (429) at once — it falls
+// back to a self-hosted Ollama 70B (when LLM_OLLAMA_URL is configured) so a
+// request never dead-ends as a model-load failure.
 export async function callLLM(
+  task: LLMTask,
+  system: string,
+  messages: LLMMessage[],
+  maxTokens: number,
+  env: LLMEnv
+): Promise<LLMResponse> {
+  try {
+    return await routeLLM(task, system, messages, maxTokens, env);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (env.LLM_OLLAMA_URL) {
+      console.error(`All hosted providers failed for ${task}; falling back to Ollama:`, msg);
+      return callOllama(MODEL.ollama(env), system, messages, maxTokens, env);
+    }
+    throw e;
+  }
+}
+
+async function routeLLM(
   task: LLMTask,
   system: string,
   messages: LLMMessage[],
