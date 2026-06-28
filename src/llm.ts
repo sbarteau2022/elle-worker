@@ -413,13 +413,29 @@ export async function callLLM(
       }
     }
     // 2) Cloudflare Workers AI — the always-on free safety net (independent of
-    //    OpenRouter's quota), so a request never dead-ends as a load failure.
+    //    OpenRouter's quota). Bounded by a timeout and fully isolated: if it
+    //    errors OR runs long, we re-throw the ORIGINAL provider error so the
+    //    caller degrades gracefully (clean 200) exactly as before this fallback
+    //    existed — the safety net can only ever help, never make things worse.
     if (env.AI) {
-      console.error(`Falling back to Workers AI for ${task}:`, msg);
-      return callWorkersAI(system, messages, maxTokens, env);
+      try {
+        console.error(`Falling back to Workers AI for ${task}:`, msg);
+        return await withTimeout(callWorkersAI(system, messages, maxTokens, env), 22000);
+      } catch (e2) {
+        console.error('Workers AI fallback failed/timed out:', (e2 as Error).message);
+      }
     }
     throw e;
   }
+}
+
+// Reject a slow provider call so it can never hang the Worker into a CPU/wall
+// kill (which surfaces as an uncatchable 500). The loser is GC'd harmlessly.
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)),
+  ]);
 }
 
 async function routeLLM(
