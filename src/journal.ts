@@ -203,7 +203,18 @@ export async function handleOptimusJournal(
   body: any, env: Env, embed: EmbedFn, userId: string,
 ): Promise<Response> {
   const op = String(body?.op || '').trim();
-  const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { 'Content-Type': 'application/json' } });
+  // Must include CORS headers — the dev console calls this cross-origin, and a
+  // response without Access-Control-Allow-Origin is blocked by the browser as a
+  // "Load failed" fetch error (every other endpoint goes through index's json()).
+  const json = (d: unknown, s = 200) => new Response(JSON.stringify(d), {
+    status: s,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey',
+    },
+  });
   switch (op) {
     case 'write':    return json(await journalWrite(env, embed, { ...body, user_id: userId }));
     case 'annotate': return json(await journalAnnotate(env, body));
