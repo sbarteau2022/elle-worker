@@ -821,6 +821,10 @@ export default {
         embed, ragSearch, recallPastConversations,
         handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
         journalWrite, journalRead, journalThread, journalAnnotate,
+        // Memory: without these the router loads no prior turns and persists nothing,
+        // so every message is a cold start — she forgets who you told her to be one
+        // turn ago. These two are what make in-session steering and her continuity hold.
+        loadSessionHistory, persistExchange,
       }, {
         maxSteps: Number(rb.max_steps) || 6,
         userId: routerUser?.id || 'superadmin',
