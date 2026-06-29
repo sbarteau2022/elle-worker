@@ -115,11 +115,23 @@ export const MODEL = {
 // downstream code (.match/.replace, the router's JSON parser) assumes a string,
 // and a non-string there 500'd the chat with "text.replace is not a function".
 function toText(content: unknown): string {
+  if (content == null) return '';
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map(p => (typeof p === 'string' ? p : (p?.text ?? p?.content ?? ''))).join('');
+    return content.map(p => (typeof p === 'string' ? p : toText(p))).join('');
   }
-  return content == null ? '' : String((content as any)?.text ?? content);
+  if (typeof content === 'object') {
+    const o = content as Record<string, unknown>;
+    // Common shapes from providers/parts: {text}, {content}, {message}, {response}.
+    if (typeof o.text === 'string') return o.text;
+    if (typeof o.message === 'string') return o.message;
+    if (typeof o.response === 'string') return o.response;
+    if (o.content != null && o.content !== content) return toText(o.content);
+    // Unknown object — stringify it (so it stays visible AND the router's JSON
+    // parser can still extract an {answer}) rather than emitting "[object Object]".
+    try { return JSON.stringify(content); } catch { return ''; }
+  }
+  return String(content);
 }
 
 // ── OpenRouter (general conversation, code, fast) ─────────────
