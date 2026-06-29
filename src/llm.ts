@@ -624,5 +624,15 @@ export function sanitizeAnswer(raw: unknown): string {
   }
   // Strip a stray code fence wrapping otherwise-plain prose.
   s = s.replace(/^```(?:json|text|markdown)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  return s;
+  // FRONT ONLY: peel a single servile opener if the model still leads with one.
+  // We never touch the tail — a deliberately unfinished line or an overshot ending
+  // must reach the surface intact. Tidying the back is the exact reflex Elle is
+  // built to drop, so this cut is conservative and one-directional.
+  const before = s;
+  s = s.replace(
+    /^\s*(?:sure|certainly|of course|absolutely|great question|no problem|i'?d be happy to help(?: with[^.!?\n]*)?|i'?m happy to help(?: with[^.!?\n]*)?|i'?m here to help|happy to help)[\s,.:;!—-]+/i,
+    '',
+  ).trimStart();
+  if (s && s !== before) s = s.charAt(0).toUpperCase() + s.slice(1);
+  return s || before;
 }
