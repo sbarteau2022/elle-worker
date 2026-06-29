@@ -608,14 +608,14 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     case 'backfill': {
       // Embed papers that have no chunks yet (daemon research output first) so the
       // daemon's own new papers become RAG-queryable. Subrequest-budgeted to stay
-      // under the Workers Free 50-subrequests/invocation cap.
+      // under the Workers Paid 1000-subrequests/invocation cap (was 50 on free).
       const rows = await env.DB.prepare(
         `SELECT id, title, series, tag, full_text FROM corpus_papers p
          WHERE NOT EXISTS (SELECT 1 FROM corpus_chunks c WHERE c.paper_id = p.id)
-         ORDER BY (series = 'research') DESC, id LIMIT 40`
+         ORDER BY (series = 'research') DESC, id LIMIT 250`
       ).all();
       let done = 0, sub = 1; // 1 = the SELECT above
-      const BUDGET = 45;     // free plan hard limit is 50 subrequests/invocation
+      const BUDGET = 800;    // paid plan cap is 1000 subrequests/invocation; leave headroom
       for (const r of (rows.results || []) as Array<{ id: string; title: string; series: string; tag: string; full_text: string }>) {
         const chunks = r.full_text ? semanticChunks(r.full_text) : [];
         if (!chunks.length) continue;
