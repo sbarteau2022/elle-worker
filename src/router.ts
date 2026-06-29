@@ -179,8 +179,11 @@ ${TABLE_CATALOG}`;
 }
 
 // ── balanced JSON object extractor (first complete {...}) ─────
-function firstJsonObject(text: string): any | null {
-  const s = text.replace(/```json|```/g, '');
+function firstJsonObject(text: unknown): any | null {
+  // Defensive: a provider may hand back non-string content (e.g. an array of
+  // content parts). Coerce so .replace can never throw "text.replace is not a
+  // function" and 500 the whole router.
+  const s = String(text ?? '').replace(/```json|```/g, '');
   let depth = 0, start = -1, inStr = false, esc = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];

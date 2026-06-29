@@ -110,6 +110,18 @@ export const MODEL = {
   ollama:    (e: LLMEnv) => normalizeModel(e.LLM_MODEL_OLLAMA,    DEFAULT_OLLAMA),
 };
 
+// Coerce any provider's "content" into a plain string. Models may return a
+// string, an array of content parts ([{type:'text',text}]), null, or an object;
+// downstream code (.match/.replace, the router's JSON parser) assumes a string,
+// and a non-string there 500'd the chat with "text.replace is not a function".
+function toText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(p => (typeof p === 'string' ? p : (p?.text ?? p?.content ?? ''))).join('');
+  }
+  return content == null ? '' : String((content as any)?.text ?? content);
+}
+
 // ── OpenRouter (general conversation, code, fast) ─────────────
 // OpenAI-compatible. One key covers all free models.
 export async function callOpenRouter(
@@ -156,7 +168,10 @@ export async function callOpenRouter(
   if (data.error) throw new Error(`OpenRouter error: ${data.error.message}`);
 
   const choice = data.choices?.[0]?.message;
-  let content = choice?.content || '';
+  // Some models return content as an array of parts ([{type:'text',text}]) or
+  // null rather than a plain string. Coerce so downstream .match/.replace and
+  // the router's JSON parser never hit a non-string (which 500'd the chat).
+  let content = toText(choice?.content);
   let thinking: string | undefined;
 
   // Extract <think>...</think> block if present (Qwen3/reasoning models)
@@ -242,7 +257,7 @@ export async function callGemini(
   const thinkingParts = parts.filter(p => p.thought);
   const responseParts = parts.filter(p => !p.thought);
 
-  const content = responseParts.map(p => p.text || '').join('');
+  const content = responseParts.map(p => toText(p.text)).join('');
   const thinking = thinkingParts.length > 0
     ? thinkingParts.map(p => p.text || '').join('')
     : undefined;
@@ -302,7 +317,7 @@ export async function callGrok(
 
   const msg = data.choices?.[0]?.message;
   return {
-    content: msg?.content || '',
+    content: toText(msg?.content),
     thinking: msg?.reasoning_content,
     model,
     provider: 'grok',
@@ -343,7 +358,7 @@ export async function callOllama(
   const data = await res.json() as { message?: { content?: string }; error?: string };
   if (data.error) throw new Error(`Ollama error: ${data.error}`);
 
-  let content = data.message?.content || '';
+  let content = toText(data.message?.content);
   let thinking: string | undefined;
   // Reasoning models (e.g. a distilled R1 70B) wrap CoT in <think>…</think>.
   const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
@@ -371,8 +386,8 @@ export async function callWorkersAI(
     const out = await env.AI!.run(m, {
       messages: [{ role: 'system', content: system }, ...messages],
       max_tokens: maxTokens,
-    }) as { response?: string };
-    return out?.response || '';
+    }) as { response?: unknown };
+    return toText(out?.response);
   };
   try {
     return { content: await run(model), model, provider: 'workers-ai' };
@@ -562,8 +577,8 @@ async function routeLLM(
 // — if the text is already prose, it is returned untouched.
 
 // Balanced extractor: the first complete top-level {...} object in `text`.
-function firstJsonObjectFrom(text: string): Record<string, unknown> | null {
-  const s = text.replace(/```json|```/g, '');
+function firstJsonObjectFrom(text: unknown): Record<string, unknown> | null {
+  const s = String(text ?? '').replace(/```json|```/g, '');
   let depth = 0, start = -1, inStr = false, esc = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
@@ -580,8 +595,8 @@ function firstJsonObjectFrom(text: string): Record<string, unknown> | null {
   return null;
 }
 
-export function sanitizeAnswer(raw: string): string {
-  let s = (raw || '').trim();
+export function sanitizeAnswer(raw: unknown): string {
+  let s = String(raw ?? '').trim();
   if (!s) return s;
   // Only treat the message as a protocol envelope when the WHOLE thing is a JSON
   // object (or a fenced one) — never unwrap prose that merely mentions braces.
