@@ -71,18 +71,34 @@ function toolAllowed(scope: Scope, name: string): boolean {
 
 const HOSPITALITY_CATALOG = `
 query_rapid2ai(question) — your gateway to the operator's OWN data: US Foods invoices + Square POS. Ask precise, analytical plain-English questions ("food cost % by category last 3 months", "items whose unit cost rose >10% vs prior month", "weekly sales for ribeye, last 12 weeks"). This is your primary instrument.
-rapid_data(tool, args?) — STRUCTURED numeric data straight from the operator's DB (use this when you need exact figures to compute on). tool is one of:
-   • get_financials — canonical food cost % + gross margin + net sales + purchases, trailing 28 & 90 days. USE FOR ANY margin / COGS / food-cost question. (no args)
-   • sales_summary {days} — gross/net sales, tax, tips, covers, avg check.
+rapid_data(tool, args?) — STRUCTURED numeric data straight from the operator's DB (use this when you need exact figures to compute on). Every call returns rows + provenance (the exact SQL it ran and a row count). All windows are venue-scoped and anchored to the freshest data. tool is one of:
+   SALES / P&L
+   • get_financials — canonical food cost % + gross margin + net sales + purchases, trailing 28 & 90 days. USE FOR ANY quick margin / COGS / food-cost question. (no args)
+   • profit_and_loss {days} — full P&L: net/gross sales, discounts, COGS, gross margin, food cost %, margin %, plus tax/tips/service charges/refunds.
+   • period_compare {days} — trailing N days vs the prior N days: sales, purchases, food cost %, margin, transactions, covers — each with absolute and % deltas. USE FOR "up or down vs last period", week-over-week, month-over-month.
+   • sales_summary {days} — gross/net sales, tax, tips, covers, avg check, avg per cover.
    • sales_trend {days} — day-by-day net/gross sales + covers (use as the series for forecasting).
+   • sales_tax_summary {days} — sales tax collected at POS vs paid on purchases, with the effective rate.
+   PURCHASES / COST STRUCTURE
    • top_purchases {days,limit} — top spend by product, qty-weighted unit price.
-   • price_variance {days,limit,product?} — biggest price swings (wavg/min/max/% swing) = COST VARIANCE.
-   • price_history {product} — per-delivery unit-price history for one product.
+   • spend_by_category {days} — spend split by storage class (DRY / REFRIGERATED / FROZEN) as a % of total.
    • vendor_spend {days} — invoiced spend by vendor.
+   • fee_burden {days} — fuel + freight as a % of product spend, plus catch-weight pricing exposure.
+   • credit_recovery {days} — credit-memo count, dollars clawed back, and recovery % of invoiced spend.
+   • ap_aging — open invoices bucketed by remit-due date (overdue / 0-7d / 8-30d / 31d+) = the cash-out outlook. (no args)
+   PRICE / VARIANCE
+   • price_variance {days,limit,product?} — biggest price swings (wavg/min/max/% swing) = COST VARIANCE.
+   • price_movers {days,limit,direction?} — qty-weighted unit price, recent half vs prior half; direction up|down|all.
+   • price_history {product} — per-delivery unit-price history for one product.
+   • product_cost {product} — current landed cost: the last invoiced unit price, the price before it, the % move (recipe costing).
+   • invoice_detail {document_number} — drill into one invoice: header, fees, totals, every line.
+   MENU / OPERATIONS
    • top_menu_items {days,limit} — best-selling menu items by revenue.
+   • menu_engineering {days,limit} — Star / Plowhorse / Puzzle / Dog quadrants (price is the margin proxy — no plate cost in data).
    • suggested_pars — weekly par levels from 8-wk deliveries.
-   • run_sql {sql} — read-only SELECT escape hatch (venue-scoped).
-   Returns rows + provenance. Reason, cross-reference, and forecast over these numbers — do the cost%/margin/variance interpretation yourself; never invent figures.
+   ESCAPE HATCH
+   • run_sql {sql} — read-only SELECT, venue-scoped.
+   Reason, cross-reference, and forecast over these numbers — do the cost%/margin/variance interpretation yourself; never invent figures.
 web_search(q) — outside world only: commodity/ingredient prices, supplier news, seasonality.
 fetch_url(url) — fetch one http(s) page.
 code_engine(action,task?,code?,language?,context?) — analyze|generate data-analysis logic.
@@ -118,7 +134,8 @@ fetch_document(id) — return the full text of one corpus paper by its id.
 recall_memory(q) — semantic search over Elle's own past conversations.
 code_engine(action,task?,code?,language?,context?) — analyze|generate|debug|refactor|explain|migrate code. Returns the engine's output.
 diagnose(error,context?) — root-cause a stack trace / build error on this Cloudflare stack.
-query_rapid2ai(question) — ask the RAPID²AI hospitality worker about US Foods invoices + Square POS data (separate DB). Plain-English question.
+query_rapid2ai(question) — ask the RAPID²AI hospitality worker about US Foods invoices + Square POS data (separate DB). Plain-English question; returns a narrated answer.
+rapid_data(tool,args?) — STRUCTURED figures from that same hospitality DB, returned as rows + provenance (the exact SQL + row count) so you can compute on exact numbers. tool ∈ {get_financials, profit_and_loss, period_compare, sales_summary, sales_trend, sales_tax_summary, top_purchases, spend_by_category, vendor_spend, fee_burden, credit_recovery, ap_aging, price_variance, price_movers, price_history, product_cost, invoice_detail, top_menu_items, menu_engineering, suggested_pars, run_sql}. Prefer this over query_rapid2ai when you need the raw figures; use query_rapid2ai for a ready-made narration.
 ingest_paper(title,text,series,tag,abstract?,source_url?) — WRITE: add a paper to the corpus.
 trigger_dream() — WRITE: run one libre/dream cycle now.
 trade_execute(action,symbol,qty?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). buy/sell need qty; close exits the whole position.
