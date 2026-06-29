@@ -386,6 +386,16 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     const parsed = firstJsonObject(result.content);
 
     if (!parsed) {
+      // If the model answered in plain prose (no JSON envelope at all), accept it
+      // as the answer rather than forcing the ReAct protocol — a greeting or a
+      // simple reply doesn't need a tool, and many models won't wrap "Hello" in
+      // {"answer":...}. Only nudge when it looks like it MEANT to emit JSON but
+      // produced a malformed/truncated blob.
+      const raw = String(result.content ?? '').trim();
+      const looksLikeJson = raw.startsWith('{') || raw.startsWith('```') || raw.includes('"tool"') || raw.includes('"answer"');
+      if (raw && !looksLikeJson) {
+        return finish(raw, step);
+      }
       // Unparseable output — usually a tool object truncated by the token cap or
       // a bad escape. NEVER surface raw protocol JSON to the caller: correct once,
       // then fail with a clean message instead of leaking the blob.
