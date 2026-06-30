@@ -17,5 +17,12 @@ LLM_MODEL_REASONING=gemini-2.5-flash
 # LLM_OLLAMA_URL=https://<your-ollama-host>
 # LLM_MODEL_OLLAMA=llama3.3:70b
  
+# Optimus journal — A/B flag for the daily-canvas conditioning path.
+# Generation conditions on EXTRACTED THREADS (open questions / claims /
+# unaddressed reader requests), not raw prior prose. This flag only controls
+# whether the single most-recent entry's prose is also shown for voice
+# continuity. Default (unset) = true. Set false to condition on threads alone.
+# JOURNAL_INCLUDE_PRIOR_PROSE=false
+
 CLOUDFLARE_ACCOUNT_ID=f60c2e6068e002f5dbad7cd562a5c165
 

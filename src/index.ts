@@ -43,6 +43,11 @@ export interface Env extends LLMEnv {
   ALPACA_BASE_URL?: string;  // https://paper-api.alpaca.markets or https://api.alpaca.markets
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
+  // Optimus journal — A/B flag for the generation conditioning path. When set
+  // truthy the daily canvas includes the single most-recent entry's prose for
+  // voice continuity; when falsy it conditions on extracted threads ALONE and
+  // omits prior prose entirely. Default (unset) = include single recent entry.
+  JOURNAL_INCLUDE_PRIOR_PROSE?: string;
 }
 
 // ── Utilities ─────────────────────────────────────────────────
