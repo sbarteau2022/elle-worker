@@ -24,6 +24,15 @@ invocation_logs = true
 [ai]
 binding = "AI"
 
+# Service binding to the RAPID²AI hospitality worker. Required because a
+# same-account worker→worker fetch over the public workers.dev URL is blocked
+# by Cloudflare (error 1042) — that block is why the hospitality data tools
+# (query_rapid2ai / rapid_data) were failing and reconciliation got no data.
+# The router prefers env.RAPID_AI.fetch() and only falls back to the public URL.
+[[services]]
+binding = "RAPID_AI"
+service = "rapid2ai-ai-worker"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "elle-corpus"
