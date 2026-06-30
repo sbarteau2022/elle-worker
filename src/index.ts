@@ -779,15 +779,23 @@ export default {
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
       if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
-      const ab = body as { query?: string; q?: string; max_steps?: number };
+      const ab = body as { query?: string; q?: string; max_steps?: number; session_id?: string };
       const q = String(ab.query || ab.q || '').trim();
       if (!q) return err('query required');
+      // Stable per-visitor session so the RAPID²AI consumer surface keeps
+      // multi-turn context. The client persists this id and echoes it back;
+      // if absent we mint one and return it.
+      const sessionId = String(ab.session_id || `atlas:${crypto.randomUUID()}`);
       const out = await runRouter(q, env, {
         embed, ragSearch, recallPastConversations,
         handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
         journalWrite, journalRead, journalThread, journalAnnotate,
-      }, { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: 'atlas' });
-      return json({ content: out.answer, trace: out.trace, steps: out.steps });
+        // Memory: load prior turns and persist this exchange so the consumer
+        // chat holds context across turns (same wiring as /api/elle-router),
+        // while staying hospitality-scoped.
+        loadSessionHistory, persistExchange,
+      }, { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: 'atlas', sessionId, source: 'rapid2ai' });
+      return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps });
     }
 
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env, request);
