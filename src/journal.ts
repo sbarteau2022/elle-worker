@@ -23,6 +23,7 @@
 
 import type { Env } from './index';
 import { callLLM } from './llm';
+import { velocityAt, accelerationAt, jerkAt, reserveAt } from './kappa-dynamics';
 
 export type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 
@@ -41,16 +42,17 @@ async function ensureSchema(env: Env): Promise<void> {
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS optimus_entries (
       id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, content TEXT,
       off_record INTEGER DEFAULT 0, kappa REAL, kappa_ts INTEGER,
-      reserve REAL, velocity REAL, accel REAL, anchor_distance REAL,
+      reserve REAL, velocity REAL, accel REAL, jerk REAL, anchor_distance REAL,
       vectorize_id TEXT, threads_json TEXT, created_at INTEGER)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS optimus_marginalia (
       id TEXT PRIMARY KEY, entry_id TEXT, anchor_para INTEGER, note TEXT,
       off_record INTEGER DEFAULT 0, created_at INTEGER)`),
   ]);
-  // Backfill the threads_json column on tables created before Fix 2 shipped —
-  // CREATE TABLE IF NOT EXISTS never alters an existing table. Best-effort: the
-  // ALTER throws "duplicate column" once the column exists, which we swallow.
+  // Backfill new columns on tables created before they shipped — CREATE TABLE IF
+  // NOT EXISTS never alters an existing table. Best-effort: each ALTER throws
+  // "duplicate column" once the column exists, which we swallow.
   await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN threads_json TEXT').run().catch(() => {});
+  await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN jerk REAL').run().catch(() => {});
   schemaReady = true;
 }
 
@@ -69,18 +71,26 @@ export function computeKappa(content: string): number {
   return Math.max(0, Math.min(1, Number(raw.toFixed(4))));
 }
 
-// ── phase-state derivation — REAL, FINAL (independent of how κ is computed) ──
-interface PhaseRef { kappa: number; kappa_ts: number; reserve: number; velocity: number; }
-function derivePhaseState(prev: PhaseRef | null, kappa: number, ts: number): { reserve: number; velocity: number; accel: number } {
-  if (!prev) return { reserve: 0, velocity: 0, accel: 0 };
-  const dt = Math.max(1, (ts - prev.kappa_ts) / 1000); // seconds; guard /0
-  const reserve = prev.reserve + ((prev.kappa + kappa) / 2) * dt; // trapezoid
-  const velocity = (kappa - prev.kappa) / dt;
-  const accel = (velocity - prev.velocity) / dt;
+// ── phase-state derivation — per-step finite differences, dt = 1 ─────────────
+// A step here is one journal entry. Velocity/accel/jerk come from the shared
+// kappa-dynamics module (same math the chat uses), differenced over the thread's
+// κ series with dt=1 — NO wall-clock time. reserve is the running Σκ (dt=1),
+// kept display-only. Derivatives are null (not 0) when there is not enough
+// history to form them.
+//   priorKappas — ALL prior κ of the thread, oldest→newest. reserve sums the
+//                 full series (so it is correct even before backfill runs); the
+//                 differences only look back 1–3 steps, and the real series
+//                 length is what makes the null/zero boundary correct.
+function derivePhaseState(
+  priorKappas: number[], kappa: number,
+): { reserve: number; velocity: number | null; accel: number | null; jerk: number | null } {
+  const series = [...priorKappas, kappa];
+  const i = series.length - 1;
   return {
-    reserve: Number(reserve.toFixed(6)),
-    velocity: Number(velocity.toFixed(6)),
-    accel: Number(accel.toFixed(6)),
+    reserve: reserveAt(series, i), // Σκ, dt=1
+    velocity: velocityAt(series, i),
+    accel: accelerationAt(series, i),
+    jerk: jerkAt(series, i),
   };
 }
 
@@ -330,13 +340,15 @@ export async function journalWrite(
     await env.DB.prepare('UPDATE optimus_threads SET updated_at = ? WHERE id = ?').bind(now, threadId).run();
   }
 
-  // prior entry in this thread → derivation base
-  const prev = await env.DB.prepare(
-    'SELECT kappa, kappa_ts, reserve, velocity FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts DESC LIMIT 1'
-  ).bind(threadId).first() as PhaseRef | null;
+  // prior entries → finite-difference base. The whole thread's κ series,
+  // oldest→newest (reserve sums all of it; the differences read the last 3).
+  const priorRows = await env.DB.prepare(
+    'SELECT kappa FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
+  ).bind(threadId).all().catch(() => ({ results: [] as any[] }));
+  const priorKappas = (priorRows.results || []).map((r: any) => Number(r.kappa));
 
   const kappa = computeKappa(content);
-  const phase = derivePhaseState(prev, kappa, now);
+  const phase = derivePhaseState(priorKappas, kappa);
 
   const entryId = id();
   let vectorizeId: string | null = null;
@@ -351,9 +363,9 @@ export async function journalWrite(
   }
 
   await env.DB.prepare(
-    `INSERT INTO optimus_entries (id, thread_id, role, content, off_record, kappa, kappa_ts, reserve, velocity, accel, anchor_distance, vectorize_id, threads_json, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).bind(entryId, threadId, role, content, offRecord, kappa, now, phase.reserve, phase.velocity, phase.accel,
+    `INSERT INTO optimus_entries (id, thread_id, role, content, off_record, kappa, kappa_ts, reserve, velocity, accel, jerk, anchor_distance, vectorize_id, threads_json, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(entryId, threadId, role, content, offRecord, kappa, now, phase.reserve, phase.velocity, phase.accel, phase.jerk,
          typeof args.anchor_distance === 'number' ? args.anchor_distance : null, vectorizeId, null, now).run();
 
   // FIX 2: extract this entry's unresolved threads and store them per entry, so
@@ -406,7 +418,7 @@ export async function journalRead(
 
   const placeholders = ids.map(() => '?').join(',');
   const rows = await env.DB.prepare(
-    `SELECT id, thread_id, role, content, off_record, kappa, reserve, velocity, accel, created_at
+    `SELECT id, thread_id, role, content, off_record, kappa, reserve, velocity, accel, jerk, created_at
        FROM optimus_entries WHERE vectorize_id IN (${placeholders})${args.thread_id ? ' AND thread_id = ?' : ''}`
   ).bind(...ids, ...(args.thread_id ? [args.thread_id] : [])).all();
 
@@ -427,12 +439,12 @@ export async function journalThread(env: Env, args: { thread_id?: string }): Pro
   const thread = await env.DB.prepare('SELECT * FROM optimus_threads WHERE id = ?').bind(args.thread_id).first();
   if (!thread) return { error: 'thread not found' };
   const entries = await env.DB.prepare(
-    'SELECT id, role, content, off_record, kappa, kappa_ts, reserve, velocity, accel, anchor_distance, created_at FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
+    'SELECT id, role, content, off_record, kappa, kappa_ts, reserve, velocity, accel, jerk, anchor_distance, created_at FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
   ).bind(args.thread_id).all();
   const notes = await env.DB.prepare(
     'SELECT m.id, m.entry_id, m.anchor_para, m.note, m.off_record, m.created_at FROM optimus_marginalia m JOIN optimus_entries e ON e.id = m.entry_id WHERE e.thread_id = ? ORDER BY m.created_at ASC'
   ).bind(args.thread_id).all();
-  const phase_series = (entries.results || []).map((e: any) => ({ t: e.kappa_ts, kappa: e.kappa, reserve: e.reserve, velocity: e.velocity, accel: e.accel }));
+  const phase_series = (entries.results || []).map((e: any) => ({ t: e.kappa_ts, kappa: e.kappa, reserve: e.reserve, velocity: e.velocity, accel: e.accel, jerk: e.jerk }));
   return { thread, entries: entries.results, marginalia: notes.results, phase_series };
 }
 
@@ -598,6 +610,41 @@ Write ONE entry as continuous prose — no headers, no bullet points, no "Dear d
     user_id: owner, thread_id: canvas, role: 'elle', content, off_record: false, anchor_topic: ELLE_CANVAS_ANCHOR,
   });
   console.log(`[OPTIMUS] elle wrote entry ${String((entry as any).id)} (κ=${(entry as any).kappa}, overlap=${gate.overlap}, prose=${showProse}) on canvas ${canvas}`);
+}
+
+// ============================================================
+// BACKFILL — recompute reserve/velocity/accel/jerk under dt = 1 STEP
+//
+// Existing entries carry the OLD wall-clock derivatives (velocity ≈ 0 because dt
+// was ~86,400 s). This rewrites every thread's series in place using the shared
+// per-step finite differences: reserve = running Σκ, and velocity/accel/jerk are
+// null for the first entries where there is insufficient history (null ≠ 0).
+// κ itself is NOT recomputed — only what it is differenced into. Trigger via
+// POST /api/cron { job: "optimus_backfill" } (admin-gated).
+// ============================================================
+export async function backfillPhaseState(env: Env): Promise<{ threads: number; entries: number }> {
+  await ensureSchema(env);
+  const threadRows = await env.DB.prepare('SELECT id FROM optimus_threads').all().catch(() => ({ results: [] as any[] }));
+  let threads = 0, entries = 0;
+  for (const t of (threadRows.results || []) as Array<{ id: string }>) {
+    const rows = await env.DB.prepare(
+      'SELECT id, kappa FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
+    ).bind(t.id).all().catch(() => ({ results: [] as any[] }));
+    const es = (rows.results || []) as Array<{ id: string; kappa: number }>;
+    if (!es.length) continue;
+    const kappas = es.map(e => Number(e.kappa) || 0);
+    let reserve = 0;
+    const stmts = es.map((e, i) => {
+      reserve = Number((reserve + kappas[i]).toFixed(6)); // Σκ, dt=1
+      return env.DB.prepare('UPDATE optimus_entries SET reserve = ?, velocity = ?, accel = ?, jerk = ? WHERE id = ?')
+        .bind(reserve, velocityAt(kappas, i), accelerationAt(kappas, i), jerkAt(kappas, i), e.id);
+    });
+    // Chunk the UPDATEs to stay within D1 batch limits.
+    for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+    threads++; entries += es.length;
+  }
+  console.log(`[OPTIMUS] backfill: ${entries} entries across ${threads} threads recomputed (dt=1)`);
+  return { threads, entries };
 }
 
 // ============================================================
