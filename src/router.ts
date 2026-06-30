@@ -16,6 +16,8 @@
 
 import { callLLM, sanitizeAnswer, type LLMMessage } from './llm';
 import type { Env } from './index';
+import { computeTurnDynamics } from './kappa-turn';
+import type { KappaPoint } from './kappa-dynamics';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -35,7 +37,7 @@ export interface RouterDeps {
   // Optional: only the admin router passes a sessionId, so the hospitality
   // callsite can omit them and still type-check.
   loadSessionHistory?: (sessionId: string, env: Env) => Promise<LLMMessage[]>;
-  persistExchange?: (sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env) => Promise<void>;
+  persistExchange?: (sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null) => Promise<void>;
 }
 
 export interface RouterStep {
@@ -49,6 +51,7 @@ export interface RouterResult {
   answer: string;
   steps: number;
   trace: RouterStep[];
+  kappa_dynamics?: KappaPoint | null;
 }
 
 const OBS_CAP = 3500; // chars per observation fed back to the model
@@ -424,10 +427,17 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // into its "answer" string, the caller only ever sees clean prose.
   const finish = async (rawAnswer: string, steps: number): Promise<RouterResult> => {
     const answer = sanitizeAnswer(rawAnswer) || rawAnswer;
-    if (sessionId && deps.persistExchange) {
-      try { await deps.persistExchange(sessionId, source, question, answer, env); } catch { /* best-effort */ }
+    // κ dynamics over the final OUTPUT ONLY (dt=1 per turn). Best-effort: the
+    // chat header reads this; never let it fail the answer or the memory write.
+    let kappa_dynamics: KappaPoint | null = null;
+    if (sessionId) {
+      try { kappa_dynamics = await computeTurnDynamics(env, deps.embed, sessionId, answer, question); }
+      catch (e) { console.error('[KAPPA] router turn dynamics failed:', (e as Error).message); }
     }
-    return { question, answer, steps, trace };
+    if (sessionId && deps.persistExchange) {
+      try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null); } catch { /* best-effort */ }
+    }
+    return { question, answer, steps, trace, kappa_dynamics };
   };
 
   for (let step = 0; step < maxSteps; step++) {
