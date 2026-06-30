@@ -25,6 +25,7 @@ import { handleDiagnose } from './diagnose';
 import { runRouter } from './router';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
+import { handleMadmind } from './madmind';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -935,6 +936,10 @@ export default {
     // reader owns their journal. off_record + κ rules enforced in journal.ts.
     if (path === '/api/optimus-journal')
       return handleOptimusJournal(body, env, embed, user.id);
+    // MadMind submissions — append-only manuscript archive on D1 (Cloudflare-only
+    // replacement for the old Supabase `submissions` table). User-gated above.
+    if (path === '/api/madmind')
+      return handleMadmind(body, env, user.id, user.email);
     if (path === '/api/elle-duel-engine')       return handleDuelEngine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-tutor')             return handleTutor(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
