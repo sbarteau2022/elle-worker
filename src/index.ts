@@ -35,6 +35,10 @@ export interface Env extends LLMEnv {
   DOCUMENTS:    R2Bucket;
   VECTORIZE:    VectorizeIndex;
   INGEST_QUEUE: Queue;
+  // Service binding to the RAPID²AI hospitality worker. Same-account
+  // worker→worker fetch over workers.dev is blocked (Cloudflare error 1042),
+  // so the binding is the sanctioned path; public-URL fetch is the fallback.
+  RAPID_AI?:        Fetcher;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
   GOOGLE_CLIENT_ID?: string;

@@ -57,6 +57,20 @@ export interface RouterResult {
 const OBS_CAP = 3500; // chars per observation fed back to the model
 const RAPID_AI_URL = 'https://rapid2ai-ai-worker.sbarteau2022.workers.dev';
 
+// Reach the RAPID²AI worker. A same-account worker→worker fetch over the
+// public workers.dev URL is blocked by Cloudflare (error 1042), which surfaced
+// as the hospitality data tools "returning 404" and reconciliation getting no
+// data. The service binding (env.RAPID_AI) is the sanctioned path; the public
+// URL is kept only as a fallback for when the binding isn't configured.
+function rapidFetch(env: Env, path: string, body: unknown): Promise<Response> {
+  const req = new Request(`${RAPID_AI_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return env.RAPID_AI ? env.RAPID_AI.fetch(req) : fetch(req);
+}
+
 // ── tool scoping ─────────────────────────────────────────────
 // 'full'        = admin router. Everything.
 // 'hospitality' = RAPID / Atlas. DATA tools only. The corpus
@@ -339,17 +353,17 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
       }
       case 'query_rapid2ai': {
         const question = String(a.question || a.q || a.query || '');
-        const r = await fetch(`${RAPID_AI_URL}/query`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
+        const r = await rapidFetch(env, '/query', { question });
         return clip(`HTTP ${r.status}\n` + (await r.text()));
       }
       case 'rapid_data': {
         const toolName = String(a.tool || a.name || '').trim();
         const toolArgs = (a.args && typeof a.args === 'object') ? a.args : {};
         if (!toolName) return 'rapid_data needs a "tool" name (e.g. get_financials, price_variance, sales_trend)';
-        const r = await fetch(`${RAPID_AI_URL}/tool`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: toolName, args: toolArgs }) });
+        const r = await rapidFetch(env, '/tool', { tool: toolName, args: toolArgs });
         if (r.status === 404) {
           // /tool not deployed on the worker yet — degrade to the NL endpoint so this still works.
-          const r2 = await fetch(`${RAPID_AI_URL}/query`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: `Run the ${toolName} analysis with ${JSON.stringify(toolArgs)}` }) });
+          const r2 = await rapidFetch(env, '/query', { question: `Run the ${toolName} analysis with ${JSON.stringify(toolArgs)}` });
           return clip(`(via /query fallback) HTTP ${r2.status}\n` + (await r2.text()));
         }
         return clip(`HTTP ${r.status}\n` + (await r.text()));
