@@ -23,7 +23,8 @@ import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
 import { runRouter } from './router';
-import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal } from './journal';
+import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
+import { computeTurnDynamics } from './kappa-turn';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -43,6 +44,11 @@ export interface Env extends LLMEnv {
   ALPACA_BASE_URL?: string;  // https://paper-api.alpaca.markets or https://api.alpaca.markets
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
+  // Optimus journal — A/B flag for the generation conditioning path. When set
+  // truthy the daily canvas includes the single most-recent entry's prose for
+  // voice continuity; when falsy it conditions on extracted threads ALONE and
+  // omits prior prose entirely. Default (unset) = include single recent entry.
+  JOURNAL_INCLUDE_PRIOR_PROSE?: string;
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -304,16 +310,19 @@ async function recallPastConversations(query: string, currentSession: string, en
   } catch { return ''; }
 }
 
-async function persistExchange(sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env): Promise<void> {
+async function persistExchange(sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null): Promise<void> {
   try {
     const userTurnId = generateId();
     const elleTurnId = generateId();
     const vecId      = `conv-${elleTurnId}`;
+    // κ (over the assistant OUTPUT only) is stored per turn so the per-session κ
+    // series can be differenced (dt=1) on the next turn. NULL when not computed.
+    const kappaVal = (typeof kappa === 'number' && Number.isFinite(kappa)) ? kappa : null;
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO elle_conversation_turns (id, session_id, source, role, content) VALUES (?, ?, ?, 'user', ?)`)
         .bind(userTurnId, sessionId, source, userMessage.slice(0, 8000)),
-      env.DB.prepare(`INSERT INTO elle_conversation_turns (id, session_id, source, role, content, vectorize_id) VALUES (?, ?, ?, 'assistant', ?, ?)`)
-        .bind(elleTurnId, sessionId, source, assistantMessage.slice(0, 8000), vecId),
+      env.DB.prepare(`INSERT INTO elle_conversation_turns (id, session_id, source, role, content, vectorize_id, kappa) VALUES (?, ?, ?, 'assistant', ?, ?, ?)`)
+        .bind(elleTurnId, sessionId, source, assistantMessage.slice(0, 8000), vecId, kappaVal),
     ]);
     // Embed the Q+A pair for cross-session semantic recall
     const pairText = `Q: ${userMessage.slice(0, 700)}\nA: ${assistantMessage.slice(0, 1100)}`;
@@ -402,12 +411,18 @@ Write in plain prose. The surface renders plain text: no markdown, no asterisks,
   const clean = sanitizeAnswer(result.content) ||
     'I could not produce a clean answer to that. Try rephrasing it.';
 
+  // κ dynamics over the OUTPUT ONLY (dt=1 per chat turn). Best-effort — the chat
+  // header reads this; a failure here must never break the answer.
+  let kappa_dynamics = null;
+  try { kappa_dynamics = await computeTurnDynamics(env, embed, sessionId, clean, userMessage); }
+  catch (e) { console.error('[KAPPA] turn dynamics failed:', (e as Error).message); }
+
   env.DB.prepare(
     `INSERT INTO sessions (id, source, message_count) VALUES (?, ?, 1) ON CONFLICT(id) DO UPDATE SET message_count = message_count + 1, last_active = datetime('now')`
   ).bind(sessionId, src).run().catch(() => {});
 
-  // Persist the exchange — fire and forget keeps response latency flat
-  await persistExchange(sessionId, src, userMessage, clean, env);
+  // Persist the exchange (with this turn's κ) — keeps the per-session series.
+  await persistExchange(sessionId, src, userMessage, clean, env, kappa_dynamics?.kappa ?? null);
 
   return json({
     content:        clean,
@@ -418,6 +433,7 @@ Write in plain prose. The surface renders plain text: no markdown, no asterisks,
     model:          result.model,
     provider:       result.provider,
     memory_recalled: !!pastConvs,
+    kappa_dynamics,
   });
 }
 
@@ -597,6 +613,12 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
     case 'optimus':  await runOptimusJournal(env, embed); return { ran: 'optimus' };
+    case 'optimus_backfill': {
+      // One-shot: recompute journal reserve/velocity/accel/jerk under dt=1 step,
+      // fixing the old wall-clock derivatives and filling in the new higher orders.
+      const r = await backfillPhaseState(env);
+      return { ran: `optimus_backfill (${r.entries} entries / ${r.threads} threads)` };
+    }
     case 'dream':
       await runLibreMode(env as unknown as LibreEnv).catch(e => console.error('[LIBRE] run failed:', (e as Error).message));
       await fetch('https://rapid2ai-ingestion.sbarteau2022.workers.dev/internal/trigger-sweep', {
@@ -831,7 +853,7 @@ export default {
         sessionId: rb.session_id || null,   // NEW — consumed in ./router runRouter
         source: 'elle-router',              // NEW
       });
-      return json((rb as { debug?: boolean }).debug ? out : { question: out.question, answer: out.answer, steps: out.steps });
+      return json((rb as { debug?: boolean }).debug ? out : { question: out.question, answer: out.answer, steps: out.steps, kappa_dynamics: out.kappa_dynamics });
     }
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
