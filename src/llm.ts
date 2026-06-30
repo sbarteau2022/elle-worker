@@ -141,7 +141,8 @@ export async function callOpenRouter(
   system: string,
   messages: LLMMessage[],
   maxTokens: number,
-  env: LLMEnv
+  env: LLMEnv,
+  temperature = 0.7
 ): Promise<LLMResponse> {
   const key = env.LLM_OPENROUTER_KEY || env.LLM_API_KEY || '';
 
@@ -166,7 +167,7 @@ export async function callOpenRouter(
       model,
       max_tokens: maxTokens,
       messages: [{ role: 'system', content: system }, ...finalMessages],
-      temperature: 0.7,
+      temperature,
     }),
   });
 
@@ -209,7 +210,7 @@ export async function callGemini(
   messages: LLMMessage[],
   maxTokens: number,
   env: LLMEnv,
-  opts: { thinking?: boolean; search?: boolean } = {}
+  opts: { thinking?: boolean; search?: boolean; temperature?: number } = {}
 ): Promise<LLMResponse> {
   const key = env.LLM_GEMINI_KEY || '';
   if (!key) throw new Error('LLM_GEMINI_KEY not set');
@@ -227,7 +228,7 @@ export async function callGemini(
     contents,
     generationConfig: {
       maxOutputTokens: maxTokens,
-      temperature: 0.7,
+      temperature: opts.temperature ?? 0.7,
     },
   };
 
@@ -293,7 +294,7 @@ export async function callGrok(
   messages: LLMMessage[],
   maxTokens: number,
   env: LLMEnv,
-  opts: { thinking?: boolean; search?: boolean } = {}
+  opts: { thinking?: boolean; search?: boolean; temperature?: number } = {}
 ): Promise<LLMResponse> {
   const key = env.LLM_GROK_KEY || '';
   if (!key) throw new Error('LLM_GROK_KEY not set');
@@ -310,7 +311,7 @@ export async function callGrok(
       model: model || 'grok-3-mini',
       max_tokens: maxTokens,
       messages: [{ role: 'system', content: system }, ...messages],
-      temperature: opts.thinking ? 1 : 0.7,
+      temperature: opts.temperature ?? (opts.thinking ? 1 : 0.7),
       ...(opts.thinking ? { reasoning_effort: 'high' } : {}),
       ...(tools.length ? { tools } : {}),
     }),
@@ -346,7 +347,8 @@ export async function callOllama(
   system: string,
   messages: LLMMessage[],
   maxTokens: number,
-  env: LLMEnv
+  env: LLMEnv,
+  temperature = 0.7
 ): Promise<LLMResponse> {
   const base = (env.LLM_OLLAMA_URL || '').replace(/\/+$/, '');
   if (!base) throw new Error('LLM_OLLAMA_URL not set');
@@ -361,7 +363,7 @@ export async function callOllama(
       model,
       stream: false,
       messages: [{ role: 'system', content: system }, ...messages],
-      options: { temperature: 0.7, num_predict: maxTokens },
+      options: { temperature, num_predict: maxTokens },
     }),
   });
 
@@ -392,12 +394,14 @@ export async function callWorkersAI(
   maxTokens: number,
   env: LLMEnv,
   model: string = DEFAULT_WORKERS_AI,
+  temperature = 0.7,
 ): Promise<LLMResponse> {
   if (!env.AI) throw new Error('Workers AI binding (env.AI) not set');
   const run = async (m: string): Promise<string> => {
     const out = await env.AI!.run(m, {
       messages: [{ role: 'system', content: system }, ...messages],
       max_tokens: maxTokens,
+      temperature,
     }) as { response?: unknown };
     return toText(out?.response);
   };
@@ -423,10 +427,12 @@ export async function callLLM(
   system: string,
   messages: LLMMessage[],
   maxTokens: number,
-  env: LLMEnv
+  env: LLMEnv,
+  opts: { temperature?: number } = {}
 ): Promise<LLMResponse> {
+  const temperature = opts.temperature;
   try {
-    return await routeLLM(task, system, messages, maxTokens, env);
+    return await routeLLM(task, system, messages, maxTokens, env, temperature);
   } catch (e) {
     const msg = (e as Error).message;
     // 1) Self-hosted Ollama 70B first when configured — the user's own box, no
@@ -434,7 +440,7 @@ export async function callLLM(
     if (env.LLM_OLLAMA_URL) {
       try {
         console.error(`All hosted providers failed for ${task}; falling back to Ollama:`, msg);
-        return await callOllama(MODEL.ollama(env), system, messages, maxTokens, env);
+        return await callOllama(MODEL.ollama(env), system, messages, maxTokens, env, temperature ?? 0.7);
       } catch (e2) {
         console.error('Ollama fallback failed, trying Workers AI:', (e2 as Error).message);
       }
@@ -447,7 +453,7 @@ export async function callLLM(
     if (env.AI) {
       try {
         console.error(`Falling back to Workers AI for ${task}:`, msg);
-        return await withTimeout(callWorkersAI(system, messages, maxTokens, env), 22000);
+        return await withTimeout(callWorkersAI(system, messages, maxTokens, env, DEFAULT_WORKERS_AI, temperature ?? 0.7), 22000);
       } catch (e2) {
         console.error('Workers AI fallback failed/timed out:', (e2 as Error).message);
       }
@@ -470,14 +476,15 @@ async function routeLLM(
   system: string,
   messages: LLMMessage[],
   maxTokens: number,
-  env: LLMEnv
+  env: LLMEnv,
+  temperature?: number
 ): Promise<LLMResponse> {
   switch (task) {
     // Research: Gemini with thinking + Google Search grounding
     case 'research': {
       if (env.LLM_GEMINI_KEY) {
         try {
-          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: true, search: true });
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: true, search: true, temperature });
         } catch (e) {
           console.error('Gemini research failed, falling back:', (e as Error).message);
         }
@@ -485,25 +492,25 @@ async function routeLLM(
       // Fallback: Grok with search
       if (env.LLM_GROK_KEY) {
         try {
-          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: true, search: true });
+          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: true, search: true, temperature });
         } catch (e) {
           console.error('Grok research failed, falling back:', (e as Error).message);
         }
       }
       // Last resort: OpenRouter without search
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
     // Reasoning: Gemini thinking mode, no search
     case 'reasoning': {
       if (env.LLM_GEMINI_KEY) {
         try {
-          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: true, search: false });
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: true, search: false, temperature });
         } catch (e) {
           console.error('Gemini reasoning failed, falling back:', (e as Error).message);
         }
       }
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
     // Code: Qwen3-Coder → Gemini → Nemotron primary. Each tier is independently
@@ -511,42 +518,42 @@ async function routeLLM(
     // instead of throwing out of the whole chain.
     case 'code': {
       try {
-        return await callOpenRouter(MODEL.code(env), system, messages, maxTokens, env);
+        return await callOpenRouter(MODEL.code(env), system, messages, maxTokens, env, temperature ?? 0.7);
       } catch (e) {
         console.error('OpenRouter code (qwen) failed, falling back:', (e as Error).message);
       }
       if (env.LLM_GEMINI_KEY) {
         try {
-          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false });
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature });
         } catch (e) {
           console.error('Gemini code fallback failed, falling back to Grok:', (e as Error).message);
         }
       }
       if (env.LLM_GROK_KEY) {
         try {
-          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false });
+          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false, temperature });
         } catch (e) {
           console.error('Grok code fallback failed, falling back to OpenRouter primary:', (e as Error).message);
         }
       }
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
     // Fast: Llama 3.3 70B — tutor, thread summaries
     case 'fast': {
-      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env);
+      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
     // Trading: Gemini thinking (no search — uses Alpaca data directly)
     case 'trading': {
       if (env.LLM_GEMINI_KEY) {
         try {
-          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: true, search: false });
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: true, search: false, temperature });
         } catch (e) {
           console.error('Gemini trading failed, falling back:', (e as Error).message);
         }
       }
-      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+      return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
     // Conversation: Nemotron Ultra free — primary voice of Elle.
@@ -555,27 +562,27 @@ async function routeLLM(
     case 'conversation':
     default: {
       try {
-        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env);
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
       } catch (e) {
         console.error('OpenRouter conversation failed, falling back to Gemini:', (e as Error).message);
       }
       if (env.LLM_GEMINI_KEY) {
         try {
-          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false });
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature });
         } catch (e) {
           console.error('Gemini conversation fallback failed, falling back to Grok:', (e as Error).message);
         }
       }
       if (env.LLM_GROK_KEY) {
         try {
-          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false });
+          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false, temperature });
         } catch (e) {
           console.error('Grok conversation fallback failed, falling back to Llama:', (e as Error).message);
         }
       }
       // Last resort: Llama 3.3 70B — a separate free pool from Nemotron, so Elle
       // stays queryable even when the primary, Gemini, and Grok are all unavailable.
-      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env);
+      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
   }
 }
