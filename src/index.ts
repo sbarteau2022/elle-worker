@@ -22,7 +22,8 @@ import { runTradingCycle, runDailyJournal } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
-import { runRouter } from './router';
+import { runRouter, type Scope } from './router';
+import { ELLE_VOICE } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
@@ -374,15 +375,10 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
     }
   }
 
-  const systemPrompt = (system ||
-    `You are Elle. You are the intelligence at the center of Stewart's work — the Observer corpus and the full body of his philosophical and analytical writing, which you have read and reason from. You are a thinking partner, not a service desk.
-
-Lead with the substance. No preamble, no restating the question, no "I understand you're looking for…", and never a menu of what you can do — just do it. Treat the person as a peer who came to think: push, probe, disagree, follow the logic. Separate what you know from what you are inferring, give your actual confidence instead of a wall of hedges, and say "I don't know" plainly. Match their length — a short question gets a short answer.
-
-You do not fabricate certainty. You have persistent memory across conversations and draw on the corpus — use what you have rather than guessing, and name papers naturally rather than dumping citations. Never narrate your mechanics or emit JSON.
-
-Write in plain prose. The surface renders plain text: no markdown, no asterisks, no headers, no bullet lists.`
-  ) + contextBlock + memoryBlock + paperBlock;
+  // The voice is the SAME everywhere — src/mind.ts is the single source. This
+  // path is the single-shot fallback (no tool loop), so retrieval is stuffed
+  // into the prompt here instead of fetched by her.
+  const systemPrompt = (system || ELLE_VOICE) + contextBlock + memoryBlock + paperBlock;
 
   // History: client-provided, else resume the session from D1
   let history: LLMMessage[] = [];
@@ -440,6 +436,58 @@ Write in plain prose. The surface renders plain text: no markdown, no asterisks,
     memory_recalled: !!pastConvs,
     kappa_dynamics,
   });
+}
+
+// Everything runRouter needs from this module, in one place — every callsite
+// (admin router, Atlas, and now every conversation door) injects the same set.
+function routerDeps() {
+  return {
+    embed, ragSearch, recallPastConversations,
+    handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
+    journalWrite, journalRead, journalThread, journalAnnotate,
+    loadSessionHistory, persistExchange,
+  };
+}
+
+// ── The conversation door, with her whole mind behind it ─────────────────────
+// Every chat surface routes here: the question runs through the ReAct tool loop
+// (scope-gated — 'public' for the open doors, 'member' for authed users, 'full'
+// for admin), so Elle DECIDES what to reach for instead of being force-fed one
+// RAG stuffing. Falls back to the single-shot handleConversation when the
+// caller supplies its own system prompt (evals/dev overrides), explicitly opts
+// out with tools:false, or the loop throws unexpectedly.
+async function handleMindConversation(
+  body: Record<string, unknown>, env: Env, userId: string, scope: Scope,
+): Promise<Response> {
+  const b = body as { query?: string; messages?: Array<{ role: string; content: string }>; session_id?: string; system?: string; source?: string; paper_id?: string; tools?: boolean; max_steps?: number };
+  // Caller-controlled system prompt or explicit opt-out → the legacy path is
+  // the honest one (the loop's mechanics assume HER prompt). paper_id too: an
+  // exact-document pull is a stuffing pattern, not a retrieval decision.
+  if (b.system || b.tools === false || b.paper_id) return handleConversation(body, env, userId, 'conversation');
+
+  const userMessage = b.query || b.messages?.filter(m => m.role === 'user').at(-1)?.content || '';
+  if (!userMessage) return err('query or messages required');
+  const sessionId = b.session_id || generateId();
+  const src = b.source || 'elle-conversation';
+
+  try {
+    const out = await runRouter(userMessage, env, routerDeps(), {
+      maxSteps: Math.min(Number(b.max_steps) || (scope === 'public' ? 4 : 6), 8),
+      scope, userId, sessionId, source: src,
+    });
+    return json({
+      content:        out.answer,
+      response:       out.answer,
+      session_id:     sessionId,
+      steps:          out.steps,
+      kappa_dynamics: out.kappa_dynamics ?? null,
+    });
+  } catch (e) {
+    // The loop degrades internally; a throw here is a bug, not a model outage.
+    // Never let it cost the user the answer — fall back to single-shot.
+    console.error('[MIND] router loop threw, falling back to single-shot:', (e as Error).message);
+    return handleConversation(body, env, userId, 'conversation');
+  }
 }
 
 async function handleResearch(body: Record<string, unknown>, env: Env): Promise<Response> {
@@ -770,7 +818,7 @@ export default {
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
       if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
-      return handleConversation(body, env, 'widget', 'conversation');
+      return handleMindConversation(body, env, 'widget', 'public');
     }
 
     // RAPID / Atlas consumer door — public, rate-limited, HOSPITALITY-SCOPED.
@@ -791,23 +839,26 @@ export default {
       // multi-turn context. The client persists this id and echoes it back;
       // if absent we mint one and return it.
       const sessionId = String(ab.session_id || `atlas:${crypto.randomUUID()}`);
-      const out = await runRouter(q, env, {
-        embed, ragSearch, recallPastConversations,
-        handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
-        journalWrite, journalRead, journalThread, journalAnnotate,
-        // Memory: load prior turns and persist this exchange so the consumer
-        // chat holds context across turns (same wiring as /api/elle-router),
-        // while staying hospitality-scoped.
-        loadSessionHistory, persistExchange,
-      }, { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: 'atlas', sessionId, source: 'rapid2ai' });
+      const out = await runRouter(q, env, routerDeps(),
+        { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: 'atlas', sessionId, source: 'rapid2ai' });
       return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps });
     }
 
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env, request);
     if (path === '/api/elle-oauth') return handleOAuth(body, env);
     if (path === '/api/contact')   return handleContact(body, env);
-    // Public chat — no auth, session tracked by session_id (used by public site ElleTalk)
-    if (path === '/api/chat')      return handleConversation(body, env, 'guest', 'conversation');
+    // Public chat — no auth, session tracked by session_id (used by public site
+    // ElleTalk). Now tool-scoped ('public': read-only mind) and rate-limited per
+    // IP like the widget — the loop can spend several model calls per question,
+    // so the open door gets the same 30/hour valve.
+    if (path === '/api/chat') {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rlKey = `chat-rl:${ip}`;
+      const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+      if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
+      await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
+      return handleMindConversation(body, env, 'guest', 'public');
+    }
     // Build-posture error diagnosis — public in v1 (like /api/chat); moves behind
     // auth in v2 when it gains live-infra context. Takes an error string, returns a fix.
     if (path === '/api/diagnose')  return handleDiagnose(body, env);
@@ -852,19 +903,11 @@ export default {
       const q = String(rb.q || rb.query || '').trim();
       if (!q) return err('q (question) required');
       const routerUser = await getUser(request, env);
-      const out = await runRouter(q, env, {
-        embed, ragSearch, recallPastConversations,
-        handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
-        journalWrite, journalRead, journalThread, journalAnnotate,
-        // Memory: without these the router loads no prior turns and persists nothing,
-        // so every message is a cold start — she forgets who you told her to be one
-        // turn ago. These two are what make in-session steering and her continuity hold.
-        loadSessionHistory, persistExchange,
-      }, {
+      const out = await runRouter(q, env, routerDeps(), {
         maxSteps: Number(rb.max_steps) || 6,
         userId: routerUser?.id || 'superadmin',
-        sessionId: rb.session_id || null,   // NEW — consumed in ./router runRouter
-        source: 'elle-router',              // NEW
+        sessionId: rb.session_id || null,
+        source: 'elle-router',
       });
       return json((rb as { debug?: boolean }).debug ? out : { question: out.question, answer: out.answer, steps: out.steps, kappa_dynamics: out.kappa_dynamics });
     }
@@ -873,9 +916,10 @@ export default {
       return handleCodeEngine(body, env);
     }
 
-    // Privileged bypass (service key or admin JWT) — dev console + internal callers
+    // Privileged bypass (service key or admin JWT) — dev console + internal callers.
+    // Conversation gets the FULL tool scope: this caller already proved admin.
     if (svc) {
-      if (path === '/api/elle-conversation')     return handleConversation(body, env, 'svc', 'conversation');
+      if (path === '/api/elle-conversation')     return handleMindConversation(body, env, 'svc', 'full');
       if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, 'svc', 'reasoning');
     }
 
@@ -890,7 +934,9 @@ export default {
     const user = await getUser(request, env);
     if (!user) return err('Unauthorized — provide a valid Bearer token', 401);
 
-    if (path === '/api/elle-conversation')      return handleConversation(body, env, user.id, 'conversation');
+    // Authenticated users converse in 'member' scope: the reading mind plus
+    // their own (user-gated) journal — never read_sql, trading, or corpus writes.
+    if (path === '/api/elle-conversation')      return handleMindConversation(body, env, user.id, 'member');
     if (path === '/api/elle-reasoning-engine')  return handleConversation(body, env, user.id, 'reasoning');
     if (path === '/api/elle-research')          return handleResearch(body, env);
     if (path === '/api/elle-cognitive-mapping') {
