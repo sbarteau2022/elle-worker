@@ -26,6 +26,11 @@ import { runRouter } from './router';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
+import type { Sandbox } from '@cloudflare/sandbox';
+
+// Required by the Cloudflare Sandbox SDK: the Durable Object class backing
+// the SANDBOX binding must be re-exported from the Worker's entry module.
+export { Sandbox } from '@cloudflare/sandbox';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -38,7 +43,24 @@ export interface Env extends LLMEnv {
   // Service binding to the RAPID²AI hospitality worker. Same-account
   // worker→worker fetch over workers.dev is blocked (Cloudflare error 1042),
   // so the binding is the sanctioned path; public-URL fetch is the fallback.
+  // Superseded for the router's own tool calls by the native RAPID_DB below
+  // (src/rapid.ts) — kept declared in case anything else still wants it.
   RAPID_AI?:        Fetcher;
+  // Native D1 binding onto rapid2ai-db — the router's RAPID hospitality
+  // tools (src/rapid.ts) query this directly instead of proxying HTTP calls
+  // through RAPID_AI. Same database the rapid2ai-ai-worker itself reads.
+  RAPID_DB?:    D1Database;
+  // Single-venue scope for the RAPID tools (rapid2ai-db is multi-tenant by
+  // venue_id). Set to the Tin Mill venue UUID in wrangler.toml [vars].
+  VENUE_ID?:    string;
+  // Router scratchpad (src/scratchpad.ts) — short-TTL working memory so a
+  // long tool chain can retain findings past the per-observation OBS_CAP
+  // truncation instead of losing them.
+  SCRATCHPAD?:  KVNamespace;
+  // Cloudflare Sandbox SDK Durable Object — real code execution (src/sandbox-tools.ts).
+  // Requires Containers enabled on the account + `wrangler deploy` with Docker
+  // running locally for the first container image build.
+  SANDBOX?:     DurableObjectNamespace<Sandbox>;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
   GOOGLE_CLIENT_ID?: string;
@@ -47,7 +69,7 @@ export interface Env extends LLMEnv {
   ALPACA_API_KEY?:    string;
   ALPACA_SECRET_KEY?: string;
   ALPACA_BASE_URL?: string;  // https://paper-api.alpaca.markets or https://api.alpaca.markets
-  // GitHub — corpus ops
+  // GitHub — corpus ops + github_read_file/github_search_code router tools (src/github-tools.ts)
   GITHUB_TOKEN?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set
   // truthy the daily canvas includes the single most-recent entry's prose for
