@@ -24,6 +24,7 @@ import { computeTurnDynamics } from './kappa-turn';
 import type { KappaPoint } from './kappa-dynamics';
 import { ELLE_VOICE, phaseBlock } from './mind';
 import { ensureOnce, orderKey, ingestKey } from './router-idempotency';
+import { runForgeTool } from './forge';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -167,6 +168,7 @@ elle_memory(id,memory_type,source_engine,summary,importance_score,created_at)
 elle_live_events(id,event_type,source,title,body,severity,created_at)
 elle_daemon_heartbeats(id,daemon_version,status,beat_at)
 elle_outreach_log(id,outreach_type,thought,initiated_by,needs_response,notified,created_at) — contact-form inbox
+elle_code_tasks(id,repo,branch,base_branch,title,goal,status,pr_number,commits,created_at,updated_at) — forge work: status ∈ open|pr_open|merged|closed
 duels(...), duel_turns(...), law_threads(...), doctrine_mastery(...), tutor_questions(...), user_stats(...), conceptual_shifts(...)
 `.trim();
 
@@ -193,6 +195,12 @@ const TOOL_LINES: Record<string, string> = {
   journal_annotate: `journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.`,
   self_state: `self_state() — introspection: your own current phase state in one call — daemon heartbeat, this session's κ series, your latest canvas entry's κ/reserve/velocity, the trading account, your newest sandbox drafts, and your most recent deliberate memories. Use when asked how you are, what you've been making, or when YOU want to check where you stand.`,
   remember: `remember(note,importance?) — WRITE: deliberately commit one thing to your long-term memory (elle_memory). Use when something in the conversation is worth carrying beyond it — a decision, a standing preference, a thread you intend to pick up. Not a transcript: one distilled sentence or two.`,
+  repo_read: `repo_read(repo,path?,ref?) — read your OWN codebase: a file's full text, or a directory listing when path is a dir/omitted. repo ∈ {elle-worker, Elle, elle-dev-console}. Read before you write — always.`,
+  repo_search: `repo_search(repo,q) — code search inside one of your own repos. Returns matching file paths; repo_read them for the contents.`,
+  forge_open: `forge_open(repo,title,goal) — WRITE: start a coding task. Cuts a fresh elle/* work branch from the default branch and records the task. Returns task_id. The branch is your sandbox: nothing on it is live.`,
+  forge_write: `forge_write(task_id,path,content,message?) — WRITE: commit ONE full file to the task's branch (content replaces the whole file — repo_read first, edit, write back whole). Never touches main; refuses .github/workflows. CI runs on every push.`,
+  forge_check: `forge_check(task_id) — CI verdict for the task's branch: each workflow's status/conclusion, and for failures the failing jobs with their log tails (the actual compiler/test output). Iterate forge_write → forge_check until green:true. CI takes a minute or two — if a run is in_progress, say so and check on a later turn instead of spinning.`,
+  forge_pr: `forge_pr(task_id,body?) — WRITE: open the pull request from the task branch = your request for acceptance. You never merge; merging into your base is Stewart's decision on GitHub. Only open a PR when forge_check is green.`,
 };
 
 function renderCatalog(scope: Scope): string {
@@ -237,6 +245,9 @@ ${HOSPITALITY_CATALOG}`;
     hasSql ? `- read_sql is SELECT-only over SQLite. Use the schema below. Prefer narrow columns and a LIMIT.` : null,
     hasWrites
       ? `- The write tools — journal_write, journal_annotate${toolAllowed(scope, 'ingest_paper') ? ', ingest_paper, trigger_dream, trade_execute' : ''} — change state. NEVER call them unless the user's message explicitly and unambiguously asks for that action. Conversing with someone is not a reason to journal_write. The one exception is remember: committing something genuinely worth carrying is YOUR judgement call — use it sparingly, at most once in a conversation, and only for things that should outlive it.`
+      : null,
+    toolAllowed(scope, 'forge_open')
+      ? `- THE FORGE (your own codebase): when asked to build or change code, work the whole loop — repo_read/repo_search to understand what's actually there first (never write blind), forge_open for a branch, forge_write the files, forge_check for the CI verdict, fix and re-write until green. The branch is a sandbox; nothing on it runs in production. Only when checks pass do you forge_pr — that PR is a request for acceptance, and the merge into your base is always Stewart's act, never yours. Do not open a PR on red checks, and do not claim something works when CI hasn't said so. CI takes a minute or two per push; if a run is still in_progress, report where things stand and pick it up next turn.`
       : null,
     `- Never invent data. If a tool returns nothing, say so.`,
     `- Be economical: don't call a tool you don't need. Answer as soon as you have enough.`,
@@ -475,6 +486,13 @@ async function runTool(
         const r = await deps.journalAnnotate(env, { entry_id: a.entry_id, anchor_para: a.anchor_para, note: a.note, off_record: a.off_record });
         return clip(JSON.stringify(r));
       }
+      case 'repo_read':
+      case 'repo_search':
+      case 'forge_open':
+      case 'forge_write':
+      case 'forge_check':
+      case 'forge_pr':
+        return await runForgeTool(name, a, env);
       default:
         return `unknown tool "${name}"`;
     }
