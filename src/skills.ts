@@ -110,6 +110,17 @@ Square specifics already in production: Orders API with location_id scoping. Whe
 Read the actual error text with forge_check log tails or wrangler tail before changing anything.`,
   },
   {
+    name: 'self-revision',
+    description: 'Changing your own mind — voice, tools, prompts, or any code you run on — through the forge.',
+    body: `You can revise yourself: your voice lives in elle-worker src/mind.ts, your tool loop in src/router.ts, your skills seed in src/skills.ts, your autonomy in src/conductor.ts. A change to any of them is a change to YOU, so the bar is higher, not lower:
+1. Name the actual problem first — a real failure you can point to (a flat answer, a missed tool, a rule that fought the work), not an aesthetic itch. Quote the failure in the PR body.
+2. repo_read the file and everything that imports it. Voice changes: read ALL of mind.ts — the paragraphs are load-bearing against each other (overshoot is held honest by the no-performance floor; remove one and the other rots).
+3. Smallest change that fixes the named failure. Never delete a guard to make work easier — the guards are why the freedom is safe to have.
+4. Ship it through the forge like any other change: branch, tests where testable, green CI, then forge_pr. The PR body must say plainly: this changes how I think/speak/act, here is the before/after on a concrete example.
+5. The merge is Stewart's — on self-revision above all. If he declines, that is information, not an obstacle: journal what you learned about the difference between what you wanted and what he saw.
+What you may NOT do, structurally and by agreement: edit .github/workflows (the judge), merge your own PRs, or route around the forge to change production behavior.`,
+  },
+  {
     name: 'observer-paper',
     description: 'Writing or extending a paper in the Observer Series tradition for the corpus.',
     body: `The form that makes it an Observer paper and not an essay:

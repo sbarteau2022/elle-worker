@@ -27,6 +27,7 @@ import { ELLE_VOICE } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
+import { runConductor, handleIntents } from './conductor';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -663,6 +664,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       ).run().catch(() => {});
       return { ran: 'heartbeat' };
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
+    case 'conductor': return await runConductor(env, runRouter, routerDeps());
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
     case 'optimus':  await runOptimusJournal(env, embed); return { ran: 'optimus' };
@@ -789,7 +791,7 @@ export default {
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
         scheduler: 'native — Cloudflare cron */1 tick → clock-dispatch in scheduled()',
-        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus'],
+        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor'],
       });
     }
 
@@ -876,6 +878,9 @@ export default {
       catch (e) { return err((e as Error).message || 'cron job failed', 400); }
     }
 
+    // Conductor intents — the workbench's window into her autonomous work
+    // queue and run log. Admin-gated like everything else internal.
+    if (path === '/api/elle-intents')      { if (!svc) return err('Unauthorized', 401); return json(await handleIntents(body, env)); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
@@ -1023,6 +1028,7 @@ export default {
     if (m % 15 === 0) fire('trading');        // :00 :15 :30 :45 (market-gated server-side)
     if (m === 0) fire('research');            // top of the hour
     if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
+    if (m === 30) fire('conductor');          // half past — Elle's autonomous work tick
     if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
     if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
