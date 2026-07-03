@@ -24,11 +24,10 @@ invocation_logs = true
 [ai]
 binding = "AI"
 
-# Service binding to the RAPID²AI hospitality worker. Required because a
-# same-account worker→worker fetch over the public workers.dev URL is blocked
-# by Cloudflare (error 1042) — that block is why the hospitality data tools
-# (query_rapid2ai / rapid_data) were failing and reconciliation got no data.
-# The router prefers env.RAPID_AI.fetch() and only falls back to the public URL.
+# Service binding to the RAPID²AI hospitality worker. No longer used by the
+# router's own tool calls (see RAPID_DB below — those run natively against
+# the same database instead of proxying HTTP through this binding), but left
+# declared/bound in case anything else still depends on it.
 [[services]]
 binding = "RAPID_AI"
 service = "rapid2ai-ai-worker"
@@ -38,6 +37,14 @@ binding = "DB"
 database_name = "elle-corpus"
 database_id = "4ed6773a-e5c5-4708-8738-73ae9f57fc9b"
 
+# Native binding onto RAPID²AI's own database. Lets the router's rapid_*
+# tools (src/rapid.ts) query directly instead of proxying HTTP calls through
+# the RAPID_AI service binding below — no 1042 risk, no dead /tool 404s.
+[[d1_databases]]
+binding = "RAPID_DB"
+database_name = "rapid2ai-db"
+database_id = "3e31b005-eca1-4c62-bd7c-5f6527ef751e"
+
 [[kv_namespaces]]
 binding = "SESSIONS"
 id = "b659cdfdac084cbc9d502c4f26962047"
@@ -46,6 +53,11 @@ id = "b659cdfdac084cbc9d502c4f26962047"
 binding = "AUTH_TOKENS"
 id = "eaef117dc6e74e17b8c4c4717ea3727b"
 
+# Router scratchpad — short-TTL working memory (src/scratchpad.ts).
+[[kv_namespaces]]
+binding = "SCRATCHPAD"
+id = "ce5b567ebc66438e8f54c3a63ad7cb18"
+
 [[r2_buckets]]
 binding = "DOCUMENTS"
 bucket_name = "elle-documents"
@@ -53,6 +65,28 @@ bucket_name = "elle-documents"
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "elle-corpus-vectors"
+
+# Real code execution for the router's run_code/run_shell tools
+# (src/sandbox-tools.ts) — an isolated container per Durable Object instance.
+# REQUIRES: Docker running locally for the first `wrangler dev`/`wrangler
+# deploy` (builds + pushes the container image, ~2-3 min the first time),
+# and Containers enabled on this Cloudflare account. Nothing else in this
+# file depends on this block — if Containers isn't available yet, delete
+# this block + the durable_objects binding + the migration below and
+# run_code/run_shell will cleanly report "SANDBOX binding not configured"
+# instead of failing to deploy.
+[[containers]]
+class_name = "Sandbox"
+image = "./Dockerfile.sandbox"
+max_instances = 2
+
+[[durable_objects.bindings]]
+class_name = "Sandbox"
+name = "SANDBOX"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]
 
 [[queues.producers]]
 binding = "INGEST_QUEUE"
@@ -73,3 +107,9 @@ crons = ["*/1 * * * *"]
 
 [vars]
 ENVIRONMENT = "production"
+# Venue UUID in rapid2ai-db that the rapid_* tools (src/rapid.ts) scope
+# every query to. rapid2ai-db is multi-tenant by venue_id; without this set
+# the rapid_* tools cleanly report "VENUE_ID not configured" rather than
+# guessing. Find the value with:
+#   wrangler d1 execute rapid2ai-db --remote --command "SELECT DISTINCT venue_id FROM vendor_document_payload LIMIT 5"
+VENUE_ID = ""

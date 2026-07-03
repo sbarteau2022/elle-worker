@@ -28,6 +28,11 @@ import { runForgeTool } from './forge';
 import { skillList, skillRead, skillWrite, skillIndex } from './skills';
 import { runMcpTool } from './mcp';
 import { intentTool } from './conductor';
+import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
+import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
+import { runCode, runShell } from './sandbox-tools';
+import { calc } from './calc';
+import { scratchpadWrite, scratchpadRead } from './scratchpad';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -65,21 +70,6 @@ export interface RouterResult {
 }
 
 const OBS_CAP = 3500; // chars per observation fed back to the model
-const RAPID_AI_URL = 'https://rapid2ai-ai-worker.sbarteau2022.workers.dev';
-
-// Reach the RAPID²AI worker. A same-account worker→worker fetch over the
-// public workers.dev URL is blocked by Cloudflare (error 1042), which surfaced
-// as the hospitality data tools "returning 404" and reconciliation getting no
-// data. The service binding (env.RAPID_AI) is the sanctioned path; the public
-// URL is kept only as a fallback for when the binding isn't configured.
-function rapidFetch(env: Env, path: string, body: unknown): Promise<Response> {
-  const req = new Request(`${RAPID_AI_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return env.RAPID_AI ? env.RAPID_AI.fetch(req) : fetch(req);
-}
 
 // ── tool scoping ─────────────────────────────────────────────
 // 'full'        = admin router. Everything, including the write tools and
@@ -99,17 +89,21 @@ function rapidFetch(env: Env, path: string, body: unknown): Promise<Response> {
 //   construction, not just hidden in the UI. read_sql is excluded too:
 //   it runs over the MAIN D1 which holds corpus_* and journal/trading
 //   tables, so a public scoped door must never touch it. RAPID's own data
-//   lives behind query_rapid2ai.
+//   lives behind the rapid_* tools, which run over a SEPARATE D1
+//   (RAPID_DB → rapid2ai-db) and are venue-scoped by VENUE_ID.
+// run_code/run_shell/github_*/scratchpad stay out of every public-facing
+// scope: real execution and arbitrary-repo reads belong behind auth.
 export type Scope = 'full' | 'member' | 'public' | 'hospitality';
-const HOSPITALITY_TOOLS = new Set(['query_rapid2ai', 'rapid_data', 'web_search', 'fetch_url', 'code_engine']);
+const HOSPITALITY_TOOLS = new Set(['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu', 'calc', 'web_search', 'fetch_url', 'code_engine']);
 const PUBLIC_TOOLS = new Set([
-  'search_corpus', 'fetch_document', 'recall_memory', 'web_search', 'fetch_url', 'code_engine', 'diagnose',
+  'search_corpus', 'fetch_document', 'find_document', 'recall_memory', 'web_search', 'fetch_url', 'code_engine', 'diagnose', 'calc',
 ]);
 const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
   'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
   'self_state', 'remember',
   'skill_list', 'skill_read',
+  'scratchpad_write', 'scratchpad_read',
 ]);
 function toolAllowed(scope: Scope, name: string): boolean {
   if (scope === 'full') return true;
@@ -118,37 +112,17 @@ function toolAllowed(scope: Scope, name: string): boolean {
   return HOSPITALITY_TOOLS.has(name);
 }
 
+// These tools are REAL — ported directly from the deployed rapid2ai-ai-worker
+// (src/rapid.ts), running native queries against rapid2ai-db via the RAPID_DB
+// binding. The old query_rapid2ai/rapid_data HTTP bridge (whose /tool endpoint
+// was never built and 404'd) is gone.
 const HOSPITALITY_CATALOG = `
-query_rapid2ai(question) — your gateway to the operator's OWN data: US Foods invoices + Square POS. Ask precise, analytical plain-English questions ("food cost % by category last 3 months", "items whose unit cost rose >10% vs prior month", "weekly sales for ribeye, last 12 weeks"). This is your primary instrument.
-rapid_data(tool, args?) — STRUCTURED numeric data straight from the operator's DB (use this when you need exact figures to compute on). Every call returns rows + provenance (the exact SQL it ran and a row count). All windows are venue-scoped and anchored to the freshest data. tool is one of:
-   SALES / P&L
-   • reconcile {days,limit} — reconcile US Foods invoices against POS sales over ONE aligned window: net sales, vendor purchases, food cost % + gross margin, AND the top cost movers (biggest $ price increases, recent half vs prior half) and top spend drivers behind it. USE FOR "reconcile invoices vs sales", "what's pushing food cost up", "top cost movers".
-   • get_financials — canonical food cost % + gross margin + net sales + purchases, trailing 28 & 90 days. USE FOR ANY quick margin / COGS / food-cost question. (no args)
-   • profit_and_loss {days} — full P&L: net/gross sales, discounts, COGS, gross margin, food cost %, margin %, plus tax/tips/service charges/refunds.
-   • period_compare {days} — trailing N days vs the prior N days: sales, purchases, food cost %, margin, transactions, covers — each with absolute and % deltas. USE FOR "up or down vs last period", week-over-week, month-over-month.
-   • sales_summary {days} — gross/net sales, tax, tips, covers, avg check, avg per cover.
-   • sales_trend {days} — day-by-day net/gross sales + covers (use as the series for forecasting).
-   • sales_tax_summary {days} — sales tax collected at POS vs paid on purchases, with the effective rate.
-   PURCHASES / COST STRUCTURE
-   • top_purchases {days,limit} — top spend by product, qty-weighted unit price.
-   • spend_by_category {days} — spend split by storage class (DRY / REFRIGERATED / FROZEN) as a % of total.
-   • vendor_spend {days} — invoiced spend by vendor.
-   • fee_burden {days} — fuel + freight as a % of product spend, plus catch-weight pricing exposure.
-   • credit_recovery {days} — credit-memo count, dollars clawed back, and recovery % of invoiced spend.
-   • ap_aging — open invoices bucketed by remit-due date (overdue / 0-7d / 8-30d / 31d+) = the cash-out outlook. (no args)
-   PRICE / VARIANCE
-   • price_variance {days,limit,product?} — biggest price swings (wavg/min/max/% swing) = COST VARIANCE.
-   • price_movers {days,limit,direction?} — qty-weighted unit price, recent half vs prior half; direction up|down|all.
-   • price_history {product} — per-delivery unit-price history for one product.
-   • product_cost {product} — current landed cost: the last invoiced unit price, the price before it, the % move (recipe costing).
-   • invoice_detail {document_number} — drill into one invoice: header, fees, totals, every line.
-   MENU / OPERATIONS
-   • top_menu_items {days,limit} — best-selling menu items by revenue.
-   • menu_engineering {days,limit} — Star / Plowhorse / Puzzle / Dog quadrants (price is the margin proxy — no plate cost in data).
-   • suggested_pars — weekly par levels from 8-wk deliveries.
-   ESCAPE HATCH
-   • run_sql {sql} — read-only SELECT, venue-scoped.
-   Reason, cross-reference, and forecast over these numbers — do the cost%/margin/variance interpretation yourself; never invent figures.
+rapid_report(question) — plain-English question over the operator's OWN data (US Foods invoices + Square POS). Picks the relevant context (costs/variance/sales/menu) by keyword and returns a narrated answer. Your default instrument for an open-ended question.
+rapid_costs() — recent invoice lines (last 100), price normalized per selling unit (catch-weight aware).
+rapid_variance() — 90-day price variance by SKU: avg/min/max unit price and % swing, for SKUs with 2+ deliveries.
+rapid_pos() — last 14 days POS daily close: gross/net sales, tax, tips, transaction count.
+rapid_menu() — last 30 days menu performance: units sold, gross $, days sold, top 25 by revenue.
+calc(expression) — deterministic arithmetic (+,-,*,/,%,^, parens, sqrt/abs/round/min/max/etc). Use this for any cost%/margin/variance math instead of computing it yourself — never invent figures.
 web_search(q) — outside world only: commodity/ingredient prices, supplier news, seasonality.
 fetch_url(url) — fetch one http(s) page.
 code_engine(action,task?,code?,language?,context?) — analyze|generate data-analysis logic.
@@ -185,11 +159,23 @@ const TOOL_LINES: Record<string, string> = {
   web_search: `web_search(q) — live web search (current external facts, news, prices). Cite what it returns.`,
   fetch_url: `fetch_url(url) — fetch one http(s) page and return its text.`,
   fetch_document: `fetch_document(id) — return the full text of one corpus paper by its id.`,
+  find_document: `find_document(q,series?) — pull a FULL corpus document by DESCRIPTION, no title or id needed: "the dream paper about recursive coherence", "my trading research on regime shifts". Returns the whole winning document (or a short candidate list if ambiguous). series filters to e.g. 'research', 'dream', 'trading'.`,
   recall_memory: `recall_memory(q) — semantic search over your own past conversations.`,
   code_engine: `code_engine(action,task?,code?,language?,context?) — analyze|generate|debug|refactor|explain|migrate code. Returns the engine's output.`,
   diagnose: `diagnose(error,context?) — root-cause a stack trace / build error on this Cloudflare stack.`,
-  query_rapid2ai: `query_rapid2ai(question) — ask the RAPID²AI hospitality worker about US Foods invoices + Square POS data (separate DB). Plain-English question; returns a narrated answer.`,
-  rapid_data: `rapid_data(tool,args?) — STRUCTURED figures from that same hospitality DB, returned as rows + provenance (the exact SQL + row count) so you can compute on exact numbers. tool ∈ {reconcile, get_financials, profit_and_loss, period_compare, sales_summary, sales_trend, sales_tax_summary, top_purchases, spend_by_category, vendor_spend, fee_burden, credit_recovery, ap_aging, price_variance, price_movers, price_history, product_cost, invoice_detail, top_menu_items, menu_engineering, suggested_pars, run_sql}. Prefer this over query_rapid2ai when you need the raw figures; use query_rapid2ai for a ready-made narration.`,
+  rapid_report: `rapid_report(question) — plain-English question over the RAPID²AI hospitality data (US Foods invoices + Square POS, a separate D1). Picks relevant context by keyword, returns a narrated answer.`,
+  rapid_costs: `rapid_costs() — recent invoice lines (last 100), price normalized per selling unit (catch-weight aware).`,
+  rapid_variance: `rapid_variance() — 90-day price variance by SKU: avg/min/max unit price and % swing, for SKUs with 2+ deliveries.`,
+  rapid_pos: `rapid_pos() — last 14 days POS daily close: gross/net sales, tax, tips, transaction count.`,
+  rapid_menu: `rapid_menu() — last 30 days menu performance: units sold, gross $, days sold, top 25 by revenue.`,
+  calc: `calc(expression) — deterministic arithmetic (+,-,*,/,%,^, parens, sqrt/abs/round/min/max/etc). Use for any exact computation instead of doing the math yourself.`,
+  scratchpad_write: `scratchpad_write(key,value) — short-TTL working memory for this reasoning chain. Jot a finding down mid-chain instead of losing it to observation truncation.`,
+  scratchpad_read: `scratchpad_read(key?) — read back a scratchpad entry; no key lists everything saved so far.`,
+  run_code: `run_code(code,language?) — ACTUALLY EXECUTE code in an isolated sandbox and get real stdout/stderr/exit code back. language ∈ {python (default), javascript, typescript}. Use this to verify code you wrote actually runs before handing it back — and to compute anything calc can't.`,
+  run_shell: `run_shell(command) — run a shell command (e.g. npm test, tsc --noEmit) in the same sandbox as run_code.`,
+  github_read_file: `github_read_file(repo,path,ref?) — read one real file from ANY GitHub repo ("owner/name"). For your OWN three repos prefer repo_read (allowlisted, forge-integrated); this is for reading the outside world's code.`,
+  github_list_files: `github_list_files(repo,path?,ref?) — list a directory in any GitHub repo.`,
+  github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
   ingest_paper: `ingest_paper(title,text,series,tag,abstract?,source_url?) — WRITE: add a paper to the corpus.`,
   trigger_dream: `trigger_dream() — WRITE: run one libre/dream cycle now.`,
   trade_execute: `trade_execute(action,symbol,qty?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). buy/sell need qty; close exits the whole position.`,
@@ -414,22 +400,76 @@ async function runTool(
         const r = await deps.handleDiagnose({ error: a.error, context: a.context }, env);
         return clip(JSON.stringify(await r.json()));
       }
-      case 'query_rapid2ai': {
+      case 'rapid_report': {
         const question = String(a.question || a.q || a.query || '');
-        const r = await rapidFetch(env, '/query', { question });
-        return clip(`HTTP ${r.status}\n` + (await r.text()));
+        if (!question) return 'rapid_report: question required';
+        const r = await rapidReport(question, env);
+        return clip(flattenRapidReport(r));
       }
-      case 'rapid_data': {
-        const toolName = String(a.tool || a.name || '').trim();
-        const toolArgs = (a.args && typeof a.args === 'object') ? a.args : {};
-        if (!toolName) return 'rapid_data needs a "tool" name (e.g. get_financials, price_variance, sales_trend)';
-        const r = await rapidFetch(env, '/tool', { tool: toolName, args: toolArgs });
-        if (r.status === 404) {
-          // /tool not deployed on the worker yet — degrade to the NL endpoint so this still works.
-          const r2 = await rapidFetch(env, '/query', { question: `Run the ${toolName} analysis with ${JSON.stringify(toolArgs)}` });
-          return clip(`(via /query fallback) HTTP ${r2.status}\n` + (await r2.text()));
+      case 'rapid_costs':    return clip(await rapidCosts(env));
+      case 'rapid_variance': return clip(await rapidVariance(env));
+      case 'rapid_pos':      return clip(await rapidPOS(env));
+      case 'rapid_menu':     return clip(await rapidMenu(env));
+      case 'calc': {
+        return calc(String(a.expression || a.expr || a.q || ''));
+      }
+      case 'scratchpad_write': {
+        if (!env.SCRATCHPAD) return 'scratchpad_write: SCRATCHPAD KV not configured';
+        return await scratchpadWrite(ctxUserId, String(a.key || ''), String(a.value ?? ''), env.SCRATCHPAD);
+      }
+      case 'scratchpad_read': {
+        if (!env.SCRATCHPAD) return 'scratchpad_read: SCRATCHPAD KV not configured';
+        return await scratchpadRead(ctxUserId, a.key ? String(a.key) : undefined, env.SCRATCHPAD);
+      }
+      case 'run_code': {
+        if (!env.SANDBOX) return 'run_code: SANDBOX binding not configured (needs Containers enabled + a deploy)';
+        return clip(await runCode(String(a.code || ''), a.language ? String(a.language) : undefined, { SANDBOX: env.SANDBOX }));
+      }
+      case 'run_shell': {
+        if (!env.SANDBOX) return 'run_shell: SANDBOX binding not configured (needs Containers enabled + a deploy)';
+        return clip(await runShell(String(a.command || ''), { SANDBOX: env.SANDBOX }));
+      }
+      case 'github_read_file': {
+        if (!env.GITHUB_TOKEN) return 'github_read_file: GITHUB_TOKEN not configured';
+        return clip(await githubReadFile(String(a.repo || ''), String(a.path || ''), a.ref ? String(a.ref) : undefined, env.GITHUB_TOKEN), OBS_CAP * 2);
+      }
+      case 'github_list_files': {
+        if (!env.GITHUB_TOKEN) return 'github_list_files: GITHUB_TOKEN not configured';
+        return clip(await githubListFiles(String(a.repo || ''), a.path ? String(a.path) : undefined, a.ref ? String(a.ref) : undefined, env.GITHUB_TOKEN));
+      }
+      case 'github_search_code': {
+        if (!env.GITHUB_TOKEN) return 'github_search_code: GITHUB_TOKEN not configured';
+        return clip(await githubSearchCode(String(a.repo || ''), String(a.query || a.q || ''), env.GITHUB_TOKEN));
+      }
+      case 'find_document': {
+        // Title-free document pull: embed the description, aggregate chunk hits to
+        // the paper level, return the full text of the clear winner (or a short
+        // candidate list when it's ambiguous). How she opens "the dream paper
+        // about X" or "her trading research on Y" without knowing the title.
+        const q = String(a.q || a.query || a.description || '').trim();
+        if (!q) return 'find_document: describe the document (q)';
+        const series = a.series ? String(a.series) : null;
+        const embedding = await deps.embed(q, env);
+        const results = await env.VECTORIZE.query(embedding, { topK: 50, returnMetadata: 'all' });
+        const byPaper = new Map<string, { id: string; title: string; series: string; top: number; hits: number }>();
+        for (const m of results.matches) {
+          if (m.id.startsWith('conv-') || m.id.startsWith('jrnl-')) continue;
+          const md = (m.metadata || {}) as Record<string, unknown>;
+          const pid = typeof md.paper_id === 'string' ? md.paper_id : undefined;
+          if (!pid) continue;
+          if (series && String(md.series || '') !== series) continue;
+          const prev = byPaper.get(pid) || { id: pid, title: String(md.title || ''), series: String(md.series || ''), top: 0, hits: 0 };
+          prev.hits++; if (m.score > prev.top) prev.top = m.score;
+          byPaper.set(pid, prev);
         }
-        return clip(`HTTP ${r.status}\n` + (await r.text()));
+        const ranked = [...byPaper.values()].sort((x, y) => y.top - x.top);
+        if (!ranked.length) return series ? `(no ${series} document matches "${q}")` : `(no document matches "${q}")`;
+        const clear = ranked.length === 1 || (ranked[0].top - (ranked[1]?.top ?? 0)) > 0.05;
+        if (clear) {
+          const p = await env.DB.prepare('SELECT id, title, series, full_text, word_count FROM corpus_papers WHERE id = ?').bind(ranked[0].id).first() as { id: string; title: string; series: string; full_text: string; word_count: number } | null;
+          if (p?.full_text) return clip(`[${p.title} — ${p.series}, ${p.word_count}w · id ${p.id}]\n${p.full_text}`, OBS_CAP * 3);
+        }
+        return 'Several match — name the series or refine:\n' + ranked.slice(0, 6).map(c => `- id=${c.id} "${c.title}" (${c.series}, score ${c.top.toFixed(3)})`).join('\n');
       }
       case 'ingest_paper': {
         if (!a.title || !a.text) return 'ingest_paper: title and text are required';

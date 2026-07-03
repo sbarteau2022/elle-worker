@@ -29,6 +29,12 @@ import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 
+// Required by the Cloudflare Sandbox SDK: the Durable Object class backing the
+// SANDBOX binding (real code execution for run_code/run_shell) must be
+// re-exported from the Worker's entry module.
+export { Sandbox } from '@cloudflare/sandbox';
+import type { Sandbox } from '@cloudflare/sandbox';
+
 export interface Env extends LLMEnv {
   AI:           Ai;
   DB:           D1Database;
@@ -37,10 +43,21 @@ export interface Env extends LLMEnv {
   DOCUMENTS:    R2Bucket;
   VECTORIZE:    VectorizeIndex;
   INGEST_QUEUE: Queue;
-  // Service binding to the RAPID²AI hospitality worker. Same-account
-  // worker→worker fetch over workers.dev is blocked (Cloudflare error 1042),
-  // so the binding is the sanctioned path; public-URL fetch is the fallback.
+  // Service binding to the RAPID²AI hospitality worker. Superseded for the
+  // router's own tool calls by the native RAPID_DB below; kept in case anything
+  // else still wants it.
   RAPID_AI?:        Fetcher;
+  // Native D1 onto rapid2ai-db — the router's rapid_* tools query it directly
+  // (src/rapid.ts) instead of proxying HTTP. Venue-scoped by VENUE_ID.
+  RAPID_DB?:    D1Database;
+  VENUE_ID?:    string;
+  // Router scratchpad (src/scratchpad.ts) — short-TTL working memory so a long
+  // tool chain retains findings past the per-observation truncation.
+  SCRATCHPAD?:  KVNamespace;
+  // Cloudflare Sandbox SDK Durable Object — real code execution (run_code/
+  // run_shell). Needs Containers enabled + a deploy with Docker for the first
+  // image build; until then run_code/run_shell report the binding as missing.
+  SANDBOX?:     DurableObjectNamespace<Sandbox>;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
   GOOGLE_CLIENT_ID?: string;
