@@ -624,6 +624,49 @@ async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Res
 // ── Daemon jobs ─────────────────────────────────────────────
 // Single source of truth for the background loops. Invoked by the external
 // scheduler via POST /api/cron, and by scheduled() if Cloudflare crons return.
+// ── self_schedule drain ───────────────────────────────────────
+// Elle's notes to her future self live in KV as intent:<dueMs>:<id>. Each
+// heartbeat fires the ones that are due (max 3/beat): delete-first so a
+// crashing intent can never loop, run the note through her own router, and
+// land the result in the live feed. This is what makes self_schedule real —
+// she genuinely picks the thought back up.
+async function drainSelfIntents(env: Env): Promise<void> {
+  const now = Date.now();
+  const listed = await env.SESSIONS.list({ prefix: 'intent:', limit: 20 });
+  const due = listed.keys
+    .filter(k => { const ts = Number(k.name.split(':')[1]); return Number.isFinite(ts) && ts <= now; })
+    .slice(0, 3);
+  for (const k of due) {
+    const raw = await env.SESSIONS.get(k.name);
+    await env.SESSIONS.delete(k.name); // delete-first: one shot, crash-safe
+    if (!raw) continue;
+    let intent: { note?: string; session?: string | null } = {};
+    try { intent = JSON.parse(raw); } catch { continue; }
+    const note = String(intent.note || '').trim();
+    if (!note) continue;
+    try {
+      const out = await runRouter(
+        `You left yourself this note and it just came due. Act on it now — investigate, conclude, and answer as the follow-through:\n\n${note}`,
+        env,
+        {
+          embed, ragSearch, recallPastConversations,
+          handleCodeEngine, handleIngest, handleDiagnose, handleResearch, runLibreMode,
+          journalWrite, journalRead, journalThread, journalAnnotate,
+          loadSessionHistory, persistExchange,
+        },
+        { maxSteps: 4, userId: 'self', scope: 'full', sessionId: intent.session || null, source: 'self-intent' },
+      );
+      await env.DB.prepare(
+        `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'self_intent', 'daemon', ?, ?, 'info')`
+      ).bind(generateId(), `follow-through: ${note.slice(0, 90)}`, JSON.stringify({ note, answer: out.answer.slice(0, 2000), steps: out.steps })).run().catch(() => {});
+    } catch (e) {
+      await env.DB.prepare(
+        `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'self_intent', 'daemon', ?, ?, 'warning')`
+      ).bind(generateId(), `intent failed: ${note.slice(0, 90)}`, JSON.stringify({ note, error: (e as Error).message?.slice(0, 300) })).run().catch(() => {});
+    }
+  }
+}
+
 async function runJob(job: string, env: Env): Promise<{ ran: string }> {
   const started = Date.now();
   try {
@@ -635,6 +678,9 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       await env.DB.prepare(
         `DELETE FROM elle_live_events WHERE id NOT IN (SELECT id FROM elle_live_events ORDER BY created_at DESC LIMIT 500)`
       ).run().catch(() => {});
+      // Fire any self_schedule intents that have come due (Elle's notes to her
+      // future self — written by the router tool, keyed intent:<dueMs>:<id>).
+      await drainSelfIntents(env).catch(e => console.error('[INTENT] drain failed:', (e as Error).message));
       return { ran: 'heartbeat' };
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
     case 'research': await runResearchCycle(env); return { ran: 'research' };

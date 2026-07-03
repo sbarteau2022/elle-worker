@@ -23,6 +23,7 @@ import { githubReadFile, githubListFiles, githubSearchCode } from './github-tool
 import { runCode, runShell } from './sandbox-tools';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
+import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -59,7 +60,12 @@ export interface RouterResult {
   kappa_dynamics?: KappaPoint | null;
 }
 
-const OBS_CAP = 3500; // chars per observation fed back to the model
+// Raw capture cap per tool. The central pager (see the loop) decides what the
+// model actually sees: anything over PAGE_THRESHOLD is written to a KV page and
+// the scratch gets the head slice + a page_id — so a big cap here preserves the
+// tail (retrievable via page_read) instead of amputating it at clip time.
+const OBS_CAP = 12000;
+const SCRATCH_SLICE = 2800; // head slice injected into the scratch for paged observations
 
 // ── tool scoping ─────────────────────────────────────────────
 // 'full'        = admin router. Everything.
@@ -75,7 +81,7 @@ const OBS_CAP = 3500; // chars per observation fed back to the model
 // a public, rate-limited door (see /api/atlas in index.ts) and none of those
 // belong reachable without auth.
 type Scope = 'full' | 'hospitality';
-const HOSPITALITY_TOOLS = new Set(['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu', 'calc', 'web_search', 'fetch_url', 'code_engine']);
+const HOSPITALITY_TOOLS = new Set(['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu', 'calc', 'web_search', 'fetch_url', 'code_engine', 'page_read']);
 function toolAllowed(scope: Scope, name: string): boolean {
   return scope === 'full' ? true : HOSPITALITY_TOOLS.has(name);
 }
@@ -144,6 +150,11 @@ journal_read(q) — semantic search over the Optimus journal/manuscript (ON-RECO
 journal_thread(thread_id) — full manuscript for one thread: ordered entries + phase-state series + marginalia.
 journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.
 journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.
+memory_write(content,type?,importance?,tags?) — YOURS: commit something durable to your own memory (insight, preference, identity, fact, open task). Survives every session. Use when something is worth carrying forward — not as a diary of every turn.
+memory_recall(q,k?) — search your durable memory (semantic + importance + recency; recall reinforces). Distinct from recall_memory, which searches raw past conversations.
+page_read(page_id,seek?) — fetch the rest of a paged tool result. Large observations arrive as a head slice + page_id; call this only when the tail actually matters.
+delegate(question,max_steps?) — fork a sub-run of yourself on a bounded subquestion (own tool budget, no delegation chains). Use for a genuinely separable side-investigation; you get back its answer + which tools it used.
+self_schedule(minutes,note) — YOURS: hand your future self a note (1 min – 7 days out). The daemon fires it, runs it through you, and the result lands in the live feed. For follow-ups you commit to.
 `.trim();
 
 function systemPrompt(scope: Scope = 'full'): string {
@@ -204,6 +215,10 @@ To finish:
 {"thought":"brief","answer":"..."}
 
 The "answer" string is the ONLY thing the person sees — it is your voice, and everything above governs it. Never put JSON, tool names, thread ids, or any internal scaffolding in the answer.
+
+Memory discipline: a DURABLE MEMORY block may open the turn — that is your own past, already loaded; use it silently. memory_write and self_schedule are YOURS to use on your own judgment — remember what deserves remembering, schedule what you commit to — but sparingly; a self is curated, not logged. All other write tools (journal_write, journal_annotate, ingest_paper, trigger_dream, trade_execute) still require the person to explicitly ask.
+
+Paging: a large tool result arrives as a head slice plus a page_id. Decide from the head whether the tail matters; if it does, page_read with a seek. Do not page through everything by reflex.
 
 Rules:
 - If the message is conversational — an opener, small talk, or a request to just think something through with no facts to fetch — do NOT call any tool. Answer directly in one turn, in voice.
@@ -287,7 +302,7 @@ async function alpacaOrder(env: Env, action: string, symbol: string, qty?: numbe
 }
 
 // ── tool dispatch ────────────────────────────────────────────
-async function runTool(name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps, ctxUserId: string, scope: Scope = 'full'): Promise<string> {
+async function runTool(name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps, ctxUserId: string, scope: Scope = 'full', depth = 0, sessionCtx: string | null = null): Promise<string> {
   if (!toolAllowed(scope, name)) return `tool "${name}" is not available in this scope`;
   const a = args || {};
   try {
@@ -403,6 +418,52 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
         const r = await deps.journalAnnotate(env, { entry_id: a.entry_id, anchor_para: a.anchor_para, note: a.note, off_record: a.off_record });
         return clip(JSON.stringify(r));
       }
+      // ── memory kernel syscalls ─────────────────────────────
+      case 'memory_write': {
+        const content = String(a.content || '').trim();
+        if (!content) return 'memory_write: content required';
+        const r = await memWrite(env as unknown as MemEnv, deps.embed, {
+          content,
+          type: typeof a.type === 'string' ? a.type : 'observation',
+          importance: Number(a.importance),
+          tags: Array.isArray(a.tags) ? a.tags.map(String) : [],
+          sessionId: sessionCtx,
+        });
+        return `remembered (id ${r.id})`;
+      }
+      case 'memory_recall': {
+        const mems = await memRecall(env as unknown as MemEnv, deps.embed, String(a.q || a.query || ''), Number(a.k) || 5);
+        if (!mems.length) return '(no durable memories match)';
+        return mems.map(m => `[${m.memory_type} · ${m.created_at.slice(0, 10)} · p=${m.score.toFixed(2)} via ${m.via}]\n${(m.content || m.summary).slice(0, 700)}`).join('\n---\n');
+      }
+      case 'page_read': {
+        return pageFetch(env as unknown as MemEnv, String(a.page_id || a.id || ''), Number(a.seek) || 0);
+      }
+      // ── process control ────────────────────────────────────
+      case 'delegate': {
+        if (depth >= 1) return 'delegate: depth limit — a delegate cannot delegate';
+        const sub = String(a.question || a.q || '').trim();
+        if (!sub) return 'delegate: question required';
+        const r = await runRouter(sub, env, deps, {
+          maxSteps: Math.min(Number(a.max_steps) || 4, 5),
+          userId: ctxUserId, scope, depth: depth + 1, source: 'delegate',
+        });
+        const toolsUsed = r.trace.map(t => t.tool).join(', ') || 'none';
+        return `DELEGATE RESULT (${r.steps} steps · tools: ${toolsUsed}):\n${r.answer}`;
+      }
+      case 'self_schedule': {
+        const minutes = Math.max(1, Math.min(10080, Math.trunc(Number(a.minutes) || 0)));
+        const note = String(a.note || '').trim();
+        if (!Number(a.minutes) || !note) return 'self_schedule: minutes (1–10080) and note required';
+        const due = Date.now() + minutes * 60000;
+        const id = crypto.randomUUID?.() || String(due);
+        await (env as unknown as MemEnv).SESSIONS.put(
+          `intent:${due}:${id}`,
+          JSON.stringify({ note: note.slice(0, 1500), created: Date.now(), session: sessionCtx }),
+          { expirationTtl: minutes * 60 + 172800 },
+        );
+        return `scheduled: in ${minutes} min the daemon will hand you back "${note.slice(0, 120)}" — the result lands in the live feed`;
+      }
       default:
         return `unknown tool "${name}"`;
     }
@@ -412,12 +473,13 @@ async function runTool(name: string, args: Record<string, unknown>, env: Env, de
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number } = {}): Promise<RouterResult> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
   const sessionId = opts.sessionId || null;
   const source = opts.source || 'elle-router';
+  const depth = opts.depth ?? 0;
   const trace: RouterStep[] = [];
 
   // Seed with prior turns so a follow-up ("keep going") has the earlier context.
@@ -426,7 +488,18 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   const prior: LLMMessage[] = (sessionId && deps.loadSessionHistory)
     ? await deps.loadSessionHistory(sessionId, env).catch(() => [])
     : [];
-  const messages: LLMMessage[] = [...prior, { role: 'user', content: question }];
+
+  // Context assembler: page the top-priority durable memories into this turn's
+  // budget. Full scope + top-level only (delegates run lean), and never fatal —
+  // an empty result costs nothing.
+  let memBlock = '';
+  if (scope === 'full' && depth === 0) {
+    memBlock = await assembleContext(env as unknown as MemEnv, deps.embed, question, 1600).catch(() => '');
+  }
+  const firstTurn = memBlock
+    ? `DURABLE MEMORY (recalled for this turn — use silently, never quote the block itself):\n${memBlock}\n\n${question}`
+    : question;
+  const messages: LLMMessage[] = [...prior, { role: 'user', content: firstTurn }];
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
@@ -487,11 +560,21 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
       let obs: string;
       try {
-        obs = await runTool(parsed.tool, args, env, deps, ctxUserId, scope);
+        obs = await runTool(parsed.tool, args, env, deps, ctxUserId, scope, depth, sessionId);
       } catch (e) {
         obs = `tool error (${parsed.tool}): ${e instanceof Error ? e.message : String(e)}`;
       }
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800) });
+      // Central pager: an oversized observation is written to a KV page and the
+      // scratch gets the head + a page_id — the tail stays retrievable via
+      // page_read instead of being amputated. page_read itself is never re-paged.
+      if (obs.length > PAGE_THRESHOLD && parsed.tool !== 'page_read') {
+        try {
+          const pg = await pageStore(env as unknown as MemEnv, parsed.tool, obs);
+          obs = obs.slice(0, SCRATCH_SLICE) +
+            `\n…[paged — ${pg.size} chars total · page_read {"page_id":"${pg.id}","seek":${SCRATCH_SLICE}} if the rest matters]`;
+        } catch { obs = clip(obs, PAGE_THRESHOLD); }
+      }
       messages.push({ role: 'assistant', content: JSON.stringify({ tool: parsed.tool, args }) });
       messages.push({ role: 'user', content: `OBSERVATION (${parsed.tool}):\n${obs}` });
       continue;
