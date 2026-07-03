@@ -66,27 +66,19 @@ bucket_name = "elle-documents"
 binding = "VECTORIZE"
 index_name = "elle-corpus-vectors"
 
-# Real code execution for the router's run_code/run_shell tools
-# (src/sandbox-tools.ts) — an isolated container per Durable Object instance.
-# REQUIRES: Docker running locally for the first `wrangler dev`/`wrangler
-# deploy` (builds + pushes the container image, ~2-3 min the first time),
-# and Containers enabled on this Cloudflare account. Nothing else in this
-# file depends on this block — if Containers isn't available yet, delete
-# this block + the durable_objects binding + the migration below and
-# run_code/run_shell will cleanly report "SANDBOX binding not configured"
-# instead of failing to deploy.
-[[containers]]
-class_name = "Sandbox"
-image = "./Dockerfile.sandbox"
-max_instances = 2
-
-[[durable_objects.bindings]]
-class_name = "Sandbox"
-name = "SANDBOX"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["Sandbox"]
+# NOTE: real code execution (run_code/run_shell via the Cloudflare Sandbox
+# SDK) is intentionally NOT wired here. It requires a Containers-enabled
+# account plus a Docker image build at deploy time, and the Dockerfile.sandbox
+# template it shipped with references a turbo/pnpm monorepo (@repo/sandbox-
+# container) that this repo is not — so `wrangler deploy` failed on the image
+# build on every push, blocking ALL deploys. With no [[containers]]/Durable
+# Object binding, env.SANDBOX is undefined and run_code/run_shell cleanly
+# report "SANDBOX binding not configured" (see src/sandbox-tools.ts). Elle's
+# real code execution remains the forge: she writes to an elle/* branch and
+# CI runs it. To re-enable the sandbox later: set up a valid container image,
+# re-add [[containers]] + [[durable_objects.bindings]] + a [[migrations]]
+# block, restore the @cloudflare/sandbox dependency, and re-import it in
+# src/sandbox-tools.ts.
 
 [[queues.producers]]
 binding = "INGEST_QUEUE"
