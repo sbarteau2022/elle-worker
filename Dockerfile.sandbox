@@ -65,7 +65,7 @@ COPY . .
 
 # Prune to only @repo/sandbox-container and its dependencies (@repo/shared)
 # The --docker flag generates out/json and out/full directories
-RUN turbo prune @repo/sandbox-container --docker
+RUN turbo prune elle-router-sandbox --docker
 
 # ============================================================================
 # Stage 2: Install dependencies and build packages
