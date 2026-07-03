@@ -22,7 +22,7 @@ import { runTradingCycle, runDailyJournal } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
-import { runRouter, type Scope } from './router';
+import { runRouter, ensureNotebook, type Scope } from './router';
 import { ELLE_VOICE } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
