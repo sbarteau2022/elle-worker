@@ -22,7 +22,7 @@ import { runTradingCycle, runDailyJournal } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
-import { runRouter } from './router';
+import { runRouter, ensureNotebook } from './router';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
@@ -1004,6 +1004,26 @@ export default {
     // Auto-opens a clear winner (full text) or returns a ranked candidate list.
     if (path === '/api/corpus-resolve')
       return handleCorpusResolve(body as { q?: string; query?: string; open?: boolean; topK?: number }, env);
+    // Elle's notebook — her own room, distinct from the Optimus correspondence.
+    // She writes via the notebook_write router tool; this endpoint is the READ
+    // surface for the workbench dropdown (list) plus a manual write for parity.
+    if (path === '/api/notebook') {
+      const nb = body as { action?: string; q?: string; limit?: number; title?: string; body?: string; mood?: string; tags?: string[] };
+      await ensureNotebook(env);
+      if ((nb.action || 'list') === 'list') {
+        const limit = Math.min(Math.max(Number(nb.limit) || 50, 1), 200);
+        const rows = nb.q
+          ? await env.DB.prepare(`SELECT id, title, body, mood, tags, source, created_at FROM elle_notebook WHERE title LIKE ?1 OR body LIKE ?1 ORDER BY created_at DESC LIMIT ?2`).bind(`%${nb.q}%`, limit).all()
+          : await env.DB.prepare(`SELECT id, title, body, mood, tags, source, created_at FROM elle_notebook ORDER BY created_at DESC LIMIT ?1`).bind(limit).all();
+        return json({ entries: rows.results || [] });
+      }
+      if (nb.action === 'write' && nb.title && nb.body) {
+        await env.DB.prepare(`INSERT INTO elle_notebook (id, title, body, mood, tags, source) VALUES (?, ?, ?, ?, ?, 'manual')`)
+          .bind(generateId(), String(nb.title).slice(0, 200), String(nb.body).slice(0, 24000), nb.mood ? String(nb.mood).slice(0, 60) : null, JSON.stringify((nb.tags || []).slice(0, 10))).run();
+        return json({ success: true });
+      }
+      return err('action must be list or write (write needs title + body)');
+    }
     // Optimus journal — the manuscript/phase-state layer. User-gated: the
     // reader owns their journal. off_record + κ rules enforced in journal.ts.
     if (path === '/api/optimus-journal')
