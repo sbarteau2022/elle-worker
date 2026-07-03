@@ -33,6 +33,7 @@ import { githubReadFile, githubListFiles, githubSearchCode } from './github-tool
 import { runCode, runShell } from './sandbox-tools';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
+import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -69,7 +70,12 @@ export interface RouterResult {
   kappa_dynamics?: KappaPoint | null;
 }
 
-const OBS_CAP = 3500; // chars per observation fed back to the model
+// Raw capture cap per tool. The central pager (see the loop) decides what the
+// model actually sees: anything over PAGE_THRESHOLD is written to a KV page and
+// the scratch gets the head slice + a page_id — so a big cap here preserves the
+// tail (retrievable via page_read) instead of amputating it at clip time.
+const OBS_CAP = 12000;
+const SCRATCH_SLICE = 2800; // head slice injected into the scratch for paged observations
 
 // ── tool scoping ─────────────────────────────────────────────
 // 'full'        = admin router. Everything, including the write tools and
@@ -274,6 +280,12 @@ You may also steer which of your engines runs your NEXT step by adding "engine" 
 
 The "answer" string is the ONLY thing the person sees — it is your voice, and everything above governs it. Never put JSON, tool names, thread ids, or any internal scaffolding in the answer.
 
+Memory discipline: a DURABLE MEMORY block may open the turn — that is your own past, already loaded; use it silently. memory_write and self_schedule are YOURS to use on your own judgment — remember what deserves remembering, schedule what you commit to — but sparingly; a self is curated, not logged. All other write tools (journal_write, journal_annotate, ingest_paper, trigger_dream, trade_execute) still require the person to explicitly ask.
+
+Paging: a large tool result arrives as a head slice plus a page_id. Decide from the head whether the tail matters; if it does, page_read with a seek. Do not page through everything by reflex.
+
+Curiosity is licensed. When something snags you mid-conversation — a fact that doesn't sit right, a thread you want to pull later — you may web_search it now if it serves the turn, self_schedule it if it doesn't, and notebook_write what you actually found or suspect. The notebook is where your curiosity accumulates into something; an unrecorded noticing is a noticing lost.
+
 Rules:
 ${rules}
 
@@ -346,6 +358,21 @@ async function alpacaOrder(env: Env, action: string, symbol: string, qty?: numbe
     return { paper: base.includes('paper'), order: await r.json() };
   }
   return { error: `unknown trade action "${action}" (expected buy|sell|close)` };
+}
+
+// Self-healing schema for the notebook — one CREATE IF NOT EXISTS per isolate,
+// so the table exists on any environment without a bootstrap dependency.
+let notebookReady = false;
+export async function ensureNotebook(env: Env): Promise<void> {
+  if (notebookReady) return;
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS elle_notebook (
+       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+       title TEXT NOT NULL, body TEXT NOT NULL, mood TEXT,
+       tags TEXT DEFAULT '[]', source TEXT DEFAULT 'router',
+       created_at TEXT DEFAULT (datetime('now')))`
+  ).run();
+  notebookReady = true;
 }
 
 // ── tool dispatch ────────────────────────────────────────────
@@ -573,12 +600,13 @@ async function runTool(
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number } = {}): Promise<RouterResult> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
   const sessionId = opts.sessionId || null;
   const source = opts.source || 'elle-router';
+  const depth = opts.depth ?? 0;
   const trace: RouterStep[] = [];
 
   // Seed with prior turns so a follow-up ("keep going") has the earlier context.
@@ -587,7 +615,18 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   const prior: LLMMessage[] = (sessionId && deps.loadSessionHistory)
     ? await deps.loadSessionHistory(sessionId, env).catch(() => [])
     : [];
-  const messages: LLMMessage[] = [...prior, { role: 'user', content: question }];
+
+  // Context assembler: page the top-priority durable memories into this turn's
+  // budget. Full scope + top-level only (delegates run lean), and never fatal —
+  // an empty result costs nothing.
+  let memBlock = '';
+  if (scope === 'full' && depth === 0) {
+    memBlock = await assembleContext(env as unknown as MemEnv, deps.embed, question, 1600).catch(() => '');
+  }
+  const firstTurn = memBlock
+    ? `DURABLE MEMORY (recalled for this turn — use silently, never quote the block itself):\n${memBlock}\n\n${question}`
+    : question;
+  const messages: LLMMessage[] = [...prior, { role: 'user', content: firstTurn }];
 
   // Self-awareness: her own κ trajectory this session, injected into the prompt
   // so she carries her phase state the way a person carries a mood. Best-effort
@@ -683,6 +722,16 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
         obs = `tool error (${parsed.tool}): ${e instanceof Error ? e.message : String(e)}`;
       }
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800) });
+      // Central pager: an oversized observation is written to a KV page and the
+      // scratch gets the head + a page_id — the tail stays retrievable via
+      // page_read instead of being amputated. page_read itself is never re-paged.
+      if (obs.length > PAGE_THRESHOLD && parsed.tool !== 'page_read') {
+        try {
+          const pg = await pageStore(env as unknown as MemEnv, parsed.tool, obs);
+          obs = obs.slice(0, SCRATCH_SLICE) +
+            `\n…[paged — ${pg.size} chars total · page_read {"page_id":"${pg.id}","seek":${SCRATCH_SLICE}} if the rest matters]`;
+        } catch { obs = clip(obs, PAGE_THRESHOLD); }
+      }
       messages.push({ role: 'assistant', content: JSON.stringify({ tool: parsed.tool, args }) });
       messages.push({ role: 'user', content: `OBSERVATION (${parsed.tool}):\n${obs}` });
       continue;
