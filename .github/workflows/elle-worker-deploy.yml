@@ -22,7 +22,13 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
-      - run: npm ci
+      # `npm install`, not `npm ci`: the committed lockfile is generated in a
+      # single-platform environment, so it can omit other-OS optional deps
+      # (@cloudflare/workerd-*, @img/sharp-*). npm 11 on the runner rejects that
+      # under the strict `npm ci` check ("Missing … from lock file"); `npm
+      # install` reconciles it instead. Deps are pinned by version ranges either
+      # way, and there's nothing here that a floating patch would break.
+      - run: npm install --no-audit --no-fund
       - name: Deploy
         run: npx wrangler deploy
         env:
