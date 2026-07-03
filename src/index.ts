@@ -538,6 +538,22 @@ async function handleResearch(body: Record<string, unknown>, env: Env): Promise<
   });
 }
 
+// Her trading desk, for the workbench Trading tab: the live account, open
+// positions, recent trades (with her reasoning), active theses, and her own
+// trading journal. Read-only; admin-gated in the fetch handler.
+async function handleTradingView(env: Env): Promise<Response> {
+  const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
+  const [account, positions, trades, theses, journal, observations] = await Promise.all([
+    grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
+    grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
+    grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, confidence, status, created_at, closed_at FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
+    grab(env.DB.prepare('SELECT thesis_type, title, thesis, confidence, updated_at FROM elle_market_thesis WHERE is_active = 1 ORDER BY confidence DESC LIMIT 8').all().then(r => r.results)),
+    grab(env.DB.prepare('SELECT * FROM elle_trading_journal ORDER BY journal_date DESC LIMIT 14').all().then(r => r.results)),
+    grab(env.DB.prepare('SELECT observation_type, symbol, observation, created_at FROM elle_market_observations ORDER BY created_at DESC LIMIT 20').all().then(r => r.results)),
+  ]);
+  return json({ account, positions, trades, theses, journal, observations });
+}
+
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
   const { action = 'analyze', code, language, task, context, use_corpus = true, session_id } = body as {
     action?: string; code?: string; language?: string; task?: string;
@@ -898,6 +914,7 @@ export default {
     // Conductor intents — the workbench's window into her autonomous work
     // queue and run log. Admin-gated like everything else internal.
     if (path === '/api/elle-intents')      { if (!svc) return err('Unauthorized', 401); return json(await handleIntents(body, env)); }
+    if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
