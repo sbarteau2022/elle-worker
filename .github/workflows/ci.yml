@@ -27,7 +27,9 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
-      - run: npm ci
+      # npm install (not ci): the lockfile can omit other-OS optional deps and
+      # npm 11's strict `npm ci` check rejects that. See the deploy workflow.
+      - run: npm install --no-audit --no-fund
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Test
