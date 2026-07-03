@@ -79,6 +79,21 @@ index_name = "elle-corpus-vectors"
 # re-add [[containers]] + [[durable_objects.bindings]] + a [[migrations]]
 # block, restore the @cloudflare/sandbox dependency, and re-import it in
 # src/sandbox-tools.ts.
+#
+# A prior (manual) deploy DID register the Sandbox Durable Object class on the
+# live worker (migration v1, new_sqlite_classes = ["Sandbox"]). Cloudflare will
+# not let a new version silently drop a class that existing Durable Objects
+# depend on, so removing the class requires an explicit delete-class migration.
+# The Sandbox DOs are throwaway code-execution containers with no durable user
+# data, so deleting them loses nothing. v1 stays listed for history (already
+# applied, not re-run); v2 removes the class.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["Sandbox"]
 
 [[queues.producers]]
 binding = "INGEST_QUEUE"
