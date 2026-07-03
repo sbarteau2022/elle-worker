@@ -93,6 +93,33 @@ function id(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 }
 
+// ── the `review_runs` tool — she reads her OWN autonomous run log ───────────
+// Closes the loop: the conductor acts unprompted and records each run; this
+// lets her read those runs back, assess whether they moved the work, and
+// refine her intents. Autonomy that can inspect itself is autonomy that
+// improves. Full scope only.
+export async function reviewRunsTool(env: Env, a: Record<string, unknown>): Promise<string> {
+  await ensureSchema(env);
+  const intentId = a.intent_id ? String(a.intent_id) : null;
+  const limit = Math.min(Math.max(Number(a.limit) || 10, 1), 25);
+  const rows = intentId
+    ? await env.DB.prepare(
+        'SELECT id, intent_id, kind, started_at, finished_at, steps, outcome FROM elle_runs WHERE intent_id = ? OR intent_id = ? ORDER BY started_at DESC LIMIT ?'
+      ).bind(intentId, `forge:${intentId}`, limit).all().catch(() => ({ results: [] as any[] }))
+    : await env.DB.prepare(
+        'SELECT id, intent_id, kind, started_at, finished_at, steps, outcome FROM elle_runs ORDER BY started_at DESC LIMIT ?'
+      ).bind(limit).all().catch(() => ({ results: [] as any[] }));
+  const runs = (rows.results || []).map((r: any) => ({
+    when: new Date(Number(r.started_at)).toISOString(),
+    kind: r.kind, intent_id: r.intent_id, steps: r.steps,
+    seconds: Math.max(1, Math.round((Number(r.finished_at) - Number(r.started_at)) / 1000)),
+    outcome: String(r.outcome || '').slice(0, 500),
+  }));
+  return runs.length
+    ? JSON.stringify({ count: runs.length, runs })
+    : '(no autonomous runs recorded yet)';
+}
+
 // ── the `intent` tool (router, full scope) — she manages her own queue ──────
 export async function intentTool(env: Env, a: Record<string, unknown>): Promise<string> {
   await ensureSchema(env);
