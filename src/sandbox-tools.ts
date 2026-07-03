@@ -1,65 +1,48 @@
 // ============================================================
-// ELLE — real code execution · src/sandbox-tools.ts
+// ELLE — real code execution · src/sandbox-tools.ts  (DORMANT)
 //
-// Everything else Elle had for "coding" (code_engine, diagnose) was pure LLM
-// text generation — she could write plausible code and plausible root-cause
-// analysis with no way to check either was actually correct. This wires the
-// Cloudflare Sandbox SDK (isolated container, Durable-Object-backed) so
-// run_code actually EXECUTES and returns real stdout/stderr/exit code.
+// This was wired to the Cloudflare Sandbox SDK (isolated container, Durable-
+// Object-backed) so run_code/run_shell could actually EXECUTE and return real
+// stdout/stderr/exit code. It is currently DORMANT and imports no SDK, because:
 //
-// DEPLOYMENT NOTE: this needs a [[containers]] block + Durable Object
-// migration in wrangler.toml (added), Docker running locally for the first
-// `wrangler dev`/`wrangler deploy` (which builds and pushes the container
-// image), and Containers enabled on the Cloudflare account. None of that can
-// be completed or verified from this environment — no Docker daemon, no
-// wrangler auth. The code below typechecks against the real SDK types but
-// is unverified at runtime until deployed.
+//   - Cloudflare Containers require a Docker image build at deploy time and a
+//     Containers-enabled account. The Dockerfile.sandbox that shipped with the
+//     SDK is a turbo/pnpm monorepo template (@repo/sandbox-container) that this
+//     repo is not, so `wrangler deploy` failed on the image build on EVERY
+//     push — blocking all deploys, not just this feature.
+//
+// With no SANDBOX binding in wrangler.toml, env.SANDBOX is undefined and the
+// router's run_code/run_shell tools short-circuit to "SANDBOX binding not
+// configured" (see router.ts) before these functions are ever reached. These
+// stubs keep the tool surface + types stable so re-enabling is a small,
+// contained change and nothing else in the worker has to move.
+//
+// Elle's real code execution meanwhile is the FORGE: she writes to an elle/*
+// branch and CI runs the typecheck + tests. That path deploys and works today.
+//
+// TO RE-ENABLE: build a valid container image, re-add the [[containers]] +
+// [[durable_objects.bindings]] + [[migrations]] blocks in wrangler.toml,
+// restore the "@cloudflare/sandbox" dependency in package.json, and swap these
+// stubs back to the SDK implementation (git history has it).
 // ============================================================
 
-import { getSandbox } from '@cloudflare/sandbox';
-import type { Sandbox } from '@cloudflare/sandbox';
-
+// Kept generic so this module needs no external package. When the SANDBOX
+// binding exists again, tighten this to DurableObjectNamespace<Sandbox>.
 export interface SandboxEnv {
-  SANDBOX: DurableObjectNamespace<Sandbox>;
+  SANDBOX: unknown;
 }
 
-// One warm sandbox per isolate rather than one per call — a fresh container
-// cold-start is multi-second, and router tool calls are typically several in
-// a row within one question. Code execution is stateless/untrusted per call
-// regardless (no secrets are ever passed into envVars below).
-const SANDBOX_ID = 'elle-router-sandbox';
-
-const SUPPORTED = new Set(['python', 'javascript', 'typescript']);
+const DISABLED =
+  'run_code/run_shell: the container sandbox is not deployed on this worker. ' +
+  'Use the forge (repo_read → forge_open → forge_write → forge_check) to write ' +
+  'code and let CI execute it.';
 
 export async function runCode(
-  code: string, language: string | undefined, env: SandboxEnv
+  _code: string, _language: string | undefined, _env: SandboxEnv,
 ): Promise<string> {
-  if (!code || !code.trim()) return 'run_code: code required';
-  const lang = SUPPORTED.has(String(language)) ? (language as 'python' | 'javascript' | 'typescript') : 'python';
-
-  const sandbox = getSandbox(env.SANDBOX, SANDBOX_ID);
-  const result = await sandbox.runCode(code, { language: lang, timeout: 20000 });
-
-  const out: string[] = [];
-  if (result.logs.stdout.length) out.push('stdout:\n' + result.logs.stdout.join(''));
-  if (result.logs.stderr.length) out.push('stderr:\n' + result.logs.stderr.join(''));
-  if (result.error) out.push(`ERROR: ${result.error.name}: ${result.error.message}\n${result.error.traceback.join('\n')}`);
-  for (const r of result.results) {
-    if (r.text) out.push(`result: ${r.text}`);
-    else if (r.json !== undefined) out.push(`result (json): ${JSON.stringify(r.json)}`);
-  }
-  if (!out.length) return '(no output)';
-  return out.join('\n\n');
+  return DISABLED;
 }
 
-// Raw shell command in the same sandbox — for when Elle needs to run a
-// build/test command (npm test, tsc --noEmit) rather than eval a snippet.
-export async function runShell(command: string, env: SandboxEnv): Promise<string> {
-  if (!command || !command.trim()) return 'run_shell: command required';
-  const sandbox = getSandbox(env.SANDBOX, SANDBOX_ID);
-  const result = await sandbox.exec(command, { origin: 'user' });
-  const parts = [`exit ${result.exitCode} (${result.success ? 'ok' : 'failed'}) in ${result.duration}ms`];
-  if (result.stdout) parts.push('stdout:\n' + result.stdout);
-  if (result.stderr) parts.push('stderr:\n' + result.stderr);
-  return parts.join('\n\n');
+export async function runShell(_command: string, _env: SandboxEnv): Promise<string> {
+  return DISABLED;
 }

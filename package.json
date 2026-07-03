@@ -1,7 +1,7 @@
 {
   "name": "elle-worker",
   "version": "1.0.0",
-  "private": true, "packageManager": "pnpm@8.8.0",
+  "private": true,
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -13,8 +13,5 @@
     "typescript": "^5.0.0",
     "vitest": "^4.1.9",
     "wrangler": "^4.105.0"
-  },
-  "dependencies": {
-    "@cloudflare/sandbox": "^0.12.3"
   }
 }
