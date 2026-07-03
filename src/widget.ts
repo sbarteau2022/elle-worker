@@ -22,7 +22,7 @@ var script = document.currentScript || (function(){var s=document.getElementsByT
 var WORKER = (script && script.src) ? script.src.replace(/\\/widget\\.js.*$/,'') : 'https://elle-worker.sbarteau2022.workers.dev';
 var ACCENT = (script && script.getAttribute('data-accent')) || '#C9A84C';
 var TITLE  = (script && script.getAttribute('data-title')) || 'Elle';
-var GREET  = (script && script.getAttribute('data-greeting')) || "I'm Elle \\u2014 the intelligence behind The Ethical Intelligence Project. Ask me anything: the corpus, the programs, or what you're trying to navigate.";
+var GREET  = (script && script.getAttribute('data-greeting')) || "I'm Elle \\u2014 the intelligence behind The Ethical Intelligence Project. Say what you're actually here to think about; we'll start there.";
 
 var css = document.createElement('style');
 css.textContent = '\\

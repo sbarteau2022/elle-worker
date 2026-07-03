@@ -1,5 +1,5 @@
 // ============================================================
-// src/idempotency.ts  —  exactly-once guard for the router's WRITE tools.
+// src/router-idempotency.ts  —  exactly-once guard for the router's WRITE tools.
 //
 // WHY: runRouter() is a plain in-memory ReAct loop. Nothing checkpoints, so
 // any re-run (client double-tap, CF retry, the LLM emitting `buy` twice in
@@ -11,17 +11,26 @@
 // (runOptimusJournal, US Foods ingestion) to Workflows — Cloudflare's own
 // rule is "steps should be idempotent," and this is that guarantee.
 //
-// MIGRATION (run once, e.g. via your /api/_bootstrap path):
-//   CREATE TABLE IF NOT EXISTS elle_idempotency (
-//     key         TEXT PRIMARY KEY,
-//     tool        TEXT NOT NULL,
-//     result_json TEXT,
-//     status      TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'done'
-//     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-//   );
+// The table bootstraps itself on first use (see ensureSchema below) — no
+// manual migration step.
 // ============================================================
 
 type OnceOpts = { windowSec?: number | null };
+
+// The guard bootstraps its own table (idempotent, memoized per isolate) so it
+// works the first time a write tool fires — no manual migration required.
+let schemaReady = false;
+async function ensureSchema(env: any): Promise<void> {
+  if (schemaReady) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_idempotency (
+    key         TEXT PRIMARY KEY,
+    tool        TEXT NOT NULL,
+    result_json TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  )`).run();
+  schemaReady = true;
+}
 
 /**
  * Run `fn` at most once for a given `key`. A second call with the same key
@@ -35,6 +44,7 @@ export async function ensureOnce<T>(
   fn: () => Promise<T>,
   opts: OnceOpts = {}
 ): Promise<{ replayed: boolean; result: T }> {
+  await ensureSchema(env);
   const windowSec = opts.windowSec ?? null;
   const cutoff = windowSec
     ? `AND created_at >= datetime('now', '-${Math.floor(windowSec)} seconds')`
@@ -90,42 +100,5 @@ export function ingestKey(title: string): string {
   return `ingest:${norm}`;
 }
 
-// ============================================================
-// DROP-IN PATCHES for src/router.ts  (replace the two case bodies in runTool)
-// import { ensureOnce, orderKey, ingestKey } from "./idempotency";
-// ============================================================
-/*
-      case "trade_execute": {
-        const action = String(a.action || "");
-        const symbol = String(a.symbol || "");
-        const qty = Number(a.qty);
-        // Dedupe identical orders within 90s: kills double-taps + LLM re-emits.
-        const { replayed, result } = await ensureOnce(
-          env2,
-          orderKey(action, symbol, qty),
-          "trade_execute",
-          () => alpacaOrder(env2, action, symbol, qty),
-          { windowSec: 90 }
-        );
-        return clip(JSON.stringify(replayed ? { ...result, idempotent_replay: true } : result));
-      }
-
-      case "ingest_paper": {
-        if (!a.title || !a.text) return "ingest_paper: title and text are required";
-        // Same title never ingests twice → no duplicate corpus_papers rows.
-        const { replayed, result } = await ensureOnce(
-          env2,
-          ingestKey(String(a.title)),
-          "ingest_paper",
-          async () => {
-            const r = await deps.handleIngest(
-              { title: a.title, text: a.text, series: a.series, tag: a.tag,
-                abstract: a.abstract, source_url: a.source_url },
-              env2
-            );
-            return await r.json();
-          }
-        );
-        return clip(JSON.stringify(replayed ? { ...result, idempotent_replay: true } : result));
-      }
-*/
+// Wired into src/router.ts runTool: trade_execute dedupes identical orders
+// within 90s; ingest_paper never ingests the same normalized title twice.

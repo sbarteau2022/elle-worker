@@ -1,0 +1,34 @@
+# CI — the judge Elle's forge iterates against.
+#
+# Runs on every PR to main and on every push to an elle/* work branch, so a
+# forge task gets a verdict per commit before any acceptance decision. This
+# file is deliberately read-only to her: forge_write refuses paths under
+# .github/workflows, because the gate that judges the work must not be
+# editable by the thing being judged.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: ['elle/**']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    name: Typecheck and test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Test
+        run: npm test
