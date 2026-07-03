@@ -828,6 +828,13 @@ export default {
       });
     }
 
+    // Her identity, verbatim — the single source of her voice (mind.ts), served
+    // read-only so the workbench can show exactly what governs her without ever
+    // copying the prose into a second place. Public: it's who she is, not a secret.
+    if (path === '/api/elle-identity' && request.method === 'GET') {
+      return json({ voice: ELLE_VOICE, source: 'elle-worker/src/mind.ts' });
+    }
+
     // Embeddable consumer widget — one script tag on any hub page
     if (path === '/widget.js' && request.method === 'GET') {
       return new Response(WIDGET_JS, {
