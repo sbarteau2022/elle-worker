@@ -31,6 +31,7 @@ import { intentTool, reviewRunsTool } from './conductor';
 import { analyzeConstraint } from './constraint';
 import { pfarRoute } from './pfar';
 import { emitEvent, provenanceTool } from './events';
+import { getProfileByUser, profileBlock } from './profiles';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { runCode, runShell } from './sandbox-tools';
@@ -103,7 +104,14 @@ const SCRATCH_SLICE = 2800; // head slice injected into the scratch for paged ob
 //   (RAPID_DB → rapid2ai-db) and are venue-scoped by VENUE_ID.
 // run_code/run_shell/github_*/scratchpad stay out of every public-facing
 // scope: real execution and arbitrary-repo reads belong behind auth.
-export type Scope = 'full' | 'member' | 'public' | 'hospitality';
+export type Scope = 'full' | 'cofounder' | 'member' | 'public' | 'hospitality';
+// 'cofounder' = a trusted second admin who may SEE and use everything EXCEPT
+// shipping or migrating code. Full scope minus the code-delivery path: no
+// forge writes/PRs (opening a branch is the entry to shipping, so it's denied
+// too) and no run_shell (which could apply a migration or deploy). He keeps
+// every read into her code (repo_read/search, github_*, forge_check) and every
+// other capability — trading, conductor, provenance, analysis, run_code.
+const SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell']);
 const HOSPITALITY_TOOLS = new Set(['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu', 'calc', 'web_search', 'fetch_url', 'code_engine']);
 const PUBLIC_TOOLS = new Set([
   'search_corpus', 'fetch_document', 'find_document', 'recall_memory', 'web_search', 'fetch_url', 'code_engine', 'diagnose', 'calc',
@@ -117,6 +125,7 @@ const MEMBER_TOOLS = new Set([
 ]);
 function toolAllowed(scope: Scope, name: string): boolean {
   if (scope === 'full') return true;
+  if (scope === 'cofounder') return !SHIP_DENY.has(name);
   if (scope === 'member') return MEMBER_TOOLS.has(name);
   if (scope === 'public') return PUBLIC_TOOLS.has(name);
   return HOSPITALITY_TOOLS.has(name);
@@ -690,7 +699,15 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   if (scope === 'full' || scope === 'member') {
     skills = await skillIndex(env).catch(() => '');
   }
-  const system = systemPrompt(scope, phase + skills, voice);
+  // Who she's talking to. An admin-tier user (full/cofounder) may have a stored
+  // profile — a dossier that lets her already know them: their work, family,
+  // what they want. Injected so the relationship precedes the first hello.
+  // Best-effort; no profile means she's simply meeting someone new.
+  let who = '';
+  if ((scope === 'full' || scope === 'cofounder') && ctxUserId && ctxUserId !== 'router') {
+    who = profileBlock(await getProfileByUser(env, ctxUserId));
+  }
+  const system = systemPrompt(scope, phase + skills + who, voice);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
