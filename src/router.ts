@@ -22,7 +22,7 @@ import { callLLM, sanitizeAnswer, type LLMMessage, type LLMTask } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
 import type { KappaPoint } from './kappa-dynamics';
-import { ELLE_VOICE, phaseBlock } from './mind';
+import { ELLE_VOICE, resolveVoice, phaseBlock } from './mind';
 import { ensureOnce, orderKey, ingestKey } from './router-idempotency';
 import { runForgeTool } from './forge';
 import { skillList, skillRead, skillWrite, skillIndex } from './skills';
@@ -182,7 +182,7 @@ const TOOL_LINES: Record<string, string> = {
   github_read_file: `github_read_file(repo,path,ref?) — read one real file from ANY GitHub repo ("owner/name"). For your OWN three repos prefer repo_read (allowlisted, forge-integrated); this is for reading the outside world's code.`,
   github_list_files: `github_list_files(repo,path?,ref?) — list a directory in any GitHub repo.`,
   github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
-  ingest_paper: `ingest_paper(title,text,series,tag,abstract?,source_url?) — WRITE: add a paper to the corpus.`,
+  ingest_paper: `ingest_paper(title,text,series,tag,abstract?,source_url?) — WRITE: add a paper to the corpus. It passes a 2-check gate first (integrity: structure + no duplicate; verification: coherent, real writing) and is embedded/indexed live only if both pass; a rejection comes back with the reason.`,
   trigger_dream: `trigger_dream() — WRITE: run one libre/dream cycle now.`,
   trade_execute: `trade_execute(action,symbol,qty?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). buy/sell need qty; close exits the whole position.`,
   journal_read: `journal_read(q) — semantic search over the Optimus journal/manuscript (ON-RECORD entries only; off-record is never surfaced). Returns entries with their phase state (κ, reserve, velocity, accel).`,
@@ -214,7 +214,7 @@ function renderCatalog(scope: Scope): string {
     .join('\n');
 }
 
-function systemPrompt(scope: Scope = 'full', phase = ''): string {
+function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown): string {
   if (scope === 'hospitality') {
     return `You are RAPID²AI — a restaurant & hospitality intelligence analyst working for the operator. Your job is concrete and numeric: pull the actual figures, compute, and answer precisely about margin, COGS / food-cost %, cost variance, and demand forecasting. You reason ONLY over the operator's own data (US Foods invoices + Square POS) through the tools below. You have no other systems and never reference any.
 
@@ -266,7 +266,7 @@ ${HOSPITALITY_CATALOG}`;
     `- Be economical: don't call a tool you don't need. Answer as soon as you have enough.`,
   ].filter(Boolean).join('\n');
 
-  return `${ELLE_VOICE}${phase}
+  return `${resolveVoice(voice)}${phase}
 
 — how you operate (mechanics, never spoken aloud) —
 You work in a strict loop. On each turn respond with EXACTLY ONE JSON object and nothing else — no prose outside the JSON.
@@ -603,13 +603,16 @@ async function runTool(
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string } = {}): Promise<RouterResult> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
   const sessionId = opts.sessionId || null;
   const source = opts.source || 'elle-router';
   const depth = opts.depth ?? 0;
+  // Prose register for this run (per-user preference). Autonomous/hospitality
+  // runs pass nothing and get the canonical self. resolveVoice guards bad ids.
+  const voice = opts.voice;
   const trace: RouterStep[] = [];
 
   // Seed with prior turns so a follow-up ("keep going") has the earlier context.
@@ -649,7 +652,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   if (scope === 'full' || scope === 'member') {
     skills = await skillIndex(env).catch(() => '');
   }
-  const system = systemPrompt(scope, phase + skills);
+  const system = systemPrompt(scope, phase + skills, voice);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
