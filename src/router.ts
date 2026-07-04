@@ -32,6 +32,7 @@ import { analyzeConstraint } from './constraint';
 import { pfarRoute } from './pfar';
 import { emitEvent, provenanceTool } from './events';
 import { getProfileByUser, profileBlock } from './profiles';
+import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { runCode, runShell } from './sandbox-tools';
@@ -704,10 +705,13 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // what they want. Injected so the relationship precedes the first hello.
   // Best-effort; no profile means she's simply meeting someone new.
   let who = '';
+  let onboard = '';
   if ((scope === 'full' || scope === 'cofounder') && ctxUserId && ctxUserId !== 'router') {
     who = profileBlock(await getProfileByUser(env, ctxUserId));
+    // One-time, self-dissolving welcome directive (armed per-user with a TTL).
+    onboard = await onboardingBrief(env, ctxUserId);
   }
-  const system = systemPrompt(scope, phase + skills + who, voice);
+  const system = systemPrompt(scope, phase + skills + who + onboard, voice);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
