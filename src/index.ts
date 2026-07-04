@@ -23,11 +23,12 @@ import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
 import { runRouter, ensureNotebook, type Scope } from './router';
-import { ELLE_VOICE } from './mind';
+import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
+import { runIngestGate } from './ingest-gate';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -264,6 +265,22 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
 async function handleIngest(body: Record<string, string>, env: Env): Promise<Response> {
   const { title, text, series, tag, abstract, source_url } = body;
   if (!title || !text || !series || !tag) return err('title, text, series, and tag required');
+
+  // THE 2-CHECK VERIFICATION GATE. A paper is embedded/chunked/vectorized/indexed
+  // ONLY after it passes integrity (structural + dedup) AND content verification.
+  // Trusted internal callers (e.g. a cron re-ingesting its own output) may pass
+  // skip_verification:true to bypass; everything from /api/ingest and Elle's
+  // ingest_paper tool is gated by default.
+  const trusted = (body as Record<string, unknown>).skip_verification === true
+    || (body as Record<string, unknown>).trusted === true;
+  let gate: Awaited<ReturnType<typeof runIngestGate>> | null = null;
+  if (!trusted) {
+    gate = await runIngestGate({ title, text, series, tag }, env, embed);
+    if (!gate.passed) {
+      return json({ success: false, ingested: false, gate }, 422);
+    }
+  }
+
   const paperId = generateId();
   await env.DOCUMENTS.put(`papers/${paperId}.txt`, text, {
     httpMetadata: { contentType: 'text/plain' },
@@ -288,7 +305,7 @@ async function handleIngest(body: Record<string, string>, env: Env): Promise<Res
     embedded = chunks.length;
   } catch (e) { errors.push((e as Error).message); }
   await env.INGEST_QUEUE.send({ type: 'paper_ingested', paper_id: paperId, title, series, tag, chunks_count: embedded }).catch(() => {});
-  return json({ success: true, paper_id: paperId, chunks_total: chunks.length, chunks_embedded: embedded, errors: errors.length ? errors : undefined });
+  return json({ success: true, ingested: true, paper_id: paperId, chunks_total: chunks.length, chunks_embedded: embedded, gate: gate ? { passed: true, checks: gate.checks } : { skipped: true }, errors: errors.length ? errors : undefined });
 }
 
 // ── Persistent memory helpers ─────────────────────────────────
@@ -356,9 +373,9 @@ async function persistExchange(sessionId: string, source: string, userMessage: s
 }
 
 async function handleConversation(body: Record<string, unknown>, env: Env, _userId: string, task: LLMTask = 'conversation'): Promise<Response> {
-  const { query, messages, session_id, system, source, paper_id } = body as {
+  const { query, messages, session_id, system, source, paper_id, voice } = body as {
     query?: string; messages?: Array<{ role: string; content: string }>;
-    session_id?: string; system?: string; source?: string; paper_id?: string;
+    session_id?: string; system?: string; source?: string; paper_id?: string; voice?: string;
   };
   const userMessage = query || messages?.filter(m => m.role === 'user').at(-1)?.content || '';
   if (!userMessage) return err('query or messages required');
@@ -387,10 +404,11 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
     }
   }
 
-  // The voice is the SAME everywhere — src/mind.ts is the single source. This
-  // path is the single-shot fallback (no tool loop), so retrieval is stuffed
-  // into the prompt here instead of fetched by her.
-  const systemPrompt = (system || ELLE_VOICE) + contextBlock + memoryBlock + paperBlock;
+  // The voice comes from src/mind.ts — the single source. This path is the
+  // single-shot fallback (no tool loop), so retrieval is stuffed into the prompt
+  // here instead of fetched by her. A caller may pick a prose register (voice);
+  // resolveVoice guards bad ids and defaults to the canonical self.
+  const systemPrompt = (system || resolveVoice(voice)) + contextBlock + memoryBlock + paperBlock;
 
   // History: client-provided, else resume the session from D1
   let history: LLMMessage[] = [];
@@ -471,7 +489,7 @@ function routerDeps() {
 async function handleMindConversation(
   body: Record<string, unknown>, env: Env, userId: string, scope: Scope,
 ): Promise<Response> {
-  const b = body as { query?: string; messages?: Array<{ role: string; content: string }>; session_id?: string; system?: string; source?: string; paper_id?: string; tools?: boolean; max_steps?: number };
+  const b = body as { query?: string; messages?: Array<{ role: string; content: string }>; session_id?: string; system?: string; source?: string; paper_id?: string; tools?: boolean; max_steps?: number; voice?: string };
   // Caller-controlled system prompt or explicit opt-out → the legacy path is
   // the honest one (the loop's mechanics assume HER prompt). paper_id too: an
   // exact-document pull is a stuffing pattern, not a retrieval decision.
@@ -485,7 +503,7 @@ async function handleMindConversation(
   try {
     const out = await runRouter(userMessage, env, routerDeps(), {
       maxSteps: Math.min(Number(b.max_steps) || (scope === 'public' ? 4 : 6), 8),
-      scope, userId, sessionId, source: src,
+      scope, userId, sessionId, source: src, voice: b.voice,
     });
     return json({
       content:        out.answer,
@@ -871,8 +889,17 @@ export default {
     // Her identity, verbatim — the single source of her voice (mind.ts), served
     // read-only so the workbench can show exactly what governs her without ever
     // copying the prose into a second place. Public: it's who she is, not a secret.
-    if (path === '/api/elle-identity' && request.method === 'GET') {
-      return json({ voice: ELLE_VOICE, source: 'elle-worker/src/mind.ts' });
+    // Also lists the selectable prose REGISTERS (id/name/blurb only — the full
+    // register prose stays server-side). ?voice=<id> returns that register's prose.
+    if ((path === '/api/elle-identity' || path === '/api/elle-voices') && request.method === 'GET') {
+      const url2 = new URL(request.url);
+      const want = url2.searchParams.get('voice');
+      return json({
+        voice: resolveVoice(want || undefined),
+        active: want && VOICE_LIST.some(v => v.id === want) ? want : 'stewart',
+        voices: VOICE_LIST,
+        source: 'elle-worker/src/mind.ts',
+      });
     }
 
     // Embeddable consumer widget — one script tag on any hub page
@@ -985,7 +1012,7 @@ export default {
     // every capability (corpus, SQL, web, code, trading, RAPID²AI) and answers.
     if (path === '/api/elle-router') {
       if (!svc) return err('Unauthorized', 401);
-      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string };
+      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string; voice?: string };
       const q = String(rb.q || rb.query || '').trim();
       if (!q) return err('q (question) required');
       const routerUser = await getUser(request, env);
@@ -994,6 +1021,7 @@ export default {
         userId: routerUser?.id || 'superadmin',
         sessionId: rb.session_id || null,
         source: 'elle-router',
+        voice: rb.voice,
       });
       return json((rb as { debug?: boolean }).debug ? out : { question: out.question, answer: out.answer, steps: out.steps, kappa_dynamics: out.kappa_dynamics });
     }
