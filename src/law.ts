@@ -4,6 +4,7 @@
 // ============================================================
 
 import { callLLM, type LLMEnv } from './llm';
+import { computeSeries, type KappaPoint } from './kappa-dynamics';
 
 export interface LawEnv extends LLMEnv {
   DB: D1Database;
@@ -12,6 +13,44 @@ export interface LawEnv extends LLMEnv {
 function id(): string {
   const b = new Uint8Array(16); crypto.getRandomValues(b);
   return Array.from(b).map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+// ── κ telemetry over a duel ──────────────────────────────────
+// The user's per-turn composure is a κ series (one step per user turn); the
+// same finite-difference module that tracks Elle's own phase state reads the
+// student's. The TILT is where the reasoning breaks: the steepest composure
+// drop at least TILT_DROP deep. Everyone drills accuracy; nobody else can
+// show a student the exact turn their coherence gave way.
+const TILT_DROP = 0.08;
+
+export interface DuelKappa {
+  series: number[];              // composure per user turn, in order
+  turn_ns: number[];             // duel_turns.n for each series entry
+  points: KappaPoint[];          // κ, velocity, acceleration, jerk per step
+  tilt_turn: number | null;      // duel_turns.n where the tilt happened
+}
+
+// Pure: index of the steepest drop ≤ -TILT_DROP, or null if composure held.
+export function tiltIndex(series: number[]): number | null {
+  let worst: number | null = null;
+  let worstV = -TILT_DROP;
+  for (let i = 1; i < series.length; i++) {
+    const v = series[i] - series[i - 1];
+    if (v < worstV) { worstV = v; worst = i; }
+  }
+  return worst;
+}
+
+export function duelKappa(userTurns: { n: number; composure: number }[]): DuelKappa {
+  const ordered = [...userTurns].sort((a, b) => a.n - b.n);
+  const series = ordered.map(t => t.composure);
+  const turn_ns = ordered.map(t => t.n);
+  const ti = tiltIndex(series);
+  return {
+    series, turn_ns,
+    points: computeSeries(series),
+    tilt_turn: ti === null ? null : turn_ns[ti],
+  };
 }
 
 // ── Static doctrine data ─────────────────────────────────────
@@ -194,53 +233,71 @@ Counter the human's argument in 2-3 sentences. Deploy tactic: "${tactic.name}". 
 Score four dimensions (0-1 each):
 - composure: emotional control and consistency
 - recognition: identifying Cerberus's fallacies and tactics
-- walkback: discipline in not re-engaging conceded points  
+- walkback: discipline in not re-engaging conceded points
 - framework: maintaining logical structure throughout
 
-Return ONLY valid JSON: {"composure":0.0,"recognition":0.0,"walkback":0.0,"framework":0.0,"result":"win|loss|draw","synthesis":"2-3 sentence analysis"}`,
-      [{role:'user',content:`Scenario: ${duel.scenario}\n\nTranscript:\n${transcript}`}],
-      500, env
+Also score EACH numbered YOU turn individually for composure (0-1): how controlled, structured, and on-frame that single turn was relative to the pressure it was under.
+
+Return ONLY valid JSON: {"composure":0.0,"recognition":0.0,"walkback":0.0,"framework":0.0,"result":"win|loss|draw","synthesis":"2-3 sentence analysis","turn_scores":[{"n":2,"composure":0.0}]}
+turn_scores must contain one entry per YOU turn, using the turn numbers as given in the transcript.`,
+      [{role:'user',content:`Scenario: ${duel.scenario}\n\nTranscript (numbered):\n${(turns.results ?? []).map((t: Record<string,unknown>) => `[turn ${t.n}] ${t.side === 'u' ? 'YOU' : 'CERBERUS'}: ${t.text}`).join('\n\n')}`}],
+      800, env
     );
 
     let score = {composure:0.65,recognition:0.55,walkback:0.60,framework:0.62};
     let result = 'draw', synthesis = scoreResult.content;
+    let turnScores: { n: number; composure: number }[] = [];
     try {
       const clean = scoreResult.content.replace(/```json|```/g,'').trim();
       const parsed = JSON.parse(clean);
       score = {composure:parsed.composure,recognition:parsed.recognition,walkback:parsed.walkback,framework:parsed.framework};
       result = parsed.result || 'draw';
       synthesis = parsed.synthesis || scoreResult.content;
+      if (Array.isArray(parsed.turn_scores)) {
+        turnScores = parsed.turn_scores
+          .map((t: Record<string,unknown>) => ({ n: Number(t.n), composure: Number(t.composure) }))
+          .filter((t: {n:number;composure:number}) => Number.isFinite(t.n) && t.composure >= 0 && t.composure <= 1);
+      }
     } catch { /* use defaults */ }
 
     const avg = (score.composure+score.recognition+score.walkback+score.framework)/4;
     if (avg > 0.65) result = 'win'; else if (avg < 0.45) result = 'loss'; else result = 'draw';
 
-    await env.DB.prepare(`UPDATE duels SET status='complete',result=?,score_composure=?,score_recognition=?,score_walkback=?,score_framework=?,synthesis=?,ended_at=datetime('now') WHERE id=?`)
-      .bind(result,score.composure,score.recognition,score.walkback,score.framework,synthesis,duel_id).run();
+    // Persist the per-turn composure the scorer measured (replacing the
+    // hardcoded placeholder written at turn time), then run the κ module
+    // over the series — same math that tracks Elle's own phase state.
+    const userTurnNs = new Set((turns.results ?? []).filter((t: Record<string,unknown>) => t.side === 'u').map((t: Record<string,unknown>) => Number(t.n)));
+    const validScores = turnScores.filter(t => userTurnNs.has(t.n));
+    if (validScores.length) {
+      await env.DB.batch(validScores.map(t =>
+        env.DB.prepare(`UPDATE duel_turns SET composure=? WHERE duel_id=? AND n=?`).bind(t.composure, duel_id, t.n)
+      )).catch(()=>{});
+    }
+    // Fall back to stored (placeholder) composure for any turn the scorer missed.
+    const scoreByN = new Map(validScores.map(t => [t.n, t.composure]));
+    const seriesTurns = (turns.results ?? [])
+      .filter((t: Record<string,unknown>) => t.side === 'u')
+      .map((t: Record<string,unknown>) => ({ n: Number(t.n), composure: scoreByN.get(Number(t.n)) ?? Number(t.composure ?? 0.75) }));
+    const kappa = duelKappa(seriesTurns);
 
-    return json({score,result,synthesis});
+    await env.DB.prepare(`UPDATE duels SET status='complete',result=?,score_composure=?,score_recognition=?,score_walkback=?,score_framework=?,synthesis=?,kappa_json=?,tilt_turn=?,ended_at=datetime('now') WHERE id=?`)
+      .bind(result,score.composure,score.recognition,score.walkback,score.framework,synthesis,JSON.stringify(kappa),kappa.tilt_turn,duel_id).run();
+
+    return json({score,result,synthesis,kappa});
   }
 
   return new Response(JSON.stringify({error:'unknown action'}),{status:400,headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
 }
 
 // ── TUTOR ────────────────────────────────────────────────────
-export async function handleTutor(body: Record<string,unknown>, env: LawEnv, userId: string): Promise<Response> {
-  const { action, question_id, selected_key, session_id, axis } = body as {
-    action: string; question_id?: string; selected_key?: string; session_id?: string; axis?: string;
-  };
-
-  function json(d: unknown, s=200) {
-    return new Response(JSON.stringify(d),{status:s,headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
-  }
-
-  if (action === 'next_question') {
-    const sid = (session_id as string) || id();
-    const qType = LSAT_TYPES[Math.floor(Math.random() * LSAT_TYPES.length)];
-    const qid = id();
-
-    const result = await callLLM('reasoning',
-      `Generate a realistic LSAT ${qType} question for an advanced student.
+// One generator serves both next_question (random/chosen type) and
+// drill_weakness (type + focus derived from the student's error taxonomy).
+async function generateTutorQuestion(
+  env: LawEnv, userId: string, sid: string, qType: string, axis: string, focus: string,
+): Promise<Record<string,unknown>> {
+  const qid = id();
+  const result = await callLLM('reasoning',
+    `Generate a realistic LSAT ${qType} question for an advanced student.
 Return ONLY valid JSON (no markdown) exactly:
 {
   "stimulus": "A 3-5 sentence logical argument or scenario",
@@ -253,35 +310,121 @@ Return ONLY valid JSON (no markdown) exactly:
   "scaffolding": "The structural principle this question tests — what skill to build (2-3 sentences)"
 }
 The correct_key must be one of A,B,C,D,E. Make the question genuinely hard and LSAT-authentic.`,
-      [{role:'user',content:`Generate a ${qType} question. Focus on ${axis || 'any LSAT reasoning type'}.`}],
-      800, env
-    );
+    [{role:'user',content:`Generate a ${qType} question. ${focus}`}],
+    800, env
+  );
 
-    let q: Record<string,unknown> = {};
-    try {
-      const clean = result.content.replace(/```json|```/g,'').trim();
-      q = JSON.parse(clean);
-    } catch {
-      q = {
-        stimulus:'The city of Harmon has the highest crime rate in the state, and also the highest number of police officers per capita.',
-        question:'Which of the following, if true, most seriously weakens the argument that increasing police presence reduces crime?',
-        choices:[{k:'A',text:'Crime rates correlate with poverty levels.'},{k:'B',text:'Police are deployed in response to existing crime levels.'},{k:'C',text:'Some cities have reduced crime through community programs.'},{k:'D',text:'Harmon\'s crime has decreased slightly over five years.'},{k:'E',text:'Studies on policing are methodologically inconsistent.'}],
-        correct_key:'B',
-        explanation:'B reveals reverse causation — police are sent where crime already is, undermining the causal claim.',
-        scaffolding:'This tests identifying confounded causation — a core LSAT pattern appearing in Weaken, Flaw, and Assumption questions.',
-      };
-    }
+  let q: Record<string,unknown> = {};
+  try {
+    const clean = result.content.replace(/```json|```/g,'').trim();
+    q = JSON.parse(clean);
+  } catch {
+    q = {
+      stimulus:'The city of Harmon has the highest crime rate in the state, and also the highest number of police officers per capita.',
+      question:'Which of the following, if true, most seriously weakens the argument that increasing police presence reduces crime?',
+      choices:[{k:'A',text:'Crime rates correlate with poverty levels.'},{k:'B',text:'Police are deployed in response to existing crime levels.'},{k:'C',text:'Some cities have reduced crime through community programs.'},{k:'D',text:'Harmon\'s crime has decreased slightly over five years.'},{k:'E',text:'Studies on policing are methodologically inconsistent.'}],
+      correct_key:'B',
+      explanation:'B reveals reverse causation — police are sent where crime already is, undermining the causal claim.',
+      scaffolding:'This tests identifying confounded causation — a core LSAT pattern appearing in Weaken, Flaw, and Assumption questions.',
+    };
+  }
 
-    const choicesJson = JSON.stringify(q.choices);
-    await env.DB.prepare(`INSERT INTO tutor_questions (id,session_id,user_id,question_type,axis,stimulus,question,choices_json,correct_key,explanation,scaffolding) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-      .bind(qid,sid,userId,qType,axis||qType,String(q.stimulus),String(q.question),choicesJson,String(q.correct_key),String(q.explanation),String(q.scaffolding)).run().catch(()=>{});
+  await env.DB.prepare(`INSERT INTO tutor_questions (id,session_id,user_id,question_type,axis,stimulus,question,choices_json,correct_key,explanation,scaffolding) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(qid,sid,userId,qType,axis,String(q.stimulus),String(q.question),JSON.stringify(q.choices),String(q.correct_key),String(q.explanation),String(q.scaffolding)).run().catch(()=>{});
 
-    return json({
-      question_id: qid, session_id: sid, question_type: qType,
-      axis: axis||qType, difficulty: 2,
-      stimulus: q.stimulus, question: q.question,
-      choices: q.choices, scaffolding: q.scaffolding,
+  return {
+    question_id: qid, session_id: sid, question_type: qType,
+    axis, difficulty: 2,
+    stimulus: q.stimulus, question: q.question,
+    choices: q.choices, scaffolding: q.scaffolding,
+  };
+}
+
+// The personal error taxonomy — the two failure ledgers merged:
+//  · tutor: wrong answers grouped by LSAT question type,
+//  · duels: which opponent tactics preceded the student's composure breaks
+//    (from replay blunder detection — the move that actually beat them).
+async function errorTaxonomy(env: LawEnv, userId: string) {
+  const qRows = await env.DB.prepare(
+    `SELECT question_type, COUNT(*) AS attempts, SUM(CASE WHEN selected_key<>correct_key THEN 1 ELSE 0 END) AS wrong
+     FROM tutor_questions WHERE user_id=? AND selected_key IS NOT NULL GROUP BY question_type`
+  ).bind(userId).all().catch(()=>({results:[]}));
+  const question_types = (qRows.results||[]).map((r: Record<string,unknown>) => ({
+    type: String(r.question_type), attempts: Number(r.attempts), wrong: Number(r.wrong),
+    wrong_rate: Number(r.attempts) ? Number((Number(r.wrong)/Number(r.attempts)).toFixed(3)) : 0,
+  })).sort((a,b) => (b.wrong_rate*Math.log(1+b.attempts)) - (a.wrong_rate*Math.log(1+a.attempts)));
+
+  const tRows = await env.DB.prepare(
+    `SELECT t.duel_id, t.n, t.side, t.composure, t.tactic_name, t.tactic_ref, t.tactic_fallacy
+     FROM duel_turns t JOIN duels d ON d.id=t.duel_id
+     WHERE d.user_id=? AND d.status='complete' ORDER BY t.duel_id, t.n`
+  ).bind(userId).all().catch(()=>({results:[]}));
+  const byDuel = new Map<string, Record<string,unknown>[]>();
+  for (const r of (tRows.results||[]) as Record<string,unknown>[]) {
+    const k = String(r.duel_id);
+    if (!byDuel.has(k)) byDuel.set(k, []);
+    byDuel.get(k)!.push(r);
+  }
+  const tacticCount = new Map<string, { name: string; ref: string; fallacy: string; times_beaten: number }>();
+  for (const turns of byDuel.values()) {
+    const userTurns = turns.filter(t => t.side === 'u').map(t => ({ n: Number(t.n), composure: Number(t.composure ?? 0.75) }));
+    const k = duelKappa(userTurns);
+    const byN = new Map(turns.map(t => [Number(t.n), t]));
+    k.series.forEach((c, i) => {
+      if (i < 1 || c - k.series[i-1] > -TILT_DROP) return;
+      const prev = byN.get(k.turn_ns[i] - 1);
+      if (prev?.side !== 'opp' || !prev.tactic_name) return;
+      const key = String(prev.tactic_name);
+      const e = tacticCount.get(key) || { name: key, ref: `${prev.tactic_src} ${prev.tactic_ref}`, fallacy: String(prev.tactic_fallacy||''), times_beaten: 0 };
+      e.times_beaten++;
+      tacticCount.set(key, e);
     });
+  }
+  const tactics = [...tacticCount.values()].sort((a,b) => b.times_beaten - a.times_beaten);
+
+  const worstType = question_types.find(t => t.wrong > 0) ?? null;
+  const worstTactic = tactics[0] ?? null;
+  return { question_types, tactics, worst_type: worstType, worst_tactic: worstTactic };
+}
+
+export async function handleTutor(body: Record<string,unknown>, env: LawEnv, userId: string): Promise<Response> {
+  const { action, question_id, selected_key, session_id, axis } = body as {
+    action: string; question_id?: string; selected_key?: string; session_id?: string; axis?: string;
+  };
+
+  function json(d: unknown, s=200) {
+    return new Response(JSON.stringify(d),{status:s,headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
+  }
+
+  if (action === 'next_question') {
+    const sid = (session_id as string) || id();
+    const qType = LSAT_TYPES[Math.floor(Math.random() * LSAT_TYPES.length)];
+    const q = await generateTutorQuestion(env, userId, sid, qType, axis||qType,
+      `Focus on ${axis || 'any LSAT reasoning type'}.`);
+    return json(q);
+  }
+
+  // The student's ranked weaknesses — what the drills should aim at.
+  if (action === 'error_taxonomy') {
+    return json(await errorTaxonomy(env, userId));
+  }
+
+  // Generate a question aimed at the top weakness: worst question type,
+  // sharpened by the tactic that most often breaks their composure in duels.
+  if (action === 'drill_weakness') {
+    const sid = (session_id as string) || id();
+    const tax = await errorTaxonomy(env, userId);
+    const qType = tax.worst_type?.type
+      || (tax.worst_tactic ? 'Flaw in Reasoning' : LSAT_TYPES[Math.floor(Math.random() * LSAT_TYPES.length)]);
+    const focusParts = [];
+    if (tax.worst_type) focusParts.push(`The student answers ${qType} questions wrong ${Math.round(tax.worst_type.wrong_rate*100)}% of the time — target that weakness directly.`);
+    if (tax.worst_tactic) focusParts.push(`In live debates their composure breaks against "${tax.worst_tactic.name}" (${tax.worst_tactic.fallacy}) — build the stimulus around that rhetorical move so they learn to see it.`);
+    const q = await generateTutorQuestion(env, userId, sid, qType, `weak:${qType}`,
+      focusParts.join(' ') || 'Focus on any LSAT reasoning type.');
+    return json({ ...q, targeted: {
+      why: focusParts.join(' ') || 'No error history yet — serving a general question.',
+      worst_type: tax.worst_type, worst_tactic: tax.worst_tactic,
+    }});
   }
 
   if (action === 'evaluate_answer' && question_id && selected_key) {
@@ -294,12 +437,32 @@ The correct_key must be one of A,B,C,D,E. Make the question genuinely hard and L
     await env.DB.prepare(`UPDATE tutor_questions SET selected_key=?,axis_delta=?,answered_at=datetime('now') WHERE id=?`)
       .bind(selected_key,delta,question_id).run().catch(()=>{});
 
+    // Session κ: rolling accuracy (window 3) over the session's answers is the
+    // coherence series; its derivatives show whether the student is holding or
+    // tilting as the session wears on. Needs ≥4 answers to say anything.
+    let session_kappa: (DuelKappa & { window: number }) | null = null;
+    const answered = await env.DB.prepare(
+      `SELECT selected_key, correct_key FROM tutor_questions WHERE session_id=? AND user_id=? AND selected_key IS NOT NULL ORDER BY answered_at, created_at`
+    ).bind(row.session_id, userId).all().catch(()=>({results:[]}));
+    const hits = (answered.results||[]).map((r: Record<string,unknown>) => r.selected_key === r.correct_key ? 1 : 0);
+    if (hits.length >= 4) {
+      const W = 3;
+      const rolling = hits.map((_h: number, i: number) => {
+        const from = Math.max(0, i - W + 1);
+        const slice = hits.slice(from, i + 1);
+        return Number((slice.reduce((a: number,b: number)=>a+b,0) / slice.length).toFixed(3));
+      });
+      const k = duelKappa(rolling.map((c: number, i: number) => ({ n: i + 1, composure: c })));
+      session_kappa = { ...k, window: W };
+    }
+
     return json({
       correct,
       correct_key: row.correct_key,
       explanation: row.explanation,
       scaffolding: row.scaffolding,
       axis_delta: delta,
+      session_kappa,
     });
   }
 
@@ -430,10 +593,37 @@ export async function handleReplays(body: Record<string,unknown>, env: LawEnv, u
     const turns = await env.DB.prepare(`SELECT * FROM duel_turns WHERE duel_id=? ORDER BY n`).bind(duel_id).all().catch(()=>({results:[]}));
 
     const turnList = (turns.results||[]).map((t: Record<string,unknown>) => ({
+      n: Number(t.n),
       side: t.side,
       text: t.text,
-      tactic: t.tactic_name ? {name:t.tactic_name,src:t.tactic_src,ref:t.tactic_ref} : undefined,
+      composure: t.side === 'u' ? Number(t.composure ?? 0.75) : undefined,
+      tactic: t.tactic_name ? {name:t.tactic_name,src:t.tactic_src,ref:t.tactic_ref,fallacy:t.tactic_fallacy} : undefined,
     }));
+
+    // κ telemetry + blunder annotations. Prefer the series sealed at duel end;
+    // recompute from stored per-turn composure for older duels. A blunder is a
+    // user turn whose composure velocity broke past the tilt threshold — each
+    // is annotated with the opponent tactic that immediately preceded it (the
+    // move that beat them), which is what feeds the personal error taxonomy.
+    let kappa: DuelKappa | null = null;
+    try { kappa = duel.kappa_json ? JSON.parse(String(duel.kappa_json)) as DuelKappa : null; } catch { /* recompute below */ }
+    if (!kappa) {
+      const userTurns = turnList.filter(t => t.side === 'u' && t.composure !== undefined)
+        .map(t => ({ n: t.n, composure: Number(t.composure) }));
+      kappa = userTurns.length ? duelKappa(userTurns) : null;
+    }
+    const byN = new Map(turnList.map(t => [t.n, t]));
+    const blunders = (kappa?.series ?? []).flatMap((c, i) => {
+      if (i < 1) return [];
+      const drop = c - kappa!.series[i - 1];
+      if (drop > -TILT_DROP) return [];
+      const turnN = kappa!.turn_ns[i];
+      const prevOpp = byN.get(turnN - 1);
+      return [{
+        turn_n: turnN, composure: c, drop: Number(drop.toFixed(3)),
+        beaten_by: prevOpp?.side === 'opp' ? prevOpp.tactic ?? null : null,
+      }];
+    });
 
     // Generate autopsy
     const transcript = turnList.map((t: { side: unknown; text: unknown }) => `${t.side === 'u' ? 'YOU' : 'CERBERUS'}: ${String(t.text)}`).join('\n\n');
@@ -458,6 +648,7 @@ export async function handleReplays(body: Record<string,unknown>, env: LawEnv, u
         composure: duel.score_composure, recognition: duel.score_recognition,
         walkback: duel.score_walkback, framework: duel.score_framework,
       },
+      kappa, blunders,
       autopsy,
       ended_at: duel.ended_at,
     });
@@ -537,4 +728,9 @@ export async function bootstrapLawSchema(env: LawEnv): Promise<void> {
     `CREATE TABLE IF NOT EXISTS user_stats (user_id TEXT PRIMARY KEY, lsat_score INTEGER DEFAULT 155, streak_days INTEGER DEFAULT 0, total_sessions INTEGER DEFAULT 0, last_session TEXT, updated_at TEXT DEFAULT (datetime('now')))`,
   ];
   await env.DB.batch(stmts.map(sql => env.DB.prepare(sql)));
+  // Guarded column adds for tables created before κ telemetry existed. ALTERs
+  // run individually (not in the batch) so "duplicate column" never aborts the
+  // CREATEs above.
+  await env.DB.prepare(`ALTER TABLE duels ADD COLUMN kappa_json TEXT`).run().catch(()=>{});
+  await env.DB.prepare(`ALTER TABLE duels ADD COLUMN tilt_turn INTEGER`).run().catch(()=>{});
 }
