@@ -31,6 +31,7 @@ import { runConductor, handleIntents } from './conductor';
 import { runIngestGate } from './ingest-gate';
 import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
+import { armOnboarding, disarmOnboarding } from './onboarding';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -238,8 +239,9 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
   const { action, email, password } = body;
   if (!email) return err('email required');
   await ensureUserColumns(env);
-  // set_profile touches no credentials, so it alone may omit the password.
-  if (!password && action !== 'set_profile') return err('email and password required');
+  // These actions touch no credentials, so they alone may omit the password.
+  const NO_PW = ['set_profile', 'arm_onboarding', 'disarm_onboarding'];
+  if (!password && !NO_PW.includes(action)) return err('email and password required');
   const emailL = email.toLowerCase();
 
   if (action === 'signup') {
@@ -353,6 +355,18 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
       profile: String(body.profile || '').trim(),
     });
     return json({ success: true, email: emailL });
+  }
+
+  // Service-key-gated: arm/disarm the one-time onboarding welcome for a user.
+  // Armed with a TTL (default 48h) so it is demo-scoped and self-dissolving.
+  if (action === 'arm_onboarding' || action === 'disarm_onboarding') {
+    if (!isServiceRequest(request, env)) return err('Forbidden', 403);
+    const u = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL).first() as { id: string } | null;
+    if (!u) return err('User not found', 404);
+    if (action === 'disarm_onboarding') { await disarmOnboarding(env, u.id); return json({ success: true, armed: false, email: emailL }); }
+    const ttl = Number((body as Record<string, unknown>).ttl_seconds) || undefined;
+    await armOnboarding(env, u.id, ttl);
+    return json({ success: true, armed: true, email: emailL, ttl_seconds: ttl || 172800 });
   }
 
   return err(`Unknown action: ${action}`);
