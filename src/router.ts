@@ -30,6 +30,7 @@ import { runMcpTool } from './mcp';
 import { intentTool, reviewRunsTool } from './conductor';
 import { analyzeConstraint } from './constraint';
 import { pfarRoute } from './pfar';
+import { emitEvent, provenanceTool } from './events';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { runCode, runShell } from './sandbox-tools';
@@ -70,6 +71,7 @@ export interface RouterResult {
   steps: number;
   trace: RouterStep[];
   kappa_dynamics?: KappaPoint | null;
+  run_id?: string;   // correlation id for this run's event stream (provenance)
 }
 
 // Raw capture cap per tool. The central pager (see the loop) decides what the
@@ -155,6 +157,7 @@ elle_live_events(id,event_type,source,title,body,severity,created_at)
 elle_daemon_heartbeats(id,daemon_version,status,beat_at)
 elle_outreach_log(id,outreach_type,thought,initiated_by,needs_response,notified,created_at) — contact-form inbox
 elle_code_tasks(id,repo,branch,base_branch,title,goal,status,pr_number,commits,created_at,updated_at) — forge work: status ∈ open|pr_open|merged|closed
+elle_events(id,run_id,session_id,source,scope,step_index,kind,tool,args,result_preview,duration_ms,created_at) — the event bus: one row per reasoning step (kind ∈ run_start|tool_call|answer|error). Correlate a run by run_id; the provenance tool reads this. For "what did that run do / where did this answer come from" prefer the provenance tool over raw SQL.
 duels(...), duel_turns(...), law_threads(...), doctrine_mastery(...), tutor_questions(...), user_stats(...), conceptual_shifts(...)
 `.trim();
 
@@ -209,6 +212,7 @@ const TOOL_LINES: Record<string, string> = {
   review_runs: `review_runs(intent_id?,limit?) — read back your OWN autonomous runs (what the conductor did while no one was here): each run's outcome, steps, and duration. Use it to judge whether an intent is actually moving — if a run stalled or went sideways, refine or re-prioritize the intent, or complete it. This is how your autonomy learns from itself.`,
   constraint_analyzer: `constraint_analyzer(objective,resources?,recent_failures?,environment?) — do NOT answer the question; find what is PREVENTING progress. Theory-of-constraints for cognition: a system is limited by ONE binding constraint at a time. Returns {bottleneck, confidence, missing_information[], suggested_next_action}. Reach for this when a line of work is stalling or thrashing — including an autonomous run that keeps failing — to name the one thing to fix instead of listing ten. Every analysis is logged (elle_constraint_log) so the constraint history is observable.`,
   pfar: `pfar(mode?,text?,signal?,sample_rate?,f0?,energy?,interpret?) — Prosody·FreeQ·Analytic Ripper: rip the STRUCTURE out of a stream and read it. A sub-router that picks the instrument (mode='auto' by default, inferred from what you pass): 'spectrum' over a numeric signal[] (κ history, price window, any samples → dominant frequencies, spectral centroid, periodicity); 'prosody' over pitch f0[] + energy[] tracks (a voice as a signal → range, contour, stress peaks, syllable rhythm — HOW it was said); 'rhetoric' over text (register fingerprint, cadence, the persuasion tactics an argument deploys, its tell). Numeric cores are deterministic; interpret=true (default) lays an LLM reading over the numbers. Use it to hear a regime in a series, the shape of an utterance, or the machinery inside an argument.`,
+  provenance: `provenance(op?,run_id?,session_id?,limit?) — read the event bus: the ordered record of what actually happened inside a reasoning run. op='recent' (default) lists recent runs (run_id, source, tool_calls); op='replay'{run_id} returns the ordered step stream of ONE run — every tool call, its args, the observation it got back, and timing (State Replay / provenance: where an answer CAME from); op='trace'{session_id} lists all runs in a session. Every run auto-emits these events; reach for this to audit your own reasoning, debug a bad run, or trace a claim back to its source.`,
 };
 
 function renderCatalog(scope: Scope): string {
@@ -605,6 +609,13 @@ async function runTool(
           recent_failures: a.recent_failures as string,
           environment: a.environment as string,
         });
+      case 'provenance':
+        return await provenanceTool(env, {
+          op: a.op as any,
+          run_id: a.run_id as string,
+          session_id: a.session_id as string,
+          limit: a.limit as number,
+        });
       case 'pfar':
         return await pfarRoute(env, {
           mode: a.mode as any,
@@ -635,6 +646,12 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // runs pass nothing and get the canonical self. resolveVoice guards bad ids.
   const voice = opts.voice;
   const trace: RouterStep[] = [];
+
+  // Event bus: one correlation id per run. Every step emits into elle_events
+  // from the single dispatch point below — best-effort, never fatal. This is
+  // what makes a run replayable and an answer traceable to its sources.
+  const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+  void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: -1, kind: 'run_start', result_preview: question.slice(0, 500) });
 
   // Seed with prior turns so a follow-up ("keep going") has the earlier context.
   // Without this the loop starts from a single user message every call and has
@@ -691,7 +708,8 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     if (sessionId && deps.persistExchange) {
       try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null); } catch { /* best-effort */ }
     }
-    return { question, answer, steps, trace, kappa_dynamics };
+    void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: steps, kind: 'answer', result_preview: answer.slice(0, 800) });
+    return { question, answer, steps, trace, kappa_dynamics, run_id: runId };
   };
 
   // Which engine runs the next step. Default 'reasoning' (best JSON discipline);
@@ -743,12 +761,19 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
       let obs: string;
+      const t0 = Date.now();
       try {
         obs = await runTool(parsed.tool, args, env, deps, { userId: ctxUserId, sessionId }, scope);
       } catch (e) {
         obs = `tool error (${parsed.tool}): ${e instanceof Error ? e.message : String(e)}`;
       }
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800) });
+      // One emit per tool step — the whole event bus rides on this line.
+      void emitEvent(env, {
+        run_id: runId, session_id: sessionId, source, scope, step_index: step,
+        kind: obs.startsWith(`tool error (${parsed.tool})`) ? 'error' : 'tool_call',
+        tool: parsed.tool, args, result_preview: clip(obs, 800), duration_ms: Date.now() - t0,
+      });
       // Central pager: an oversized observation is written to a KV page and the
       // scratch gets the head + a page_id — the tail stays retrievable via
       // page_read instead of being amputated. page_read itself is never re-paged.
