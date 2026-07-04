@@ -29,6 +29,7 @@ import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { runIngestGate } from './ingest-gate';
+import { CORPUS_SEEDS } from './corpus-seed';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -801,8 +802,25 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       }
       return { ran: `backfill:${done}` };
     }
+    case 'seed_corpus': {
+      // Ingest the bundled seed documents (src/corpus-seed.ts) that aren't in
+      // the corpus yet — chunked, embedded, vectorized, indexed. Idempotent:
+      // deduped by exact title, so this only ingests what's missing.
+      let added = 0; const results: string[] = [];
+      for (const doc of CORPUS_SEEDS) {
+        const exists = await env.DB.prepare('SELECT id FROM corpus_papers WHERE title = ? LIMIT 1').bind(doc.title).first().catch(() => null);
+        if (exists) { results.push(`skip:${doc.title.slice(0, 30)}`); continue; }
+        // Trusted: curated seed content, so bypass the LLM verification gate
+        // (dedup is handled by the existence check above).
+        const r = await handleIngest({ ...doc, skip_verification: true } as unknown as Record<string, string>, env);
+        const d = await r.json().catch(() => ({})) as { paper_id?: string; chunks_embedded?: number };
+        if (d.paper_id) { added++; results.push(`add:${doc.title.slice(0, 30)}(${d.chunks_embedded ?? 0})`); }
+        else results.push(`fail:${doc.title.slice(0, 30)}`);
+      }
+      return { ran: `seed_corpus:${added} [${results.join(', ')}]` };
+    }
     default:
-      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus)`);
+      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|seed_corpus)`);
   }
   } catch (e) {
     const emsg = (e as Error).message || String(e);
@@ -1161,6 +1179,7 @@ export default {
     if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
     if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
+    if (h === 5 && m === 0) fire('seed_corpus'); // 05:00 UTC — ingest any missing bundled seed docs (idempotent)
   },
 
   // ── Queue consumer ─────────────────────────────────────────

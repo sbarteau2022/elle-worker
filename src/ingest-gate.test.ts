@@ -40,14 +40,18 @@ describe('ingest gate — title normalization (dedup key)', () => {
 });
 
 describe('prose registers', () => {
-  it('has five distinct registers, stewart default = ELLE_VOICE', () => {
-    expect(VOICE_LIST).toHaveLength(5);
+  it('has six distinct registers, stewart default = ELLE_VOICE', () => {
+    expect(VOICE_LIST).toHaveLength(6);
     expect(VOICES.stewart.prose).toBe(ELLE_VOICE);
     expect(resolveVoice('stewart')).toBe(ELLE_VOICE);
   });
+  it('includes the Screwtape adversarial register', () => {
+    expect(isVoiceId('screwtape')).toBe(true);
+    expect(resolveVoice('screwtape')).toMatch(/adversarial|War Room|Screwtape/i);
+  });
   it('resolves each id to a non-empty, distinct prose', () => {
     const proses = VOICE_LIST.map(v => resolveVoice(v.id));
-    expect(new Set(proses).size).toBe(5);
+    expect(new Set(proses).size).toBe(6);
     for (const p of proses) expect(p.length).toBeGreaterThan(200);
   });
   it('falls back to the canonical self on a bad/missing id', () => {

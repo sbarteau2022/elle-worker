@@ -8,6 +8,16 @@ main = "src/index.ts"
 compatibility_date = "2026-06-25"
 compatibility_flags = ["nodejs_compat"]
 
+# Bundle the corpus seed documents (corpus/**/*.md) as Text modules, so
+# src/corpus-seed.ts can `import doc from '../corpus/.../x.md'` and get the file
+# contents as a string. The seedCorpus job ingests any that aren't in the corpus
+# yet (chunk/embed/vectorize/index) — the docs live as real, version-controlled
+# files rather than pasted into source.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+fallback = true
+
 # Workers Logs — persist runtime logs so server-side errors (e.g.
 # "[ROUTER] model layer unreachable: <real provider error>") are queryable in
 # the dashboard (Workers & Pages → elle-worker → Logs) instead of needing a
