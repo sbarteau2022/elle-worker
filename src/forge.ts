@@ -34,7 +34,11 @@ const GH = 'https://api.github.com';
 const OWNER = 'sbarteau2022';
 
 // Her own repos, and nothing else. Accepts "elle-worker" or "sbarteau2022/elle-worker".
-const REPO_ALLOWLIST = ['elle-worker', 'Elle', 'elle-dev-console'];
+// elle-law is included so she can read (and, once we build the War Room, forge on)
+// the Elle.law repo through the worker's GITHUB_TOKEN — the same credential that
+// powers github_read_file. The forge safety model is unchanged for every repo:
+// writes only go to elle/* branches, never main, and the merge is always human.
+const REPO_ALLOWLIST = ['elle-worker', 'Elle', 'elle-dev-console', 'elle-law'];
 
 export const BRANCH_PREFIX = 'elle/';
 
