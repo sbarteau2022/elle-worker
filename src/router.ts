@@ -123,7 +123,7 @@ const MEMBER_TOOLS = new Set([
   'skill_list', 'skill_read',
   'scratchpad_write', 'scratchpad_read',
 ]);
-function toolAllowed(scope: Scope, name: string): boolean {
+export function toolAllowed(scope: Scope, name: string): boolean {
   if (scope === 'full') return true;
   if (scope === 'cofounder') return !SHIP_DENY.has(name);
   if (scope === 'member') return MEMBER_TOOLS.has(name);

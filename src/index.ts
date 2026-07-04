@@ -1145,10 +1145,14 @@ export default {
     }
 
     // Privileged bypass (service key or admin JWT) — dev console + internal callers.
-    // Conversation gets the FULL tool scope: this caller already proved admin.
+    // Conversation gets full tool scope — EXCEPT a cofounder, who is gated to
+    // his restricted scope here too (no full-scope side door around the code-
+    // shipping block). The service key (no user) stays full.
     if (svc) {
-      if (path === '/api/elle-conversation')     return handleMindConversation(body, env, 'svc', 'full');
-      if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, 'svc', 'reasoning');
+      const privUser = await getUser(request, env);
+      const privScope = routerScope(privUser?.tier);
+      if (path === '/api/elle-conversation')     return handleMindConversation(body, env, privUser?.id || 'svc', privScope);
+      if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, privUser?.id || 'svc', 'reasoning');
     }
 
     // Bootstrap schema (idempotent — safe to call anytime)
