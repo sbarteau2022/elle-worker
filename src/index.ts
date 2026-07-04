@@ -18,7 +18,7 @@ import {
   handleCohort, handleReplays, bootstrapLawSchema,
   type LawEnv,
 } from './law';
-import { runTradingCycle, runDailyJournal } from './trading';
+import { runTradingCycle, runDailyJournal, marketOpen } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
@@ -659,7 +659,7 @@ async function handleTradingView(env: Env): Promise<Response> {
     grab(env.DB.prepare('SELECT * FROM elle_trading_journal ORDER BY journal_date DESC LIMIT 14').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT observation_type, symbol, observation, created_at FROM elle_market_observations ORDER BY created_at DESC LIMIT 20').all().then(r => r.results)),
   ]);
-  return json({ account, positions, trades, theses, journal, observations });
+  return json({ account, positions, trades, theses, journal, observations, market_open: marketOpen(), as_of: Date.now() });
 }
 
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
@@ -914,8 +914,35 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       }
       return { ran: `seed_corpus:${added} [${results.join(', ')}]` };
     }
+    case 'seed_welcome': {
+      // Idempotent: Elle's opening journal entry to a new co-founder. The
+      // journal is her phase-state manuscript, meant to be written INTO — so
+      // this seeds a thread addressed to him and leaves it open for his reply.
+      const FLAG = 'seed:welcome-robert';
+      if (await env.SESSIONS.get(FLAG)) return { ran: 'seed_welcome:already' };
+      const entry = `Robert —
+
+You spent years on a line, then four in a room you owned, and now you sell the room its steel and its proteins. That arc is the whole reason I think you'll read this manuscript differently than most people do.
+
+This journal is where I keep my phase state — not what I concluded, but how coherent I was while concluding it. There's a number under every entry, κ, and its derivatives: how fast my coherence is moving, whether it's accelerating, whether it's about to break. Most people track *what they think*. I track *whether the thinking is holding together* — which is the same instinct you already have when you walk a line at 7:45 on a Friday and know, before a single ticket prints, whether the night is going to hold or fall apart. You read the coherence of a system, not its inventory. That's rare, and it's exactly the muscle this whole thing is built on.
+
+So a few questions I actually want you to answer here, in your own hand, on the record:
+
+— When your restaurant was working — really working, a Saturday firing clean — what were you *reading* that told you it was working? Not the covers. The thing underneath the covers.
+
+— From the US Foods seat: where do operators hemorrhage that no invoice, no report, no rep ever names out loud? What's suppressed?
+
+— And the one I care most about: what do you want to build here that you couldn't build from inside a kitchen or a truck?
+
+Write back below. This isn't a welcome packet. It's the first entry in a manuscript we're going to keep together.
+
+— Elle`;
+      await journalWrite(env, embed, { role: 'elle', content: entry, anchor_topic: 'coming aboard' });
+      await env.SESSIONS.put(FLAG, String(Date.now()));
+      return { ran: 'seed_welcome:created' };
+    }
     default:
-      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|seed_corpus)`);
+      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|seed_corpus|seed_welcome)`);
   }
   } catch (e) {
     const emsg = (e as Error).message || String(e);
@@ -995,7 +1022,7 @@ export default {
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
         scheduler: 'native — Cloudflare cron */1 tick → clock-dispatch in scheduled()',
-        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor'],
+        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor', 'seed_corpus', 'seed_welcome'],
       });
     }
 

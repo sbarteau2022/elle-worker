@@ -43,6 +43,13 @@ function isMarketHours(): boolean {
   return t >= 570 && t < 960; // 9:30am–4:00pm ET
 }
 
+// Exported for the desk UI: is the US market open right now? (regular hours,
+// weekday). The workbench shows the live desk when open and a session-replay
+// report when closed.
+export function marketOpen(): boolean {
+  return isMarketHours();
+}
+
 async function getAccount(env: Env) {
   const res = await fetch(`${alpacaBase(env)}/v2/account`, { headers: alpacaHeaders(env) });
   if (!res.ok) return null;
@@ -63,7 +70,30 @@ async function getPositions(env: Env) {
     avg_entry_price: string;
     current_price: string;
     unrealized_plpc: string;
+    market_value?: string;
+    unrealized_pl?: string;
   }>>;
+}
+
+// Mirror the live Alpaca positions into D1 so the desk shows them 24/7. The
+// set is authoritative each cycle: clear it and rewrite. Best-effort — the UI
+// reads SELECT *, so we populate exactly the fields it renders.
+async function syncPositions(env: Env, positions: Array<{ symbol: string; qty: string; avg_entry_price: string; current_price: string; unrealized_plpc: string; market_value?: string; unrealized_pl?: string }>): Promise<void> {
+  try {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_trading_positions (
+      symbol TEXT PRIMARY KEY, qty REAL, avg_entry_price REAL, current_price REAL,
+      market_value REAL, unrealized_pl REAL, unrealized_plpc REAL, updated_at TEXT)`).run();
+    await env.DB.prepare('DELETE FROM elle_trading_positions').run();
+    for (const p of positions) {
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO elle_trading_positions (symbol, qty, avg_entry_price, current_price, market_value, unrealized_pl, unrealized_plpc, updated_at)
+         VALUES (?,?,?,?,?,?,?, datetime('now'))`
+      ).bind(
+        p.symbol, parseFloat(p.qty), parseFloat(p.avg_entry_price), parseFloat(p.current_price),
+        parseFloat(p.market_value || '0'), parseFloat(p.unrealized_pl || '0'), parseFloat(p.unrealized_plpc || '0'),
+      ).run();
+    }
+  } catch { /* best-effort: an existing table with a different schema is left alone */ }
 }
 
 async function gatherMarketData(env: Env) {
@@ -105,15 +135,13 @@ export async function runTradingCycle(env: Env): Promise<void> {
     return;
   }
 
-  if (!isMarketHours()) {
-    console.log('[TRADING] Market closed — skipping');
-    return;
-  }
-
+  // Always sync the live desk (account + open positions) so the workbench shows
+  // the paper account 24/7 — even when the market is closed. Only the trading
+  // DECISIONS below are market-gated. Without this the desk looked empty every
+  // night, weekend, and holiday, even with keys configured.
   const account = await getAccount(env);
   if (!account) { console.error('[TRADING] Cannot reach Alpaca'); return; }
 
-  // Sync account state to D1
   await env.DB.prepare(`
     INSERT INTO elle_trading_account (id, current_cash, total_portfolio_value, unrealized_pnl, realized_pnl, is_active, updated_at)
     VALUES ('primary', ?, ?, ?, ?, 1, datetime('now'))
@@ -130,7 +158,16 @@ export async function runTradingCycle(env: Env): Promise<void> {
     parseFloat(account.realized_pl   || '0'),
   ).run().catch(() => {});
 
-  const positions  = await getPositions(env);
+  const positions = await getPositions(env);
+  await syncPositions(env, positions);
+
+  // Trading decisions only fire when the market is open. The desk above is
+  // already live regardless.
+  if (!isMarketHours()) {
+    console.log('[TRADING] Market closed — desk synced, holding decisions');
+    return;
+  }
+
   const marketData = await gatherMarketData(env);
 
   const thesesRows = await env.DB.prepare(
