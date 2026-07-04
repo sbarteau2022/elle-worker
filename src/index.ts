@@ -30,6 +30,7 @@ import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { runIngestGate } from './ingest-gate';
 import { CORPUS_SEEDS } from './corpus-seed';
+import { upsertProfile, getProfileByEmail } from './profiles';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -210,13 +211,35 @@ function isServiceRequest(request: Request, env: Env): boolean {
 async function isAdmin(request: Request, env: Env): Promise<boolean> {
   if (isServiceRequest(request, env)) return true;
   const u = await getUser(request, env);
-  return !!u && (u.tier === 'admin' || u.tier === 'superadmin');
+  return !!u && ADMIN_TIERS.has(u.tier);
+}
+// Tiers that may open the admin surface (the workbench) and see everything.
+// 'cofounder' is a trusted second admin: full visibility, but the router runs
+// him at a restricted scope that blocks shipping/migrating code (see routerScope).
+const ADMIN_TIERS = new Set(['admin', 'superadmin', 'cofounder']);
+
+// The router scope a signed-in user gets. Superadmin/admin drive the full tool
+// set; a cofounder sees and uses everything EXCEPT the code-shipping path.
+function routerScope(tier: string | undefined): 'full' | 'cofounder' {
+  return tier === 'cofounder' ? 'cofounder' : 'full';
 }
 
 // ── Handlers ──────────────────────────────────────────────────
+// Guarded, once-per-isolate: add the must_reset column if an older users table
+// predates it. ALTER throws when the column already exists — swallow that.
+let usersColsReady = false;
+async function ensureUserColumns(env: Env): Promise<void> {
+  if (usersColsReady) return;
+  await env.DB.prepare('ALTER TABLE users ADD COLUMN must_reset INTEGER DEFAULT 0').run().catch(() => {});
+  usersColsReady = true;
+}
+
 async function handleAuth(body: Record<string, string>, env: Env, request: Request): Promise<Response> {
   const { action, email, password } = body;
-  if (!email || !password) return err('email and password required');
+  if (!email) return err('email required');
+  await ensureUserColumns(env);
+  // set_profile touches no credentials, so it alone may omit the password.
+  if (!password && action !== 'set_profile') return err('email and password required');
   const emailL = email.toLowerCase();
 
   if (action === 'signup') {
@@ -230,7 +253,7 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
   }
 
   if (action === 'login') {
-    const user = await env.DB.prepare('SELECT id, email, password_hash, access_tier FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; password_hash: string; access_tier: string } | null;
+    const user = await env.DB.prepare('SELECT id, email, password_hash, access_tier, must_reset FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; password_hash: string; access_tier: string; must_reset?: number } | null;
     if (!user) return err('Invalid credentials', 401);
     const [salt, stored] = user.password_hash.split(':');
     if (await hashPassword(password, salt) !== stored) return err('Invalid credentials', 401);
@@ -239,7 +262,30 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
     const tier = user.access_tier || 'standard';
     const token = await signJWT({ sub: user.id, email: user.email, tier, jti, exp }, env.JWT_SECRET);
     await env.AUTH_TOKENS.put(`token:${jti}`, user.id, { expirationTtl: 2592000 });
-    return json({ access_token: token, user: { id: user.id, email: user.email, tier } });
+    // A provisioned account carries a temp password; the client must force a
+    // self-set reset before it opens the console. The token is still returned
+    // so set_password can authorize on it, but must_reset flags the gate.
+    return json({ access_token: token, user: { id: user.id, email: user.email, tier }, must_reset: !!user.must_reset });
+  }
+
+  // Self-service password reset — the forced first-login flow. Verifies the
+  // CURRENT (temp) password, sets the new one, and clears must_reset. No
+  // service key needed: proving the current password is the authorization.
+  if (action === 'set_password') {
+    const newPassword = String(body.new_password || '');
+    if (newPassword.length < 8) return err('new_password must be at least 8 characters', 400);
+    const user = await env.DB.prepare('SELECT id, email, password_hash, access_tier FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; password_hash: string; access_tier: string } | null;
+    if (!user) return err('Invalid credentials', 401);
+    const [salt, stored] = user.password_hash.split(':');
+    if (await hashPassword(password, salt) !== stored) return err('Invalid credentials', 401);
+    const nsalt = generateSalt();
+    await env.DB.prepare("UPDATE users SET password_hash = ?, must_reset = 0, updated_at = datetime('now') WHERE id = ?")
+      .bind(`${nsalt}:${await hashPassword(newPassword, nsalt)}`, user.id).run();
+    const jti = generateId(); const exp = Math.floor(Date.now() / 1000) + 2592000;
+    const tier = user.access_tier || 'standard';
+    const token = await signJWT({ sub: user.id, email: user.email, tier, jti, exp }, env.JWT_SECRET);
+    await env.AUTH_TOKENS.put(`token:${jti}`, user.id, { expirationTtl: 2592000 });
+    return json({ access_token: token, user: { id: user.id, email: user.email, tier }, must_reset: false });
   }
 
   // Service-key-gated password reset — for admin use only
@@ -258,6 +304,55 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
     const pl = await verifyJWT(body.token || '', env.JWT_SECRET);
     if (!pl || !await env.AUTH_TOKENS.get(`token:${pl.jti}`)) return err('Invalid or expired token', 401);
     return json({ valid: true, user: { id: pl.sub, email: pl.email, tier: (pl.tier as string) || 'standard' } });
+  }
+
+  // Service-key-gated account provisioning — for onboarding a teammate. Creates
+  // OR updates the user with a chosen access_tier and password, and (optionally)
+  // stores a profile dossier Elle will reference so she already knows them.
+  // Keeps passwords + PII out of the repo: the operator supplies them at call
+  // time with the service key. tier ∈ standard|cofounder|admin|superadmin.
+  if (action === 'provision') {
+    if (!isServiceRequest(request, env)) return err('Forbidden', 403);
+    const tier = (body.tier || 'cofounder').toLowerCase();
+    if (!['standard', 'cofounder', 'admin', 'superadmin'].includes(tier)) return err('invalid tier', 400);
+    const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL).first() as { id: string } | null;
+    const salt = generateSalt();
+    const hash = `${salt}:${await hashPassword(password, salt)}`;
+    // Temp password by default → force a self-set reset on first login. Pass
+    // must_reset:false explicitly to provision a ready-to-use password.
+    const mrRaw = (body as Record<string, unknown>).must_reset;
+    const mustReset = mrRaw === false || String(mrRaw) === 'false' ? 0 : 1;
+    let id: string;
+    if (existing) {
+      id = existing.id;
+      await env.DB.prepare("UPDATE users SET password_hash = ?, access_tier = ?, must_reset = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(hash, tier, mustReset, id).run();
+    } else {
+      id = generateId();
+      await env.DB.prepare('INSERT INTO users (id, email, password_hash, access_tier, must_reset) VALUES (?, ?, ?, ?, ?)')
+        .bind(id, emailL, hash, tier, mustReset).run();
+    }
+    // Optional profile dossier (display_name + free-form profile report).
+    const display_name = String(body.display_name || '').trim();
+    const profile = String(body.profile || '').trim();
+    if (display_name || profile) {
+      await upsertProfile(env, { user_id: id, email: emailL, display_name, profile });
+    }
+    return json({ success: true, user: { id, email: emailL, tier }, profile_set: !!(display_name || profile), created: !existing });
+  }
+
+  // Service-key-gated profile upsert — set/refresh a user's dossier without
+  // touching their credentials. Also updatable through the account above.
+  if (action === 'set_profile') {
+    if (!isServiceRequest(request, env)) return err('Forbidden', 403);
+    const u = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL).first() as { id: string } | null;
+    if (!u) return err('User not found', 404);
+    await upsertProfile(env, {
+      user_id: u.id, email: emailL,
+      display_name: String(body.display_name || '').trim(),
+      profile: String(body.profile || '').trim(),
+    });
+    return json({ success: true, email: emailL });
   }
 
   return err(`Unknown action: ${action}`);
@@ -1037,6 +1132,7 @@ export default {
       const out = await runRouter(q, env, routerDeps(), {
         maxSteps: Number(rb.max_steps) || 6,
         userId: routerUser?.id || 'superadmin',
+        scope: routerScope(routerUser?.tier),
         sessionId: rb.session_id || null,
         source: 'elle-router',
         voice: rb.voice,
