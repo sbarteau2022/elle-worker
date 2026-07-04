@@ -18,7 +18,7 @@ import {
   handleCohort, handleReplays, bootstrapLawSchema,
   type LawEnv,
 } from './law';
-import { runTradingCycle, runDailyJournal } from './trading';
+import { runTradingCycle, runDailyJournal, marketOpen } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
@@ -659,7 +659,7 @@ async function handleTradingView(env: Env): Promise<Response> {
     grab(env.DB.prepare('SELECT * FROM elle_trading_journal ORDER BY journal_date DESC LIMIT 14').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT observation_type, symbol, observation, created_at FROM elle_market_observations ORDER BY created_at DESC LIMIT 20').all().then(r => r.results)),
   ]);
-  return json({ account, positions, trades, theses, journal, observations });
+  return json({ account, positions, trades, theses, journal, observations, market_open: marketOpen(), as_of: Date.now() });
 }
 
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
