@@ -7,6 +7,8 @@ describe('forge guards', () => {
     expect(resolveRepo('sbarteau2022/elle-worker')).toBe('elle-worker');
     expect(resolveRepo('ELLE')).toBe('Elle');
     expect(resolveRepo('elle-dev-console')).toBe('elle-dev-console');
+    expect(resolveRepo('elle-law')).toBe('elle-law');
+    expect(resolveRepo('sbarteau2022/elle-law')).toBe('elle-law');
     expect(resolveRepo('someone/other-repo')).toBeNull();
     expect(resolveRepo('elle-worker-evil')).toBeNull();
     expect(resolveRepo('')).toBeNull();
