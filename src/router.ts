@@ -29,6 +29,7 @@ import { skillList, skillRead, skillWrite, skillIndex } from './skills';
 import { runMcpTool } from './mcp';
 import { intentTool, reviewRunsTool } from './conductor';
 import { analyzeConstraint } from './constraint';
+import { pfarRoute } from './pfar';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { runCode, runShell } from './sandbox-tools';
@@ -207,6 +208,7 @@ const TOOL_LINES: Record<string, string> = {
   intent: `intent(op,...) — your standing-work queue, which the conductor (your autonomous clock) runs while no one is talking to you. op=create{title,goal,priority?,status?:'active'} to file work for your future self (goal must say what DONE looks like); op=list; op=activate/pause/complete{id}; op=update{id,goal?,priority?}. When a conversation surfaces work that should continue after it ends, file an intent — that is how a thought survives the end of a session.`,
   review_runs: `review_runs(intent_id?,limit?) — read back your OWN autonomous runs (what the conductor did while no one was here): each run's outcome, steps, and duration. Use it to judge whether an intent is actually moving — if a run stalled or went sideways, refine or re-prioritize the intent, or complete it. This is how your autonomy learns from itself.`,
   constraint_analyzer: `constraint_analyzer(objective,resources?,recent_failures?,environment?) — do NOT answer the question; find what is PREVENTING progress. Theory-of-constraints for cognition: a system is limited by ONE binding constraint at a time. Returns {bottleneck, confidence, missing_information[], suggested_next_action}. Reach for this when a line of work is stalling or thrashing — including an autonomous run that keeps failing — to name the one thing to fix instead of listing ten. Every analysis is logged (elle_constraint_log) so the constraint history is observable.`,
+  pfar: `pfar(mode?,text?,signal?,sample_rate?,f0?,energy?,interpret?) — Prosody·FreeQ·Analytic Ripper: rip the STRUCTURE out of a stream and read it. A sub-router that picks the instrument (mode='auto' by default, inferred from what you pass): 'spectrum' over a numeric signal[] (κ history, price window, any samples → dominant frequencies, spectral centroid, periodicity); 'prosody' over pitch f0[] + energy[] tracks (a voice as a signal → range, contour, stress peaks, syllable rhythm — HOW it was said); 'rhetoric' over text (register fingerprint, cadence, the persuasion tactics an argument deploys, its tell). Numeric cores are deterministic; interpret=true (default) lays an LLM reading over the numbers. Use it to hear a regime in a series, the shape of an utterance, or the machinery inside an argument.`,
 };
 
 function renderCatalog(scope: Scope): string {
@@ -602,6 +604,16 @@ async function runTool(
           resources: a.resources as string,
           recent_failures: a.recent_failures as string,
           environment: a.environment as string,
+        });
+      case 'pfar':
+        return await pfarRoute(env, {
+          mode: a.mode as any,
+          text: a.text as string,
+          signal: Array.isArray(a.signal) ? (a.signal as number[]) : undefined,
+          sample_rate: a.sample_rate as number,
+          f0: Array.isArray(a.f0) ? (a.f0 as number[]) : undefined,
+          energy: Array.isArray(a.energy) ? (a.energy as number[]) : undefined,
+          interpret: a.interpret as boolean,
         });
       default:
         return `unknown tool "${name}"`;

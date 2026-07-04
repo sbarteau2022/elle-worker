@@ -24,12 +24,12 @@ read **The Router**.
   │  THE ROUTER  (router.ts)                             │
   │  a ReAct loop: she picks a TOOL and an ENGINE per    │
   │  step, executes, observes, repeats, then answers.    │
-  │  SCOPE gates which of the ~45 tools are visible.     │
+  │  SCOPE gates which of the ~46 tools are visible.     │
   │  VOICE picks which prose register answers.           │
   └──────┬───────────────────────────────┬───────────────┘
          │                               │
   ┌──────▼──────┐                 ┌──────▼──────────────┐
-  │ LLM ROUTER  │                 │  TOOLS (~45)        │
+  │ LLM ROUTER  │                 │  TOOLS (~46)        │
   │  (llm.ts)   │                 │  corpus · D1 · web  │
   │ picks model │                 │  run_code · forge · │
   │ tier, walks │                 │  skills · mcp ·     │
@@ -79,7 +79,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `full` | service key or admin/superadmin JWT | **everything** — read_sql, trades, forge, MCP, run_code/run_shell, github_*, intents, self-revision |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
 
-### The ~45 tools (full scope)
+### The ~46 tools (full scope)
 
 **Mind & memory** — `search_corpus`, `find_document` (pull a whole doc by
 description, no title), `fetch_document`, `read_sql` (SELECT-only over D1),
@@ -118,6 +118,17 @@ instead of answering, it names the one thing preventing progress. Every analysis
 is logged to `elle_constraint_log`, so a stalling line of work — including an
 autonomous run that keeps failing — can ask what its bottleneck is instead of
 thrashing.
+
+**Signal analysis** — `pfar` (Prosody·FreeQ·Analytic Ripper). One move —
+*rip the structure out of a stream and read it* — done three ways by a
+sub-router that picks the instrument: `spectrum` over a numeric `signal[]` (κ
+history, price window → dominant frequencies, spectral centroid, periodicity),
+`prosody` over pitch `f0[]` + `energy[]` tracks (a voice as a signal → range,
+contour, stress peaks, syllable rhythm — *how* it was said), and `rhetoric` over
+`text` (register fingerprint, cadence, the persuasion tactics an argument
+deploys, its tell). The numeric cores are deterministic (unit-tested DFT +
+prosody math in `src/pfar.ts`); `interpret` (default on) lays an LLM reading over
+the numbers.
 
 **Journal** — `journal_read`, `journal_thread`, `journal_write`,
 `journal_annotate` (the Optimus phase-state manuscript).
