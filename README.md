@@ -77,6 +77,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `public` | `/api/chat`, widget (rate-limited, no auth) | read-only mind: corpus, find_document, memory recall, web, code_engine, diagnose, calc |
 | `member` | authenticated standard-tier user | public + their own journal + self_state, remember, skills (read), scratchpad |
 | `full` | service key or admin/superadmin JWT | **everything** — read_sql, trades, forge, MCP, run_code/run_shell, github_*, intents, self-revision |
+| `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr` and `run_shell` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
 
 ### The ~47 tools (full scope)
