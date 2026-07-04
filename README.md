@@ -24,12 +24,12 @@ read **The Router**.
   │  THE ROUTER  (router.ts)                             │
   │  a ReAct loop: she picks a TOOL and an ENGINE per    │
   │  step, executes, observes, repeats, then answers.    │
-  │  SCOPE gates which of the ~46 tools are visible.     │
+  │  SCOPE gates which of the ~47 tools are visible.     │
   │  VOICE picks which prose register answers.           │
   └──────┬───────────────────────────────┬───────────────┘
          │                               │
   ┌──────▼──────┐                 ┌──────▼──────────────┐
-  │ LLM ROUTER  │                 │  TOOLS (~46)        │
+  │ LLM ROUTER  │                 │  TOOLS (~47)        │
   │  (llm.ts)   │                 │  corpus · D1 · web  │
   │ picks model │                 │  run_code · forge · │
   │ tier, walks │                 │  skills · mcp ·     │
@@ -79,7 +79,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `full` | service key or admin/superadmin JWT | **everything** — read_sql, trades, forge, MCP, run_code/run_shell, github_*, intents, self-revision |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
 
-### The ~46 tools (full scope)
+### The ~47 tools (full scope)
 
 **Mind & memory** — `search_corpus`, `find_document` (pull a whole doc by
 description, no title), `fetch_document`, `read_sql` (SELECT-only over D1),
@@ -110,6 +110,14 @@ Hugging Face pre-mounted; the external tool ecosystem is reachable this way.
 
 **Autonomy** — `intent` (file standing work for the conductor), `review_runs`
 (read her own autonomous run log).
+
+**Provenance** — `provenance` (op=recent|replay|trace). Reads the **event bus**:
+every reasoning run emits a structured event per step into `elle_events` from
+the *single* dispatch point in the loop. `replay{run_id}` returns a run's ordered
+step stream — each tool call, its args, the observation it got back, and timing
+(State Replay + where an answer came from); `recent` lists runs; `trace` walks a
+session. One instrumentation site, three capabilities — and the raw material for
+an Observer Graph laid on top later without new capture.
 
 **Reasoning about herself** — `constraint_analyzer` (objective, resources,
 recent_failures, environment → the single binding constraint, confidence,
