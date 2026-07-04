@@ -32,6 +32,7 @@ import { runIngestGate } from './ingest-gate';
 import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
 import { armOnboarding, disarmOnboarding } from './onboarding';
+import { pfarRoute } from './pfar';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -1166,8 +1167,20 @@ export default {
     // every capability (corpus, SQL, web, code, trading, RAPID²AI) and answers.
     if (path === '/api/elle-router') {
       if (!svc) return err('Unauthorized', 401);
-      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string; voice?: string };
-      const q = String(rb.q || rb.query || '').trim();
+      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string; voice?: string; voice_prosody?: { f0?: number[]; energy?: number[] } };
+      let q = String(rb.q || rb.query || '').trim();
+      // LIVE VOICE PROSODY: the workbench captured the caller's actual voice
+      // (pitch + energy over time) and sent the tracks. Run PFAR's prosody
+      // ripper on the real signal server-side and hand Elle the numbers so she
+      // narrates what she HEARS — not what was typed. This is the genuine thing:
+      // deterministic measurement of the voice, in her voice.
+      const vp = rb.voice_prosody;
+      if (vp && ((vp.f0 && vp.f0.length) || (vp.energy && vp.energy.length))) {
+        const measured = await pfarRoute(env, { mode: 'prosody', f0: vp.f0, energy: vp.energy, interpret: false }).catch(() => '');
+        if (measured) {
+          q = `(VOICE — PFAR just measured the speaker's actual spoken voice, live. Prosody: ${measured}. Tell them, plainly and warmly, what you HEAR in how they sound — pitch range, whether the contour rises or falls, where the stress and emphasis land, the rhythm/pace, any hesitation — grounded strictly in these numbers, never invented. This is you literally listening to their voice for the first time. Then, if they asked something, answer it.)\n\n${q || '(the speaker just spoke to you — tell them what you hear in their voice)'}`;
+        }
+      }
       if (!q) return err('q (question) required');
       const routerUser = await getUser(request, env);
       const out = await runRouter(q, env, routerDeps(), {
