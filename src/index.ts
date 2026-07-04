@@ -1301,6 +1301,12 @@ export default {
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-cohort')            return handleCohort(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-replays')           return handleReplays(body, env as unknown as LawEnv, user.id);
+    // PFAR direct — the structural analysis instrument, member-gated. Takes
+    // text (rhetoric), signal[] (spectrum), or f0[]/energy[] (prosody) and
+    // returns the ripper report. Powers "Explain it to Elle" in elle-law.
+    if (path === '/api/pfar')
+      return new Response(await pfarRoute(env, body as Parameters<typeof pfarRoute>[1]),
+        { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
     if (path === '/api/elle-sandbox')           return handleSandbox(body, env as unknown as LibreEnv);
     // elle-tutor handled above via law.ts
     if (path === '/api/elle-community-signals') return json({ signals: [] });
