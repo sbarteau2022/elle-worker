@@ -79,6 +79,22 @@ export interface RouterStep {
   thinking?: string;  // the model's native reasoning tokens for this step, when the provider returns them
 }
 
+// One frame of the loop, as it happens — the live counterpart of the trace.
+// The SSE door forwards these to the caller so the reasoning is WATCHED, not
+// just replayed after the fact. Emission is best-effort and never gates the
+// loop; the D1 event bus (emitEvent) remains the durable record.
+export interface RouterLiveEvent {
+  kind: 'run_start' | 'step' | 'obs';
+  run_id?: string;
+  step?: number;
+  thought?: string;
+  thinking?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  result?: string;
+  duration_ms?: number;
+}
+
 export interface RouterResult {
   question: string;
   answer: string;
@@ -746,7 +762,7 @@ Continue from here — at most a couple more tool calls if genuinely needed — 
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
   const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
@@ -762,6 +778,10 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // from the single dispatch point below — best-effort, never fatal. This is
   // what makes a run replayable and an answer traceable to its sources.
   const runId = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+  // Live wire: forward each frame to the caller (the SSE door) — best-effort,
+  // a throwing listener can never take the loop down with it.
+  const ping = (ev: RouterLiveEvent) => { if (opts.onEvent) { try { opts.onEvent(ev); } catch { /* listener's problem */ } } };
+  ping({ kind: 'run_start', run_id: runId });
   void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: -1, kind: 'run_start', result_preview: question.slice(0, 500) });
 
   // Seed with prior turns so a follow-up ("keep going") has the earlier context.
@@ -922,6 +942,9 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
+      // The step frame goes out BEFORE execution — the watcher sees what she
+      // reached for and why while the tool is still running.
+      ping({ kind: 'step', step, thought: stepThought, thinking: stepThinking, tool: parsed.tool, args });
       let obs: string;
       const t0 = Date.now();
       // Flinch check — a scar matching this call shape fires its warning into
@@ -936,6 +959,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       }
       const isErr = obs.startsWith(`tool error (${parsed.tool})`);
       if (flinch) obs = flinch + obs;
+      ping({ kind: 'obs', step, tool: parsed.tool, result: clip(obs, 800), duration_ms: Date.now() - t0 });
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800), thought: stepThought, thinking: stepThinking });
       // One emit per tool step — the whole event bus rides on this line.
       void emitEvent(env, {
