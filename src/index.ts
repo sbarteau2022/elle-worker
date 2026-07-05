@@ -26,8 +26,13 @@ import { runRouter, ensureNotebook, type Scope } from './router';
 import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
+import { kappaMemoryState } from './kappa-memory/integration';
+import { parseUpload } from './upload';
+import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
+import { runConsolidation } from './consolidate';
+import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
 import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
@@ -878,6 +883,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       return { ran: 'heartbeat' };
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
     case 'conductor': return await runConductor(env, runRouter, routerDeps());
+    case 'consolidate': return { ran: await runConsolidation(env) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
     case 'optimus':  await runOptimusJournal(env, embed); return { ran: 'optimus' };
@@ -968,7 +974,7 @@ Write back below. This isn't a welcome packet. It's the first entry in a manuscr
       return { ran: 'seed_welcome:created' };
     }
     default:
-      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|seed_corpus|seed_welcome)`);
+      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|conductor|consolidate|seed_corpus|seed_welcome)`);
   }
   } catch (e) {
     const emsg = (e as Error).message || String(e);
@@ -1029,7 +1035,7 @@ async function handleCorpusResolve(
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
    try {
     const url  = new URL(request.url);
     const path = url.pathname;
@@ -1058,7 +1064,7 @@ export default {
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
         scheduler: 'native — Cloudflare cron */1 tick → clock-dispatch in scheduled()',
-        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor', 'seed_corpus', 'seed_welcome'],
+        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor', 'consolidate', 'seed_corpus', 'seed_welcome'],
       });
     }
 
@@ -1078,6 +1084,15 @@ export default {
       });
     }
 
+    // κ memory state — the read the workbench κ display polls. Public aggregate:
+    // current κ, the recent series, the relationally-inferred r/reserve/velocity,
+    // the bending-trace count, and the seam gate. Everything is labelled
+    // provisional (κ ranks nothing until validate_kappa clears the seam).
+    if (path === '/api/kappa-state' && request.method === 'GET') {
+      const sid = new URL(request.url).searchParams.get('session');
+      return json(await kappaMemoryState(env, sid));
+    }
+
     // Embeddable consumer widget — one script tag on any hub page
     if (path === '/widget.js' && request.method === 'GET') {
       return new Response(WIDGET_JS, {
@@ -1087,6 +1102,26 @@ export default {
           ...corsHeaders(),
         },
       });
+    }
+
+    // File upload (multipart) — parsed BEFORE the JSON body read below, since the
+    // request carries form data, not JSON. Admin-gated. Turns a PDF/DOCX/TXT/…
+    // into text (Workers AI toMarkdown) so the composer can attach it to a turn
+    // and Elle can ingest_paper it on your instruction.
+    if (path === '/api/elle-upload' && request.method === 'POST') {
+      if (!(await isAdmin(request, env))) return err('Unauthorized', 401);
+      try {
+        const form = await request.formData();
+        const f = form.get('file');
+        // Duck-typed rather than `instanceof File` (the Workers type isn't a
+        // valid instanceof target): a File entry is an object with arrayBuffer().
+        if (!f || typeof f === 'string' || typeof (f as { arrayBuffer?: unknown }).arrayBuffer !== 'function') {
+          return err('no file in form field "file"', 400);
+        }
+        const file = f as unknown as { name: string; type: string; arrayBuffer(): Promise<ArrayBuffer> };
+        const parsed = await parseUpload(env, { name: file.name, type: file.type, bytes: await file.arrayBuffer() });
+        return json(parsed);
+      } catch (e) { return err(`upload failed: ${(e as Error).message}`, 400); }
     }
 
     let body: Record<string, unknown> = {};
@@ -1168,6 +1203,10 @@ export default {
     if (path === '/api/elle-sandbox-runs') { if (!svc) return err('Unauthorized', 401);
       return json({ path: await sandboxPathOpen(env), runs: await sandboxRunsRecent(env, Number((body as { limit?: number }).limit) || 50) });
     }
+    // Code security analysis — the Deep-Mind code tab's upload runs through here.
+    // STATIC analysis (the code is never executed): deterministic scan + LLM
+    // security review → a vulnerability/exploit report. Admin-gated.
+    if (path === '/api/elle-cyber-analyze') { if (!svc) return err('Unauthorized', 401); return json(await analyzeCode(String(body.code || ''), body.language ? String(body.language) : undefined, env)); }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
@@ -1208,15 +1247,56 @@ export default {
       }
       if (!q) return err('q (question) required');
       const routerUser = await getUser(request, env);
-      const out = await runRouter(q, env, routerDeps(), {
+      const routerOpts = {
         maxSteps: Number(rb.max_steps) || 6,
         userId: routerUser?.id || 'superadmin',
         scope: routerScope(routerUser?.tier),
         sessionId: rb.session_id || null,
         source: 'elle-router',
         voice: rb.voice,
-      });
-      return json((rb as { debug?: boolean }).debug ? out : { question: out.question, answer: out.answer, steps: out.steps, kappa_dynamics: out.kappa_dynamics });
+      };
+      // LIVE MODE (stream:true): the loop's frames go out as Server-Sent
+      // Events while she works — run_start, each step's thought + tool + args
+      // the moment she commits to it, each observation as it lands, then one
+      // 'done' frame carrying the full RouterResult (answer, trace, κ). The
+      // caller watches her think instead of waiting for her to finish.
+      if ((rb as { stream?: boolean }).stream) {
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const enc = new TextEncoder();
+        const send = (event: string, data: unknown) =>
+          writer.write(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {});
+        ctx.waitUntil((async () => {
+          try {
+            const out = await runRouter(q, env, routerDeps(), {
+              ...routerOpts,
+              onEvent: (ev) => { void send(ev.kind, ev); },
+            });
+            await send('done', out);
+          } catch (e) {
+            await send('error', { error: (e as Error).message || 'router failed' });
+          } finally {
+            try { await writer.close(); } catch { /* already closed */ }
+          }
+        })());
+        return new Response(readable, {
+          status: 200,
+          headers: { ...corsHeaders(), 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+        });
+      }
+      const out = await runRouter(q, env, routerDeps(), routerOpts);
+      // The full result — trace included — goes back by default now. This door
+      // is admin-tier by construction (the svc gate above), and the trace IS
+      // the chain of thought the workbench renders: each step's thought, tool,
+      // args, and observation. The old debug-only gating starved the timeline.
+      return json(out);
+    }
+    // The Mirror — one snapshot of the reflexive organs (bet ledger +
+    // calibration, scars, watches, dead drops, metabolism, consolidation,
+    // self-forged tools). Admin-gated like the router door it sits beside.
+    if (path === '/api/elle-self') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await selfMirror(env));
     }
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
@@ -1362,6 +1442,7 @@ export default {
     if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
     if (m === 30) fire('conductor');          // half past — Elle's autonomous work tick
     if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
+    if (h === 4 && m === 0) fire('consolidate'); // 04:00 UTC — the sleep pass: digest the day into memory/skills/scars
     if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
     if (h === 5 && m === 0) fire('seed_corpus'); // 05:00 UTC — ingest any missing bundled seed docs (idempotent)

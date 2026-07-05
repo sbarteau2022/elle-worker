@@ -32,6 +32,8 @@
 // is corrected at call time instead of taking the whole conversation path down.
 // ============================================================
 
+import { recordLLMCall } from './metabolism';
+
 export interface LLMEnv {
   LLM_OPENROUTER_KEY:  string;
   LLM_GEMINI_KEY:      string;
@@ -431,8 +433,16 @@ export async function callLLM(
   opts: { temperature?: number } = {}
 ): Promise<LLMResponse> {
   const temperature = opts.temperature;
+  // Metabolism: every call is timed and recorded (in-memory ring + best-effort
+  // D1 trail) so the metabolism tool can read the body budget back. The hook
+  // is fire-and-forget — observability never becomes a dependency.
+  const t0 = Date.now();
+  const record = (r: LLMResponse | null, ok: boolean, provider = r?.provider || 'none', model = r?.model || 'none') =>
+    recordLLMCall(env, { task, provider, model, ms: Date.now() - t0, ok, at: t0 });
   try {
-    return await routeLLM(task, system, messages, maxTokens, env, temperature);
+    const r = await routeLLM(task, system, messages, maxTokens, env, temperature);
+    record(r, true);
+    return r;
   } catch (e) {
     const msg = (e as Error).message;
     // 1) Self-hosted Ollama 70B first when configured — the user's own box, no
@@ -440,7 +450,9 @@ export async function callLLM(
     if (env.LLM_OLLAMA_URL) {
       try {
         console.error(`All hosted providers failed for ${task}; falling back to Ollama:`, msg);
-        return await callOllama(MODEL.ollama(env), system, messages, maxTokens, env, temperature ?? 0.7);
+        const r = await callOllama(MODEL.ollama(env), system, messages, maxTokens, env, temperature ?? 0.7);
+        record(r, true);
+        return r;
       } catch (e2) {
         console.error('Ollama fallback failed, trying Workers AI:', (e2 as Error).message);
       }
@@ -453,11 +465,14 @@ export async function callLLM(
     if (env.AI) {
       try {
         console.error(`Falling back to Workers AI for ${task}:`, msg);
-        return await withTimeout(callWorkersAI(system, messages, maxTokens, env, DEFAULT_WORKERS_AI, temperature ?? 0.7), 22000);
+        const r = await withTimeout(callWorkersAI(system, messages, maxTokens, env, DEFAULT_WORKERS_AI, temperature ?? 0.7), 22000);
+        record(r, true);
+        return r;
       } catch (e2) {
         console.error('Workers AI fallback failed/timed out:', (e2 as Error).message);
       }
     }
+    record(null, false);
     throw e;
   }
 }

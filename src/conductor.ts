@@ -30,6 +30,8 @@
 
 import type { Env } from './index';
 import type { RouterDeps, RouterResult, Scope } from './router';
+import { evaluateWatches } from './watches';
+import { scorePredictions } from './oracle';
 
 export interface Intent {
   id: string; title: string; goal: string;
@@ -190,6 +192,21 @@ async function recordRun(env: Env, intentId: string, kind: string, started: numb
 export async function runConductor(env: Env, runRouterFn: RunRouterFn, deps: RouterDeps): Promise<{ ran: string }> {
   await ensureSchema(env);
   const now = Date.now();
+
+  // Sentry pass — BEFORE picking work: evaluate due watches (a fired watch
+  // files an active intent this very tick can then pick up) and settle any
+  // predictions that have matured. Both capped and best-effort; the tick's
+  // real work is never hostage to the sentry.
+  try {
+    const research = async (q: string) => {
+      const r = await deps.handleResearch({ query: q }, env);
+      const d = await r.json() as { content?: string; search_results?: string };
+      return `${d.content || ''}\n${d.search_results || ''}`;
+    };
+    await evaluateWatches(env, research, (args) => intentTool(env, args));
+  } catch (e) { console.error('[CONDUCTOR] watch pass failed:', (e as Error).message); }
+  try { await scorePredictions(env); }
+  catch (e) { console.error('[CONDUCTOR] oracle pass failed:', (e as Error).message); }
 
   const [forgeRows, intentRows] = await Promise.all([
     env.DB.prepare(`SELECT id, status, updated_at FROM elle_code_tasks WHERE status IN ('open','pr_open') ORDER BY updated_at ASC LIMIT 10`)
