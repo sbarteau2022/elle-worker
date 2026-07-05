@@ -26,6 +26,8 @@
 //                            memories into a fixed char budget for a turn.
 // ============================================================
 
+import { CloudGraphStore, graphExpand, recordAssociations } from './graph';
+
 export interface MemEnv {
   DB: D1Database;
   VECTORIZE: VectorizeIndex;
@@ -100,7 +102,7 @@ interface MemRow {
   importance_score: number; created_at: string;
 }
 
-export interface RecalledMem extends MemRow { score: number; via: 'semantic' | 'importance' }
+export interface RecalledMem extends MemRow { score: number; via: 'semantic' | 'importance' | 'graph' }
 
 export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 5): Promise<RecalledMem[]> {
   const byId = new Map<string, { sem: number }>();
@@ -157,7 +159,36 @@ export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 
        WHERE id IN (${hot.map(() => '?').join(',')})`
     ).bind(...hot).run().catch(() => {});
   }
-  return scored;
+
+  // Graph expansion — navigate edges from the top hits to pull in memories that
+  // MATTER to the query but share none of its words (the decision a fact led to,
+  // the insight distilled from it). Additive and best-effort: on a fresh graph
+  // this is one empty query and a no-op; a failure returns the base recall
+  // untouched. Every successful recall also records the co-occurrence of the set
+  // it returned as `assoc` edges, so the graph self-bootstraps from use.
+  let result = scored;
+  try {
+    const store = new CloudGraphStore(env.DB);
+    const seeds = scored.map(s => ({ id: s.id, activation: Math.max(0.05, s.score) }));
+    const activation = await graphExpand(store, seeds, { hops: 2 });
+    const extraIds = [...activation.keys()].filter(id => !scored.some(s => s.id === id)).slice(0, k);
+    if (extraIds.length) {
+      const er = await env.DB.prepare(
+        `SELECT id, memory_type, summary, content, importance_score, created_at
+         FROM elle_memory WHERE id IN (${extraIds.map(() => '?').join(',')})`
+      ).bind(...extraIds).all();
+      const extra: RecalledMem[] = (er.results as unknown as MemRow[]).map(r => {
+        const ageDays = Math.max(0, (now - Date.parse(r.created_at + 'Z')) / 86400000) || 0;
+        const recency = Math.exp(-ageDays / 45);
+        const act = Math.min(1, activation.get(r.id) ?? 0);
+        return { ...r, via: 'graph' as const, score: 0.40 * act + 0.30 * (r.importance_score ?? 0.5) + 0.10 * recency };
+      });
+      result = [...scored, ...extra].sort((a, b) => b.score - a.score).slice(0, k);
+    }
+    void recordAssociations(store, result.map(r => r.id)).catch(() => {});
+  } catch { /* the graph is an enhancement, never a dependency */ }
+
+  return result;
 }
 
 // ── context assembler ────────────────────────────────────────
