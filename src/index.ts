@@ -27,6 +27,8 @@ import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
 import { kappaMemoryState } from './kappa-memory/integration';
+import { parseUpload } from './upload';
+import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { runConsolidation } from './consolidate';
@@ -1081,6 +1083,26 @@ export default {
       });
     }
 
+    // File upload (multipart) — parsed BEFORE the JSON body read below, since the
+    // request carries form data, not JSON. Admin-gated. Turns a PDF/DOCX/TXT/…
+    // into text (Workers AI toMarkdown) so the composer can attach it to a turn
+    // and Elle can ingest_paper it on your instruction.
+    if (path === '/api/elle-upload' && request.method === 'POST') {
+      if (!(await isAdmin(request, env))) return err('Unauthorized', 401);
+      try {
+        const form = await request.formData();
+        const f = form.get('file');
+        // Duck-typed rather than `instanceof File` (the Workers type isn't a
+        // valid instanceof target): a File entry is an object with arrayBuffer().
+        if (!f || typeof f === 'string' || typeof (f as { arrayBuffer?: unknown }).arrayBuffer !== 'function') {
+          return err('no file in form field "file"', 400);
+        }
+        const file = f as unknown as { name: string; type: string; arrayBuffer(): Promise<ArrayBuffer> };
+        const parsed = await parseUpload(env, { name: file.name, type: file.type, bytes: await file.arrayBuffer() });
+        return json(parsed);
+      } catch (e) { return err(`upload failed: ${(e as Error).message}`, 400); }
+    }
+
     let body: Record<string, unknown> = {};
     if (request.method === 'POST') {
       try { body = await request.json(); }
@@ -1156,6 +1178,10 @@ export default {
     // Conductor intents — the workbench's window into her autonomous work
     // queue and run log. Admin-gated like everything else internal.
     if (path === '/api/elle-intents')      { if (!svc) return err('Unauthorized', 401); return json(await handleIntents(body, env)); }
+    // Code security analysis — the Deep-Mind code tab's upload runs through here.
+    // STATIC analysis (the code is never executed): deterministic scan + LLM
+    // security review → a vulnerability/exploit report. Admin-gated.
+    if (path === '/api/elle-cyber-analyze') { if (!svc) return err('Unauthorized', 401); return json(await analyzeCode(String(body.code || ''), body.language ? String(body.language) : undefined, env)); }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
