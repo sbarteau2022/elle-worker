@@ -273,8 +273,13 @@ A single `*/1` cron dispatches by clock:
 
 ## Endpoints (selected)
 
-Conversation: `/api/elle-router` (full/member), `/api/elle-conversation`,
-`/api/chat` (public), `/api/widget-chat`, `/api/atlas` (hospitality).
+Conversation: `/api/elle-router` (full/member; pass `stream:true` for SSE —
+the loop's frames arrive live: each step's thought + tool as she commits to
+it, each observation as it lands, one `done` frame with the full result),
+`/api/elle-conversation`, `/api/chat` (public), `/api/widget-chat`,
+`/api/atlas` (hospitality). `/api/elle-self` — the Mirror: one snapshot of
+the reflexive organs (bets + calibration, scars, watches, drops, metabolism,
+consolidation, self-forged tools).
 Identity/voice: `/api/elle-identity`, `/api/elle-voices`.
 Corpus: `/api/corpus-papers`, `/api/corpus-paper`, `/api/corpus-resolve`,
 `/api/corpus-series`, `/api/search`, `/api/ingest`.
@@ -351,6 +356,7 @@ to Elle by construction. `main` auto-deploys via
 | `metabolism.ts` | LLM-call interoception (ring + `elle_llm_calls`) |
 | `tool-forge.ts` | self-authored tool registry, sandbox-executed |
 | `consolidate.ts` | nightly memory consolidation (memories→skills→scars) |
+| `mirror.ts` | /api/elle-self — one snapshot of the reflexive organs |
 | `libre.ts` | dream/libre autonomous production |
 | `trading.ts` | Alpaca cycle + daily journal |
 | `kappa-*.ts` | coherence measure + derivatives |
