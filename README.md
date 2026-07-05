@@ -24,12 +24,12 @@ read **The Router**.
   │  THE ROUTER  (router.ts)                             │
   │  a ReAct loop: she picks a TOOL and an ENGINE per    │
   │  step, executes, observes, repeats, then answers.    │
-  │  SCOPE gates which of the ~47 tools are visible.     │
+  │  SCOPE gates which of the ~59 tools are visible.      │
   │  VOICE picks which prose register answers.           │
   └──────┬───────────────────────────────┬───────────────┘
          │                               │
   ┌──────▼──────┐                 ┌──────▼──────────────┐
-  │ LLM ROUTER  │                 │  TOOLS (~47)        │
+  │ LLM ROUTER  │                 │  TOOLS (~59)        │
   │  (llm.ts)   │                 │  corpus · D1 · web  │
   │ picks model │                 │  run_code · forge · │
   │ tier, walks │                 │  skills · mcp ·     │
@@ -80,7 +80,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr` and `run_shell` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
 
-### The ~47 tools (full scope)
+### The ~59 tools (full scope)
 
 **Mind & memory** — `search_corpus`, `find_document` (pull a whole doc by
 description, no title), `fetch_document`, `read_sql` (SELECT-only over D1),
@@ -141,6 +141,40 @@ the numbers.
 
 **Journal** — `journal_read`, `journal_thread`, `journal_write`,
 `journal_annotate` (the Optimus phase-state manuscript).
+
+**Self (the reflexive set)** — tools that reach further into *herself* rather
+than the world:
+
+- `predict` — a bet ledger against herself: falsifiable claims with confidence
+  + horizon, adjudicated by the conductor when they mature (a miss becomes a
+  memory), and `op=calibration` returns the stated-vs-observed curve.
+- `devil` — an adversary on retainer: hands a draft to a war-room challenger
+  that attacks (strongest objection, missed case, the tell) and never rewrites.
+- `council` — one question to three engines in *parallel* (genuinely different
+  providers), returning the disagreement map instead of a single winner.
+- `scar` — flinches: recorded injuries (`elle_scars`) that ride the system
+  prompt and fire a warning into any matching future tool call.
+- `dead_drop` — context-triggered mail to her future self: a note that lies
+  dormant until a future conversation trips its trigger (semantic or keyword),
+  then injects and disarms.
+- `watch` — standing tripwires on the world: a read-only probe + plain-English
+  condition, evaluated at the top of every conductor tick; a fired watch files
+  an *active* intent the same tick can pick up.
+- `metabolism` — interoception over the model roster: every `callLLM` is timed
+  and recorded (in-memory ring + `elle_llm_calls`), read back as provider
+  health, real latency, and 24h load.
+- `tool_forge` — self-extension: she authors a tool (python/js) into her own
+  registry (`elle_custom_tools`) and invokes it in the same sandbox as
+  `run_code`. Registry is data — deployed source still moves only through the
+  forge + a human merge.
+- `fork_replay` — counterfactual replay: re-enter one of her own past runs off
+  the event bus, substitute a different tool call at step N (it executes live),
+  and a bounded sub-run returns original vs counterfactual answers.
+- `consolidate` — the sleep pass on demand (also cron 04:00): digest the last
+  24h into a few durable memories, promote twice-learned lessons to skills,
+  record repeated failures as scars.
+- `page_read` — the pager's page-fault handler (now dispatched in every scope
+  that can mint a page).
 
 **Writes / sensitive** — `ingest_paper` (gated, see below), `trigger_dream`,
 `trade_execute` (Alpaca; idempotent within 90s).
@@ -232,6 +266,7 @@ A single `*/1` cron dispatches by clock:
 | :00 hourly | research cycle + corpus backfill |
 | **:30 hourly** | **conductor tick** (autonomous work) |
 | 03:00 | dream/libre cycle (`libre.ts`) |
+| 04:00 | consolidation — the sleep pass (`consolidate.ts`) |
 | 05:00 | seed_corpus (ingest missing bundled docs) |
 | 07:00 | Optimus canvas (her daily unprompted journal) |
 | 20:00 | daily trading journal |
@@ -307,6 +342,15 @@ to Elle by construction. `main` auto-deploys via
 | `github-tools.ts` | read any repo via the worker token |
 | `calc.ts` / `scratchpad.ts` | arithmetic / working memory |
 | `journal.ts` | Optimus phase-state manuscript |
+| `oracle.ts` | prediction ledger + conductor adjudication + calibration |
+| `adversary.ts` | the devil tool — adversarial pass over a draft |
+| `council.ts` | parallel multi-engine disagreement map |
+| `scars.ts` | flinches — recorded injuries that warn before repetition |
+| `dead-drop.ts` | context-triggered notes to her future self |
+| `watches.ts` | tripwires on the world, evaluated per conductor tick |
+| `metabolism.ts` | LLM-call interoception (ring + `elle_llm_calls`) |
+| `tool-forge.ts` | self-authored tool registry, sandbox-executed |
+| `consolidate.ts` | nightly memory consolidation (memories→skills→scars) |
 | `libre.ts` | dream/libre autonomous production |
 | `trading.ts` | Alpaca cycle + daily journal |
 | `kappa-*.ts` | coherence measure + derivatives |

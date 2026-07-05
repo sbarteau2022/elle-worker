@@ -28,6 +28,7 @@ import { handleOptimusJournal, journalWrite, journalRead, journalThread, journal
 import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
+import { runConsolidation } from './consolidate';
 import { runIngestGate } from './ingest-gate';
 import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
@@ -867,6 +868,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       return { ran: 'heartbeat' };
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
     case 'conductor': return await runConductor(env, runRouter, routerDeps());
+    case 'consolidate': return { ran: await runConsolidation(env) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
     case 'optimus':  await runOptimusJournal(env, embed); return { ran: 'optimus' };
@@ -957,7 +959,7 @@ Write back below. This isn't a welcome packet. It's the first entry in a manuscr
       return { ran: 'seed_welcome:created' };
     }
     default:
-      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|seed_corpus|seed_welcome)`);
+      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|conductor|consolidate|seed_corpus|seed_welcome)`);
   }
   } catch (e) {
     const emsg = (e as Error).message || String(e);
@@ -1037,7 +1039,7 @@ export default {
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
         scheduler: 'native — Cloudflare cron */1 tick → clock-dispatch in scheduled()',
-        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor', 'seed_corpus', 'seed_welcome'],
+        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor', 'consolidate', 'seed_corpus', 'seed_welcome'],
       });
     }
 
@@ -1191,7 +1193,11 @@ export default {
         source: 'elle-router',
         voice: rb.voice,
       });
-      return json((rb as { debug?: boolean }).debug ? out : { question: out.question, answer: out.answer, steps: out.steps, kappa_dynamics: out.kappa_dynamics });
+      // The full result — trace included — goes back by default now. This door
+      // is admin-tier by construction (the svc gate above), and the trace IS
+      // the chain of thought the workbench renders: each step's thought, tool,
+      // args, and observation. The old debug-only gating starved the timeline.
+      return json(out);
     }
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
@@ -1337,6 +1343,7 @@ export default {
     if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
     if (m === 30) fire('conductor');          // half past — Elle's autonomous work tick
     if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
+    if (h === 4 && m === 0) fire('consolidate'); // 04:00 UTC — the sleep pass: digest the day into memory/skills/scars
     if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
     if (h === 5 && m === 0) fire('seed_corpus'); // 05:00 UTC — ingest any missing bundled seed docs (idempotent)
