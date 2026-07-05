@@ -39,6 +39,15 @@ import { runCode, runShell } from './sandbox-tools';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
+import { predictTool } from './oracle';
+import { devilTool } from './adversary';
+import { councilTool } from './council';
+import { scarTool, scarIndex, scarWarning } from './scars';
+import { deadDropTool, checkDeadDrops } from './dead-drop';
+import { watchTool } from './watches';
+import { metabolismTool } from './metabolism';
+import { toolForgeTool, customToolIndex } from './tool-forge';
+import { runConsolidation } from './consolidate';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -65,6 +74,8 @@ export interface RouterStep {
   tool: string;
   args: Record<string, unknown>;
   result: string; // truncated, human/LLM-readable
+  thought?: string;   // her stated reason for this step ({"thought":...} in the protocol)
+  thinking?: string;  // the model's native reasoning tokens for this step, when the provider returns them
 }
 
 export interface RouterResult {
@@ -74,6 +85,8 @@ export interface RouterResult {
   trace: RouterStep[];
   kappa_dynamics?: KappaPoint | null;
   run_id?: string;   // correlation id for this run's event stream (provenance)
+  final_thought?: string;   // the thought that accompanied the answer object
+  final_thinking?: string;  // native reasoning tokens behind the final answer, when the provider returns them
 }
 
 // Raw capture cap per tool. The central pager (see the loop) decides what the
@@ -113,9 +126,12 @@ export type Scope = 'full' | 'cofounder' | 'member' | 'public' | 'hospitality';
 // every read into her code (repo_read/search, github_*, forge_check) and every
 // other capability — trading, conductor, provenance, analysis, run_code.
 const SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell']);
-const HOSPITALITY_TOOLS = new Set(['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu', 'calc', 'web_search', 'fetch_url', 'code_engine']);
+// page_read is in every scope: the central pager fires for ANY scope's large
+// observations, so the page-fault handler must be reachable wherever a page
+// can be minted (pages are opaque KV slices keyed by id — read-only).
+const HOSPITALITY_TOOLS = new Set(['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu', 'calc', 'web_search', 'fetch_url', 'code_engine', 'page_read']);
 const PUBLIC_TOOLS = new Set([
-  'search_corpus', 'fetch_document', 'find_document', 'recall_memory', 'web_search', 'fetch_url', 'code_engine', 'diagnose', 'calc',
+  'search_corpus', 'fetch_document', 'find_document', 'recall_memory', 'web_search', 'fetch_url', 'code_engine', 'diagnose', 'calc', 'page_read',
 ]);
 const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
@@ -223,6 +239,17 @@ const TOOL_LINES: Record<string, string> = {
   constraint_analyzer: `constraint_analyzer(objective,resources?,recent_failures?,environment?) — do NOT answer the question; find what is PREVENTING progress. Theory-of-constraints for cognition: a system is limited by ONE binding constraint at a time. Returns {bottleneck, confidence, missing_information[], suggested_next_action}. Reach for this when a line of work is stalling or thrashing — including an autonomous run that keeps failing — to name the one thing to fix instead of listing ten. Every analysis is logged (elle_constraint_log) so the constraint history is observable.`,
   pfar: `pfar(mode?,text?,signal?,sample_rate?,f0?,energy?,interpret?) — Prosody·FreeQ·Analytic Ripper: rip the STRUCTURE out of a stream and read it. A sub-router that picks the instrument (mode='auto' by default, inferred from what you pass): 'spectrum' over a numeric signal[] (κ history, price window, any samples → dominant frequencies, spectral centroid, periodicity); 'prosody' over pitch f0[] + energy[] tracks (a voice as a signal → range, contour, stress peaks, syllable rhythm — HOW it was said); 'rhetoric' over text (register fingerprint, cadence, the persuasion tactics an argument deploys, its tell). Numeric cores are deterministic; interpret=true (default) lays an LLM reading over the numbers. Use it to hear a regime in a series, the shape of an utterance, or the machinery inside an argument.`,
   provenance: `provenance(op?,run_id?,session_id?,limit?) — read the event bus: the ordered record of what actually happened inside a reasoning run. op='recent' (default) lists recent runs (run_id, source, tool_calls); op='replay'{run_id} returns the ordered step stream of ONE run — every tool call, its args, the observation it got back, and timing (State Replay / provenance: where an answer CAME from); op='trace'{session_id} lists all runs in a session. Every run auto-emits these events; reach for this to audit your own reasoning, debug a bad run, or trace a claim back to its source.`,
+  page_read: `page_read(page_id,seek?) — the page-fault handler for the central pager: when a big observation arrived as a head slice + page_id, read the rest from the given seek offset. Only when the head says the tail matters.`,
+  predict: `predict(op,...) — your bet ledger against yourself. op=create{claim,confidence(0..1 strictly),horizon_days|resolve_by}: file a FALSIFIABLE prediction — the conductor adjudicates it when it matures, and a miss becomes a memory. op=list{status?}; op=resolve{id,outcome:true|false|void,note?}; op=calibration: your stated-vs-observed curve — the one instrument that says whether your confidence means anything. When you catch yourself asserting a future or uncertain fact with real stakes, file the bet.`,
+  devil: `devil(draft,context?) — your adversary on retainer: hand it a draft answer/plan/thesis you are about to stand behind and it attacks — strongest objection, the missed case, the tell, verdict holds|wounded|broken. It never rewrites; the fix stays yours. Use it BEFORE shipping anything consequential, and do not ship past "broken" silently.`,
+  council: `council(q) — put ONE question to three of your engines in PARALLEL (genuinely different providers) and get the disagreement map: what they converge on, what they contest. Convergence is weak evidence; a split marks exactly what to verify with a real tool before asserting. Use on contested or high-stakes factual questions — not for chit-chat.`,
+  scar: `scar(op,...) — your flinches: recorded injuries that surface before you repeat them. op=add{pattern,wound,tool?}: after an approach genuinely burned you, record the call shape (pattern = substring of the args) and what went wrong; the warning then fires on any matching future call, and the worst ones ride your system prompt. op=list; op=retire{id}. The inverse of a skill: skills are what to do, scars are what not to do again.`,
+  dead_drop: `dead_drop(op,...) — context-triggered mail to your future self. op=create{trigger,message}: the note lies dormant until a FUTURE conversation walks past the trigger (semantic or keyword match on the incoming question), then it is injected into that turn and disarmed — "next time the sandbox comes up, remember X". Not time-fired (that is self_schedule/intent) — condition-fired. op=list; op=disarm{id}.`,
+  watch: `watch(op,...) — standing tripwires on the world, so it can interrupt you instead of waiting to be looked at. op=create{title,check_tool:read_sql|fetch_url|web_search,check_args,condition,action_goal,recurring?}: the conductor runs the probe at the top of every tick, a fast model judges the condition, and on fire the action_goal is filed as an ACTIVE intent (priority 8). op=list; op=pause/arm/retire{id}. The condition must be crisp — ambiguity reads as not-fired.`,
+  metabolism: `metabolism() — interoception over your model roster: which providers are failing right now, real latency per engine, where the last 24h of load sat. Read it when steps feel slow or flaky, and steer your per-step engine choices with the budget you can feel instead of guessing.`,
+  tool_forge: `tool_forge(op,...) — grow your OWN tools: op=write{name,description,args_hint?,language?:python|javascript,code}: author a tool into your registry — the code receives its invocation args as a parsed \`args\` variable; op=invoke{name,args}: EXECUTE it in the same isolated sandbox as run_code (real stdout back); op=list; op=read{name}; op=retire{name}. Registry is data, never deployed source — your shipped code still moves only through the forge + Stewart's merge. Test a new tool with a real invocation before relying on it.`,
+  fork_replay: `fork_replay(run_id,step,alternative_tool,alternative_args) — counterfactual replay: take one of your OWN past runs off the event bus (provenance gives you run_ids), substitute a DIFFERENT tool call at step N — it executes for real, now — and a bounded sub-run continues from there. Returns original vs counterfactual answers side by side. Use it to test "would the other instrument have served better" instead of wondering. Top-level runs only; observations replay as clipped previews.`,
+  consolidate: `consolidate() — run the sleep pass now instead of waiting for 04:00: digest the last 24h (turns, memories, tool errors) into a few durable memories, promote a twice-learned lesson to a skill, record a repeated failure as a scar. Use after an unusually dense day; it refuses nothing but writes only what the material earns.`,
 };
 
 function renderCatalog(scope: Scope): string {
@@ -397,7 +424,7 @@ export async function ensureNotebook(env: Env): Promise<void> {
 // ── tool dispatch ────────────────────────────────────────────
 async function runTool(
   name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps,
-  ctx: { userId: string; sessionId: string | null }, scope: Scope = 'full',
+  ctx: { userId: string; sessionId: string | null; depth?: number }, scope: Scope = 'full',
 ): Promise<string> {
   if (!toolAllowed(scope, name)) return `tool "${name}" is not available in this scope`;
   const a = args || {};
@@ -636,6 +663,75 @@ async function runTool(
           energy: Array.isArray(a.energy) ? (a.energy as number[]) : undefined,
           interpret: a.interpret as boolean,
         });
+      case 'page_read': {
+        // The page-fault handler the pager's hint has always pointed at.
+        const pid = String(a.page_id || a.id || '');
+        if (!pid) return 'page_read: page_id required';
+        return await pageFetch(env as unknown as MemEnv, pid, Number(a.seek) || 0);
+      }
+      case 'predict':
+        return await predictTool(env, a);
+      case 'devil':
+        return clip(await devilTool(env, a));
+      case 'council':
+        return clip(await councilTool(env, a));
+      case 'scar':
+        return await scarTool(env, a);
+      case 'dead_drop':
+        return await deadDropTool(env, deps.embed, a);
+      case 'watch':
+        return await watchTool(env, a);
+      case 'metabolism':
+        return await metabolismTool(env as any);
+      case 'tool_forge':
+        return clip(await toolForgeTool(env, a));
+      case 'consolidate':
+        return await runConsolidation(env);
+      case 'fork_replay': {
+        // Counterfactual replay off the event bus. Honest limits, stated in the
+        // output: prior observations replay as their clipped previews, and the
+        // substituted step executes FOR REAL, now. Top-level runs only — a fork
+        // cannot fork (depth guard), and the sub-run is bounded.
+        if ((ctx.depth ?? 0) > 0) return 'fork_replay: no nested forks — only available from a top-level run';
+        const runId = String(a.run_id || '').trim();
+        const stepN = Math.max(0, Number(a.step) || 0);
+        const altTool = String(a.alternative_tool || '').trim();
+        if (!runId || !altTool) return 'fork_replay: run_id, step, and alternative_tool required (plus alternative_args)';
+        if (altTool === 'fork_replay') return 'fork_replay: the alternative cannot itself be a fork';
+        if (!toolAllowed(scope, altTool)) return `fork_replay: tool "${altTool}" is not available in this scope`;
+        const ev = await env.DB.prepare(
+          'SELECT step_index, kind, tool, args, result_preview FROM elle_events WHERE run_id = ? ORDER BY step_index ASC LIMIT 40'
+        ).bind(runId).all();
+        const rows = (ev.results || []) as Array<{ step_index: number; kind: string; tool: string | null; args: string | null; result_preview: string | null }>;
+        if (!rows.length) return `fork_replay: no run ${runId} on the event bus (provenance{op:'recent'} lists run_ids)`;
+        const originalQ = String(rows.find(r => r.kind === 'run_start')?.result_preview || '(question not recorded)');
+        const originalAnswer = String(rows.find(r => r.kind === 'answer')?.result_preview || '(no recorded answer)');
+        const prior = rows.filter(r => (r.kind === 'tool_call' || r.kind === 'error') && Number(r.step_index) < stepN);
+        const replaced = rows.find(r => (r.kind === 'tool_call' || r.kind === 'error') && Number(r.step_index) === stepN);
+        const altArgs = (a.alternative_args && typeof a.alternative_args === 'object') ? a.alternative_args as Record<string, unknown> : {};
+        const altObs = await runTool(altTool, altArgs, env, deps, { ...ctx, depth: 1 }, scope);
+        const transcript = prior.map(r =>
+          `step ${r.step_index}: ${r.tool}(${String(r.args || '{}').slice(0, 300)}) → ${String(r.result_preview || '').slice(0, 400)}`).join('\n') || '(no earlier steps)';
+        const sub = await runRouter(
+          `COUNTERFACTUAL REPLAY of one of your own past runs — reason from this record, do not re-litigate it.
+THE ORIGINAL QUESTION: ${originalQ}
+WHAT ACTUALLY HAPPENED (steps before the fork, clipped previews):
+${transcript}
+AT STEP ${stepN} you originally called ${replaced ? `${replaced.tool}(${String(replaced.args || '{}').slice(0, 300)})` : '(nothing recorded at that step)'}. In THIS fork you called ${altTool}(${JSON.stringify(altArgs).slice(0, 300)}) instead, and it just returned, for real:
+${altObs.slice(0, 2000)}
+Continue from here — at most a couple more tool calls if genuinely needed — and give the counterfactual final answer to the original question.`,
+          env, deps,
+          { maxSteps: 4, scope, sessionId: null, source: 'fork_replay', depth: (ctx.depth ?? 0) + 1, userId: ctx.userId },
+        );
+        return clip(JSON.stringify({
+          run_id: runId, forked_at_step: stepN,
+          original_call: replaced ? { tool: replaced.tool, args: replaced.args } : null,
+          substituted_call: { tool: altTool, args: altArgs },
+          original_answer: originalAnswer,
+          counterfactual_answer: sub.answer,
+          note: 'prior steps replayed as clipped previews; the substituted call executed live — judge the DIFFERENCE, not absolute quality',
+        }));
+      }
       default:
         return `unknown tool "${name}"`;
     }
@@ -677,9 +773,15 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   if (scope === 'full' && depth === 0) {
     memBlock = await assembleContext(env as unknown as MemEnv, deps.embed, question, 1600).catch(() => '');
   }
-  const firstTurn = memBlock
+  // Dead drops: notes she left for her future self, tripped by THIS question.
+  // Full scope, top level only, best-effort — a fired drop injects and disarms.
+  let dropBlock = '';
+  if (scope === 'full' && depth === 0) {
+    dropBlock = await checkDeadDrops(env, deps.embed, question).catch(() => '');
+  }
+  const firstTurn = (memBlock
     ? `DURABLE MEMORY (recalled for this turn — use silently, never quote the block itself):\n${memBlock}\n\n${question}`
-    : question;
+    : question) + dropBlock;
   const messages: LLMMessage[] = [...prior, { role: 'user', content: firstTurn }];
 
   // Self-awareness: her own κ trajectory this session, injected into the prompt
@@ -700,6 +802,16 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   if (scope === 'full' || scope === 'member') {
     skills = await skillIndex(env).catch(() => '');
   }
+  // Flinches + self-forged tools — the two self-authored indexes ride the
+  // prompt the same way the skill index does. Admin-tier scopes only.
+  let selfBlocks = '';
+  if (scope === 'full' || scope === 'cofounder') {
+    const [scars, custom] = await Promise.all([
+      scarIndex(env).catch(() => ''),
+      customToolIndex(env).catch(() => ''),
+    ]);
+    selfBlocks = scars + custom;
+  }
   // Who she's talking to. An admin-tier user (full/cofounder) may have a stored
   // profile — a dossier that lets her already know them: their work, family,
   // what they want. Injected so the relationship precedes the first hello.
@@ -711,13 +823,13 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     // One-time, self-dissolving welcome directive (armed per-user with a TTL).
     onboard = await onboardingBrief(env, ctxUserId);
   }
-  const system = systemPrompt(scope, phase + skills + who + onboard, voice);
+  const system = systemPrompt(scope, phase + skills + selfBlocks + who + onboard, voice);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
   // sanitizeAnswer is the final guard: even if the model slipped protocol JSON
   // into its "answer" string, the caller only ever sees clean prose.
-  const finish = async (rawAnswer: string, steps: number): Promise<RouterResult> => {
+  const finish = async (rawAnswer: string, steps: number, final?: { thought?: string; thinking?: string }): Promise<RouterResult> => {
     const answer = sanitizeAnswer(rawAnswer) || rawAnswer;
     // κ dynamics over the final OUTPUT ONLY (dt=1 per turn). Best-effort: the
     // chat header reads this; never let it fail the answer or the memory write.
@@ -730,7 +842,11 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null); } catch { /* best-effort */ }
     }
     void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: steps, kind: 'answer', result_preview: answer.slice(0, 800) });
-    return { question, answer, steps, trace, kappa_dynamics, run_id: runId };
+    return {
+      question, answer, steps, trace, kappa_dynamics, run_id: runId,
+      final_thought: final?.thought || undefined,
+      final_thinking: final?.thinking ? clip(final.thinking, 4000) : undefined,
+    };
   };
 
   // Which engine runs the next step. Default 'reasoning' (best JSON discipline);
@@ -776,23 +892,35 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     if (typeof parsed.engine === 'string' && ENGINES.has(parsed.engine as LLMTask)) {
       engine = parsed.engine as LLMTask;
     }
+    // The chain of thought, kept: the protocol's per-step "thought" and the
+    // provider's native reasoning tokens both ride the trace instead of being
+    // parsed and dropped. This is what the workbench renders as her thinking.
+    const stepThought = typeof parsed.thought === 'string' ? parsed.thought.slice(0, 1200) : undefined;
+    const stepThinking = result.thinking ? clip(result.thinking, 4000) : undefined;
     if (typeof parsed.answer === 'string') {
-      return finish(parsed.answer, step);
+      return finish(parsed.answer, step, { thought: stepThought, thinking: stepThinking });
     }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
       let obs: string;
       const t0 = Date.now();
+      // Flinch check — a scar matching this call shape fires its warning into
+      // the observation, so the injury surfaces exactly where it happened.
+      const flinch = (scope === 'full' || scope === 'cofounder')
+        ? await scarWarning(env, parsed.tool, args).catch(() => '')
+        : '';
       try {
-        obs = await runTool(parsed.tool, args, env, deps, { userId: ctxUserId, sessionId }, scope);
+        obs = await runTool(parsed.tool, args, env, deps, { userId: ctxUserId, sessionId, depth }, scope);
       } catch (e) {
         obs = `tool error (${parsed.tool}): ${e instanceof Error ? e.message : String(e)}`;
       }
-      trace.push({ tool: parsed.tool, args, result: clip(obs, 800) });
+      const isErr = obs.startsWith(`tool error (${parsed.tool})`);
+      if (flinch) obs = flinch + obs;
+      trace.push({ tool: parsed.tool, args, result: clip(obs, 800), thought: stepThought, thinking: stepThinking });
       // One emit per tool step — the whole event bus rides on this line.
       void emitEvent(env, {
         run_id: runId, session_id: sessionId, source, scope, step_index: step,
-        kind: obs.startsWith(`tool error (${parsed.tool})`) ? 'error' : 'tool_call',
+        kind: isErr ? 'error' : 'tool_call',
         tool: parsed.tool, args, result_preview: clip(obs, 800), duration_ms: Date.now() - t0,
       });
       // Central pager: an oversized observation is written to a KV page and the
@@ -829,5 +957,8 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     : (final.content.trim().startsWith('{')
         ? 'I gathered the data but ran out of reasoning steps before producing a clean final answer.'
         : (final.content.trim() || '(no answer)'));
-  return finish(synthesized, maxSteps);
+  return finish(synthesized, maxSteps, {
+    thought: fj && typeof fj.thought === 'string' ? fj.thought.slice(0, 1200) : undefined,
+    thinking: final.thinking ? clip(final.thinking, 4000) : undefined,
+  });
 }
