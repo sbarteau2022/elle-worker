@@ -1,7 +1,7 @@
 // retrieval.ts — retrieval-at-thread-open. Makes "I remember our conversation" TRUE, not aspirational.
 // Functional: relevance+recency ships now. Gated: reserve-weight + dip + surprise injection.
-import { SEAM, ranksOnKappa } from "../seam/seam";
-import type { Trace } from "../write/write_path";
+import { SEAM, ranksOnKappa } from "./seam";
+import type { Trace } from "./write_path";
 
 interface Scored { trace: Trace; score: number; }
 function dip(traj: number[] | null): number { return (!traj || !traj.length) ? 0 : Math.min(...traj); }
