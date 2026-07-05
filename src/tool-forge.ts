@@ -9,9 +9,10 @@
 // growing one.
 //
 // The safety model is inherited, not invented:
-//   • execution happens ONLY inside the same isolated sandbox as run_code —
-//     if the SANDBOX binding is dormant, custom tools author fine but report
-//     "not configured" on invoke, exactly like run_code does;
+//   • execution happens ONLY through the same connect-back sandbox as
+//     run_code — if the laptop agent isn't connected, custom tools author
+//     fine but report "not configured"/"not open" on invoke, exactly like
+//     run_code does;
 //   • the registry is data in D1 — nothing here touches her deployed source,
 //     which still moves only through the human-merged forge;
 //   • every invocation rides the event bus like any tool step (provenance).
@@ -20,7 +21,7 @@
 // ============================================================
 
 import type { Env } from './index';
-import { runCode } from './sandbox-tools';
+import { sandboxRunCode } from './connect-sandbox';
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
@@ -107,9 +108,8 @@ export async function toolForgeTool(env: Env, a: Record<string, unknown>): Promi
     ).bind(name).first() as { id: string; language: string; code: string; status: string } | null;
     if (!row) return `no tool "${name}" — tool_forge{op:'list'} to see what exists`;
     if (row.status !== 'active') return `tool "${name}" is retired`;
-    if (!env.SANDBOX) return `tool_forge invoke: SANDBOX binding not configured (custom tools execute in the same sandbox as run_code — authoring works, invocation needs the sandbox reprovisioned)`;
     const argsJson = JSON.stringify((a.args && typeof a.args === 'object') ? a.args : {});
-    const out = await runCode(harness(row.language, row.code, argsJson), row.language, { SANDBOX: env.SANDBOX });
+    const out = await sandboxRunCode(env, harness(row.language, row.code, argsJson), row.language, { source: 'tool_forge' });
     void env.DB.prepare(`UPDATE elle_custom_tools SET runs = runs + 1 WHERE id = ?`).bind(row.id).run().catch(() => {});
     return out;
   }

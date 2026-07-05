@@ -76,27 +76,25 @@ bucket_name = "elle-documents"
 binding = "VECTORIZE"
 index_name = "elle-corpus-vectors"
 
-# NOTE: real code execution (run_code/run_shell via the Cloudflare Sandbox
-# SDK) is intentionally NOT wired here. It requires a Containers-enabled
-# account plus a Docker image build at deploy time, and the Dockerfile.sandbox
-# template it shipped with references a turbo/pnpm monorepo (@repo/sandbox-
-# container) that this repo is not — so `wrangler deploy` failed on the image
-# build on every push, blocking ALL deploys. With no [[containers]]/Durable
-# Object binding, env.SANDBOX is undefined and run_code/run_shell cleanly
-# report "SANDBOX binding not configured" (see src/sandbox-tools.ts). Elle's
-# real code execution remains the forge: she writes to an elle/* branch and
-# CI runs it. To re-enable the sandbox later: set up a valid container image,
-# re-add [[containers]] + [[durable_objects.bindings]] + a [[migrations]]
-# block, restore the @cloudflare/sandbox dependency, and re-import it in
-# src/sandbox-tools.ts.
-#
-# A prior (manual) deploy DID register the Sandbox Durable Object class on the
-# live worker (migration v1, new_sqlite_classes = ["Sandbox"]). Cloudflare will
-# not let a new version silently drop a class that existing Durable Objects
-# depend on, so removing the class requires an explicit delete-class migration.
-# The Sandbox DOs are throwaway code-execution containers with no durable user
-# data, so deleting them loses nothing. v1 stays listed for history (already
-# applied, not re-run); v2 removes the class.
+# Real code execution — the CONNECT-BACK sandbox. The dead end here was the
+# Cloudflare Sandbox SDK: it needs a Containers-enabled account and a Docker
+# image build at deploy time, and its Dockerfile.sandbox template references a
+# turbo/pnpm monorepo (@repo/sandbox-container) this repo is not — so `wrangler
+# deploy` failed on the image build on EVERY push, blocking ALL deploys. We do
+# not re-enter that trap. Instead of a container that Cloudflare must build,
+# execution happens on the operator's own laptop: the local Electron agent dials
+# a WebSocket UP to the SandboxAgent Durable Object (below), and run_code/
+# run_shell/sandbox_clone reach back DOWN it. No container image, no Containers
+# entitlement, no deploy-time build — just a plain Durable Object holding a
+# socket. See src/sandbox-agent.ts + src/connect-sandbox.ts.
+[[durable_objects.bindings]]
+name = "SANDBOX_AGENT"
+class_name = "SandboxAgent"
+
+# Migration history. v1 registered the old (container) Sandbox class; v2 removed
+# it. v3 registers the connect-back SandboxAgent — a plain DO (WebSocket
+# hibernation + storage), NOT a container, so it introduces no image build. The
+# earlier tags stay listed as already-applied history and are never re-run.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Sandbox"]
@@ -104,6 +102,10 @@ new_sqlite_classes = ["Sandbox"]
 [[migrations]]
 tag = "v2"
 deleted_classes = ["Sandbox"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["SandboxAgent"]
 
 [[queues.producers]]
 binding = "INGEST_QUEUE"
