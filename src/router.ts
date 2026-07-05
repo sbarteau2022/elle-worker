@@ -49,6 +49,7 @@ import { metabolismTool } from './metabolism';
 import { toolForgeTool, customToolIndex } from './tool-forge';
 import { runConsolidation } from './consolidate';
 import { assembleWorkingSet, invalidateWorkingSet } from './kv-cache';
+import { recordTurnTrace } from './kappa-memory/integration';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -860,6 +861,13 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     if (sessionId && deps.persistExchange) {
       try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null); } catch { /* best-effort */ }
+    }
+    // κ memory (live, gate-closed): record one bending trace for the turn off the
+    // per-session κ series just updated above. Writing is always on — the
+    // substrate fills with real, relationally-inferred r/reserve/velocity — but
+    // κ ranks NOTHING until the seam clears (see src/kappa-memory). Best-effort.
+    if (sessionId) {
+      void recordTurnTrace(env as unknown as { DB: D1Database }, { sessionId, question, answer }).catch(() => {});
     }
     void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: steps, kind: 'answer', result_preview: answer.slice(0, 800) });
     return {

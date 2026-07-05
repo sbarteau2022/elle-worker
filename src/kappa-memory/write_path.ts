@@ -1,7 +1,7 @@
 // write_path.ts — extract (perturbation, response, settling, r), write idempotently.
 // Text triple ALWAYS written (functional). κ/r written but provisional until gate clears.
-import { SEAM, KAPPA_PROVISIONAL } from "../seam/seam";
-import { estimateR, reserveOf, velocityPeak } from "../kappa/kappa";
+import { SEAM, KAPPA_PROVISIONAL } from "./seam";
+import { estimateR, reserveOf, velocityPeak } from "./kappa";
 
 export interface Trace {
   id: string; thread_id: string; created_at: number;

@@ -1,7 +1,7 @@
 // kappa.ts — contraction operator (real) + κ(T,t) (stubbed behind seam).
 // u̇ = −r·u is known and implemented. κ(T,t) validated form is NOT dropped in here;
 // validatedKappa() throws pre-gate so nothing can quietly depend on an unvalidated κ.
-import { SEAM } from "../seam/seam";
+import { SEAM } from "./seam";
 
 export function estimateR(traj: number[]): number {
   const u = traj.map((x) => Math.max(x, 1e-9));

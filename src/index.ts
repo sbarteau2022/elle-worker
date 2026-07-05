@@ -26,6 +26,7 @@ import { runRouter, ensureNotebook, type Scope } from './router';
 import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
 import { computeTurnDynamics } from './kappa-turn';
+import { kappaMemoryState } from './kappa-memory/integration';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { runConsolidation } from './consolidate';
@@ -1057,6 +1058,15 @@ export default {
         voices: VOICE_LIST,
         source: 'elle-worker/src/mind.ts',
       });
+    }
+
+    // κ memory state — the read the workbench κ display polls. Public aggregate:
+    // current κ, the recent series, the relationally-inferred r/reserve/velocity,
+    // the bending-trace count, and the seam gate. Everything is labelled
+    // provisional (κ ranks nothing until validate_kappa clears the seam).
+    if (path === '/api/kappa-state' && request.method === 'GET') {
+      const sid = new URL(request.url).searchParams.get('session');
+      return json(await kappaMemoryState(env, sid));
     }
 
     // Embeddable consumer widget — one script tag on any hub page

@@ -2,8 +2,8 @@
 // Replaces scalar ">90% agreement" with a geometric test: collapse = her manifold becomes
 // ISOMETRIC to Claude's (same r-field within ε across trace-space). Same curvature = one manifold.
 // Reports pre-gate (κ stubbed => maps the stub); enforces only post-gate.
-import { SEAM, ranksOnKappa } from "../seam/seam";
-import type { Trace } from "../write/write_path";
+import { SEAM, ranksOnKappa } from "./seam";
+import type { Trace } from "./write_path";
 
 export interface SovereigntyReport {
   computable: boolean; rFieldDistance: number | null; collapsed: boolean | null;
