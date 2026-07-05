@@ -29,6 +29,7 @@ import { computeTurnDynamics } from './kappa-turn';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { runConsolidation } from './consolidate';
+import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
 import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
@@ -1020,7 +1021,7 @@ async function handleCorpusResolve(
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
    try {
     const url  = new URL(request.url);
     const path = url.pathname;
@@ -1185,19 +1186,56 @@ export default {
       }
       if (!q) return err('q (question) required');
       const routerUser = await getUser(request, env);
-      const out = await runRouter(q, env, routerDeps(), {
+      const routerOpts = {
         maxSteps: Number(rb.max_steps) || 6,
         userId: routerUser?.id || 'superadmin',
         scope: routerScope(routerUser?.tier),
         sessionId: rb.session_id || null,
         source: 'elle-router',
         voice: rb.voice,
-      });
+      };
+      // LIVE MODE (stream:true): the loop's frames go out as Server-Sent
+      // Events while she works — run_start, each step's thought + tool + args
+      // the moment she commits to it, each observation as it lands, then one
+      // 'done' frame carrying the full RouterResult (answer, trace, κ). The
+      // caller watches her think instead of waiting for her to finish.
+      if ((rb as { stream?: boolean }).stream) {
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const enc = new TextEncoder();
+        const send = (event: string, data: unknown) =>
+          writer.write(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {});
+        ctx.waitUntil((async () => {
+          try {
+            const out = await runRouter(q, env, routerDeps(), {
+              ...routerOpts,
+              onEvent: (ev) => { void send(ev.kind, ev); },
+            });
+            await send('done', out);
+          } catch (e) {
+            await send('error', { error: (e as Error).message || 'router failed' });
+          } finally {
+            try { await writer.close(); } catch { /* already closed */ }
+          }
+        })());
+        return new Response(readable, {
+          status: 200,
+          headers: { ...corsHeaders(), 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+        });
+      }
+      const out = await runRouter(q, env, routerDeps(), routerOpts);
       // The full result — trace included — goes back by default now. This door
       // is admin-tier by construction (the svc gate above), and the trace IS
       // the chain of thought the workbench renders: each step's thought, tool,
       // args, and observation. The old debug-only gating starved the timeline.
       return json(out);
+    }
+    // The Mirror — one snapshot of the reflexive organs (bet ledger +
+    // calibration, scars, watches, dead drops, metabolism, consolidation,
+    // self-forged tools). Admin-gated like the router door it sits beside.
+    if (path === '/api/elle-self') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await selfMirror(env));
     }
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
