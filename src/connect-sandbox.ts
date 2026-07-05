@@ -1,0 +1,189 @@
+// ============================================================
+// ELLE — worker-side face of the connect-back sandbox · src/connect-sandbox.ts
+//
+// The router calls these; they talk to the SandboxAgent Durable Object (which
+// holds the laptop's WebSocket) and turn a tool call into real execution on the
+// box. Every call:
+//   1. checks the path is OPEN (laptop connected + beating) — no silent hangs,
+//   2. dispatches over the socket and awaits the real result,
+//   3. writes a row to the comprehensive use report (elle_sandbox_runs),
+//   4. for clones, caches a COPY of the pulled code in KV (24h).
+//
+// The event bus (elle_events) already logs every run_code/run_shell call by
+// run_id from the router loop; this table adds the execution detail (exit,
+// stdout/stderr previews, the clone's KV key, whether the path was open).
+// ============================================================
+
+import type { Env } from './index';
+import type { ExecResult, CloneResult, AgentStatus } from './sandbox-agent';
+
+const CLONE_TTL = 60 * 60 * 24; // a pulled-back copy lives 24h in KV
+const PREVIEW = 4000;           // clip previews the way the event bus clips observations
+const CODE_TIMEOUT_MS = 120_000;
+const SHELL_TIMEOUT_MS = 300_000;
+const CLONE_TIMEOUT_MS = 120_000;
+
+export interface RunCtx { runId?: string; sessionId?: string | null; source?: string; userId?: string }
+
+function newId(): string { return crypto.randomUUID().replace(/-/g, '').slice(0, 20); }
+
+function stub(env: Env) {
+  const ns = env.SANDBOX_AGENT!; // callers guard sandboxConfigured() first
+  return ns.get(ns.idFromName('primary'));
+}
+
+export function sandboxConfigured(env: Env): boolean { return !!env.SANDBOX_AGENT; }
+
+export async function pathOpen(env: Env): Promise<AgentStatus> {
+  if (!env.SANDBOX_AGENT) return { open: false };
+  try {
+    const r = await stub(env).fetch('https://sandbox/status');
+    return (await r.json()) as AgentStatus;
+  } catch {
+    return { open: false };
+  }
+}
+
+async function dispatchExec(env: Env, payload: Record<string, unknown>): Promise<ExecResult> {
+  const r = await stub(env).fetch('https://sandbox/dispatch', {
+    method: 'POST', body: JSON.stringify({ kind: 'exec', payload }),
+  });
+  return (await r.json()) as ExecResult;
+}
+async function dispatchClone(env: Env, payload: Record<string, unknown>): Promise<CloneResult> {
+  const r = await stub(env).fetch('https://sandbox/dispatch', {
+    method: 'POST', body: JSON.stringify({ kind: 'clone', payload }),
+  });
+  return (await r.json()) as CloneResult;
+}
+
+// ── the comprehensive use report ────────────────────────────
+let schemaReady = false;
+export async function ensureSandboxSchema(env: Env): Promise<void> {
+  if (schemaReady) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_sandbox_runs (
+    id TEXT PRIMARY KEY,
+    run_id TEXT, session_id TEXT, source TEXT, user_id TEXT,
+    kind TEXT,                -- code | shell | clone
+    language TEXT, command TEXT, code_preview TEXT,
+    target TEXT, clone_key TEXT,
+    exit INTEGER, stdout_preview TEXT, stderr_preview TEXT,
+    ok INTEGER, path_open INTEGER, duration_ms INTEGER, created_at INTEGER
+  )`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_time ON elle_sandbox_runs(created_at DESC)`).run().catch(() => {});
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_run ON elle_sandbox_runs(run_id)`).run().catch(() => {});
+  schemaReady = true;
+}
+
+interface RunRow {
+  kind: string; language?: string; command?: string; code_preview?: string;
+  target?: string; clone_key?: string; exit?: number;
+  stdout_preview?: string; stderr_preview?: string;
+  ok: boolean; path_open: boolean; duration_ms?: number;
+}
+async function record(env: Env, ctx: RunCtx, row: RunRow): Promise<void> {
+  try {
+    await ensureSandboxSchema(env);
+    await env.DB.prepare(`INSERT INTO elle_sandbox_runs
+      (id,run_id,session_id,source,user_id,kind,language,command,code_preview,target,clone_key,exit,stdout_preview,stderr_preview,ok,path_open,duration_ms,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      newId(), ctx.runId ?? null, ctx.sessionId ?? null, ctx.source ?? null, ctx.userId ?? null,
+      row.kind, row.language ?? null, row.command ?? null, row.code_preview ?? null,
+      row.target ?? null, row.clone_key ?? null, row.exit ?? null,
+      row.stdout_preview ?? null, row.stderr_preview ?? null,
+      row.ok ? 1 : 0, row.path_open ? 1 : 0, row.duration_ms ?? null, Date.now(),
+    ).run();
+  } catch {
+    /* the use report is best-effort — it never blocks or fails a real run */
+  }
+}
+
+const NOT_CONFIGURED = 'the SANDBOX_AGENT binding is not configured on this worker.';
+const NOT_OPEN =
+  'sandbox path not open — your laptop agent is offline. It reconnects when the ' +
+  'workbench is running; run sandbox_status to check, then retry.';
+
+function formatExec(res: ExecResult): string {
+  const head = `exit ${res.exit}${res.ok ? '' : ' (FAILED)'} · ${res.duration_ms}ms${res.truncated ? ' · output truncated on the box' : ''}`;
+  const out = res.stdout ? `\n── stdout ──\n${res.stdout}` : '';
+  const errBlock = res.stderr ? `\n── stderr ──\n${res.stderr}` : '';
+  return `${head}${out}${errBlock}`;
+}
+
+function slug(s: string): string { return s.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'clone'; }
+
+// ── the four tools ──────────────────────────────────────────
+export async function sandboxRunCode(env: Env, code: string, language: string | undefined, ctx: RunCtx): Promise<string> {
+  if (!sandboxConfigured(env)) return `run_code: ${NOT_CONFIGURED}`;
+  const lang = language || 'python';
+  const st = await pathOpen(env);
+  if (!st.open) { await record(env, ctx, { kind: 'code', language: lang, code_preview: code.slice(0, PREVIEW), ok: false, path_open: false }); return NOT_OPEN; }
+  const res = await dispatchExec(env, { id: newId(), mode: 'code', code, language: lang, timeout_ms: CODE_TIMEOUT_MS });
+  await record(env, ctx, {
+    kind: 'code', language: lang, code_preview: code.slice(0, PREVIEW), exit: res.exit,
+    stdout_preview: (res.stdout || '').slice(0, PREVIEW), stderr_preview: (res.stderr || '').slice(0, PREVIEW),
+    ok: res.ok, path_open: res.path_open !== false, duration_ms: res.duration_ms,
+  });
+  return res.path_open === false ? NOT_OPEN : formatExec(res);
+}
+
+export async function sandboxRunShell(env: Env, command: string, ctx: RunCtx): Promise<string> {
+  if (!sandboxConfigured(env)) return `run_shell: ${NOT_CONFIGURED}`;
+  const st = await pathOpen(env);
+  if (!st.open) { await record(env, ctx, { kind: 'shell', command: command.slice(0, PREVIEW), ok: false, path_open: false }); return NOT_OPEN; }
+  const res = await dispatchExec(env, { id: newId(), mode: 'shell', command, timeout_ms: SHELL_TIMEOUT_MS });
+  await record(env, ctx, {
+    kind: 'shell', command: command.slice(0, PREVIEW), exit: res.exit,
+    stdout_preview: (res.stdout || '').slice(0, PREVIEW), stderr_preview: (res.stderr || '').slice(0, PREVIEW),
+    ok: res.ok, path_open: res.path_open !== false, duration_ms: res.duration_ms,
+  });
+  return res.path_open === false ? NOT_OPEN : formatExec(res);
+}
+
+export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git', ctx: RunCtx): Promise<string> {
+  if (!sandboxConfigured(env)) return `sandbox_clone: ${NOT_CONFIGURED}`;
+  if (!target) return 'sandbox_clone: target required (a path on the box, or a git repo)';
+  const st = await pathOpen(env);
+  if (!st.open) { await record(env, ctx, { kind: 'clone', target, ok: false, path_open: false }); return NOT_OPEN; }
+  const res = await dispatchClone(env, { id: newId(), kind, target, timeout_ms: CLONE_TIMEOUT_MS });
+
+  let cloneKey: string | undefined;
+  if (res.ok && res.bundle && env.SCRATCHPAD) {
+    cloneKey = `clone:${ctx.userId || 'elle'}:${slug(target)}:${Date.now().toString(36)}`;
+    try { await env.SCRATCHPAD.put(cloneKey, res.bundle, { expirationTtl: CLONE_TTL }); }
+    catch { cloneKey = undefined; }
+  }
+  await record(env, ctx, { kind: 'clone', target, clone_key: cloneKey, ok: res.ok, path_open: res.path_open !== false });
+
+  if (res.path_open === false) return NOT_OPEN;
+  if (!res.ok) return `sandbox_clone failed: ${res.error || 'unknown error'}`;
+  const files = res.files || [];
+  const list = files.slice(0, 50).map(f => `  ${f.path} (${f.bytes}b)`).join('\n');
+  return `cloned ${files.length} file(s) from ${target}.` +
+    (cloneKey ? `\na copy is cached at KV key "${cloneKey}" (24h) and mirrored to the laptop's sovereign cache.` : '') +
+    (list ? `\n${list}${files.length > 50 ? `\n  …and ${files.length - 50} more` : ''}` : '');
+}
+
+export async function sandboxStatus(env: Env): Promise<string> {
+  if (!sandboxConfigured(env)) return `sandbox path: NOT CONFIGURED — ${NOT_CONFIGURED}`;
+  const st = await pathOpen(env);
+  if (!st.open) return 'sandbox path: CLOSED — the laptop agent is not connected. Start the workbench to bring it up.';
+  const m = st.meta || {};
+  const ago = m.lastSeen ? Math.round((Date.now() - m.lastSeen) / 1000) : null;
+  return `sandbox path: OPEN — ${m.host || m.agent || 'laptop'} (${m.platform || '?'}), root ${m.root || '?'}` +
+    (ago != null ? `, last beat ${ago}s ago.` : '.');
+}
+
+// ── read side (admin workbench) ─────────────────────────────
+export async function sandboxRunsRecent(env: Env, limit = 50): Promise<unknown[]> {
+  try {
+    await ensureSandboxSchema(env);
+    const r = await env.DB.prepare(
+      `SELECT id,run_id,session_id,source,user_id,kind,language,command,code_preview,target,clone_key,exit,stdout_preview,stderr_preview,ok,path_open,duration_ms,created_at
+       FROM elle_sandbox_runs ORDER BY created_at DESC LIMIT ?`,
+    ).bind(Math.min(Math.max(limit, 1), 200)).all();
+    return r.results || [];
+  } catch {
+    return [];
+  }
+}

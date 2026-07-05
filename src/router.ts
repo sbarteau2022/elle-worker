@@ -35,7 +35,7 @@ import { getProfileByUser, profileBlock } from './profiles';
 import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
-import { runCode, runShell } from './sandbox-tools';
+import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus } from './connect-sandbox';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
@@ -192,8 +192,10 @@ const TOOL_LINES: Record<string, string> = {
   calc: `calc(expression) — deterministic arithmetic (+,-,*,/,%,^, parens, sqrt/abs/round/min/max/etc). Use for any exact computation instead of doing the math yourself.`,
   scratchpad_write: `scratchpad_write(key,value) — short-TTL working memory for this reasoning chain. Jot a finding down mid-chain instead of losing it to observation truncation.`,
   scratchpad_read: `scratchpad_read(key?) — read back a scratchpad entry; no key lists everything saved so far.`,
-  run_code: `run_code(code,language?) — ACTUALLY EXECUTE code in an isolated sandbox and get real stdout/stderr/exit code back. language ∈ {python (default), javascript, typescript}. Use this to verify code you wrote actually runs before handing it back — and to compute anything calc can't.`,
-  run_shell: `run_shell(command) — run a shell command (e.g. npm test, tsc --noEmit) in the same sandbox as run_code.`,
+  run_code: `run_code(code,language?) — ACTUALLY EXECUTE code on your laptop's live sandbox (the connect-back path) and get real stdout/stderr/exit code back. language ∈ {python (default), javascript, typescript}. Use this to verify code you wrote actually runs before handing it back — and to compute anything calc can't. If the path is closed you'll be told; run sandbox_status to check.`,
+  run_shell: `run_shell(command) — run a shell command (e.g. npm test, tsc --noEmit, git clone, npm install) on your laptop's sandbox, same box as run_code. This is your real hands: build from scratch, install deps, run the test suite, iterate on failures.`,
+  sandbox_status: `sandbox_status() — check whether the live path down to your laptop's sandbox is OPEN before running code on it. Returns the box's host/platform/root and when it last checked in.`,
+  sandbox_clone: `sandbox_clone(target,kind?) — pull a COPY of code back UP from the laptop into the cloud. kind='git' reads a repo's working tree; kind='path' (default) reads a file or directory. The copy is cached in KV (24h) and mirrored to the laptop's sovereign cache, and the pull is logged. Use after you've built or changed something on the box and want the source back.`,
   github_read_file: `github_read_file(repo,path,ref?) — read one real file from ANY GitHub repo ("owner/name"). For your OWN three repos prefer repo_read (allowlisted, forge-integrated); this is for reading the outside world's code.`,
   github_list_files: `github_list_files(repo,path?,ref?) — list a directory in any GitHub repo.`,
   github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
@@ -397,11 +399,14 @@ export async function ensureNotebook(env: Env): Promise<void> {
 // ── tool dispatch ────────────────────────────────────────────
 async function runTool(
   name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps,
-  ctx: { userId: string; sessionId: string | null }, scope: Scope = 'full',
+  ctx: { userId: string; sessionId: string | null; runId?: string; source?: string }, scope: Scope = 'full',
 ): Promise<string> {
   if (!toolAllowed(scope, name)) return `tool "${name}" is not available in this scope`;
   const a = args || {};
   const ctxUserId = ctx.userId;
+  // Correlation for the sandbox use report (elle_sandbox_runs) — ties a run_code /
+  // run_shell / sandbox_clone row back to the run and session it happened in.
+  const sctx = { runId: ctx.runId, sessionId: ctx.sessionId, source: ctx.source, userId: ctxUserId };
   try {
     switch (name) {
       case 'search_corpus': {
@@ -467,14 +472,14 @@ async function runTool(
         if (!env.SCRATCHPAD) return 'scratchpad_read: SCRATCHPAD KV not configured';
         return await scratchpadRead(ctxUserId, a.key ? String(a.key) : undefined, env.SCRATCHPAD);
       }
-      case 'run_code': {
-        if (!env.SANDBOX) return 'run_code: SANDBOX binding not configured (needs Containers enabled + a deploy)';
-        return clip(await runCode(String(a.code || ''), a.language ? String(a.language) : undefined, { SANDBOX: env.SANDBOX }));
-      }
-      case 'run_shell': {
-        if (!env.SANDBOX) return 'run_shell: SANDBOX binding not configured (needs Containers enabled + a deploy)';
-        return clip(await runShell(String(a.command || ''), { SANDBOX: env.SANDBOX }));
-      }
+      case 'run_code':
+        return clip(await sandboxRunCode(env, String(a.code || ''), a.language ? String(a.language) : undefined, sctx));
+      case 'run_shell':
+        return clip(await sandboxRunShell(env, String(a.command || ''), sctx));
+      case 'sandbox_status':
+        return await sandboxStatus(env);
+      case 'sandbox_clone':
+        return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx));
       case 'github_read_file': {
         if (!env.GITHUB_TOKEN) return 'github_read_file: GITHUB_TOKEN not configured';
         return clip(await githubReadFile(String(a.repo || ''), String(a.path || ''), a.ref ? String(a.ref) : undefined, env.GITHUB_TOKEN), OBS_CAP * 2);
@@ -784,7 +789,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       let obs: string;
       const t0 = Date.now();
       try {
-        obs = await runTool(parsed.tool, args, env, deps, { userId: ctxUserId, sessionId }, scope);
+        obs = await runTool(parsed.tool, args, env, deps, { userId: ctxUserId, sessionId, runId, source }, scope);
       } catch (e) {
         obs = `tool error (${parsed.tool}): ${e instanceof Error ? e.message : String(e)}`;
       }

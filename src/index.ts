@@ -33,6 +33,11 @@ import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
 import { armOnboarding, disarmOnboarding } from './onboarding';
 import { pfarRoute } from './pfar';
+import { pathOpen as sandboxPathOpen, sandboxRunsRecent } from './connect-sandbox';
+
+// The connect-back sandbox Durable Object must be exported from the worker
+// entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
+export { SandboxAgent } from './sandbox-agent';
 
 export interface Env extends LLMEnv {
   AI:           Ai;
@@ -53,10 +58,16 @@ export interface Env extends LLMEnv {
   // Router scratchpad (src/scratchpad.ts) — short-TTL working memory so a long
   // tool chain retains findings past the per-observation truncation.
   SCRATCHPAD?:  KVNamespace;
-  // Code-execution sandbox binding — currently DORMANT (no [[containers]] block
-  // in wrangler.toml; see src/sandbox-tools.ts). Undefined at runtime, so
-  // run_code/run_shell report "not configured" rather than executing.
-  SANDBOX?:     unknown;
+  // Connect-back code sandbox. Elle's mind is in the cloud; her hands are on the
+  // operator's laptop. The local Electron agent dials a WebSocket UP to the
+  // SandboxAgent Durable Object (this binding), which holds the socket; then
+  // run_code/run_shell/sandbox_clone reach back DOWN it to execute on the real
+  // machine. See src/sandbox-agent.ts + src/connect-sandbox.ts. Undefined ⇒ the
+  // tools report "not configured".
+  SANDBOX_AGENT?: DurableObjectNamespace;
+  // Shared secret the laptop agent presents on /api/sandbox-agent/connect.
+  // Set as a Worker secret: `wrangler secret put SANDBOX_AGENT_KEY`.
+  SANDBOX_AGENT_KEY?: string;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
   GOOGLE_CLIENT_ID?: string;
@@ -1025,6 +1036,16 @@ export default {
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
 
+    // The laptop's sandbox agent dials in here and upgrades to a long-lived
+    // WebSocket. Auth is NOT the admin JWT — the SandboxAgent DO checks the
+    // shared secret (?key=) itself — so this sits ahead of the svc gate. The
+    // worker just forwards the upgrade to the single "primary" DO instance.
+    if (path === '/api/sandbox-agent/connect') {
+      if (!env.SANDBOX_AGENT) return err('sandbox not configured', 503);
+      const id = env.SANDBOX_AGENT.idFromName('primary');
+      return env.SANDBOX_AGENT.get(id).fetch(request);
+    }
+
     if (path === '/health' && request.method === 'GET') {
       const [papers, chunks] = await Promise.all([
         env.DB.prepare('SELECT COUNT(*) as n FROM corpus_papers').first(),
@@ -1143,6 +1164,10 @@ export default {
     // Conductor intents — the workbench's window into her autonomous work
     // queue and run log. Admin-gated like everything else internal.
     if (path === '/api/elle-intents')      { if (!svc) return err('Unauthorized', 401); return json(await handleIntents(body, env)); }
+    // Sandbox path status + the comprehensive use report (elle_sandbox_runs).
+    if (path === '/api/elle-sandbox-runs') { if (!svc) return err('Unauthorized', 401);
+      return json({ path: await sandboxPathOpen(env), runs: await sandboxRunsRecent(env, Number((body as { limit?: number }).limit) || 50) });
+    }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
