@@ -48,6 +48,7 @@ import { watchTool } from './watches';
 import { metabolismTool } from './metabolism';
 import { toolForgeTool, customToolIndex } from './tool-forge';
 import { runConsolidation } from './consolidate';
+import { assembleWorkingSet, invalidateWorkingSet } from './kv-cache';
 
 // Helpers index.ts owns are injected so this module stays free of circular imports.
 export interface RouterDeps {
@@ -603,6 +604,10 @@ async function runTool(
         await env.DB.prepare(
           `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'deliberate', 'router', ?, ?, ?)`
         ).bind(mid, note.slice(0, 1000), importance, importance).run();
+        // Drop this session's working-set cache so the next turn rebuilds
+        // against the memory we just wrote instead of serving a set that
+        // predates it. Best-effort; the write already stands.
+        if (env.SESSIONS) void invalidateWorkingSet(env.SESSIONS, ctx.sessionId).catch(() => {});
         return `remembered (importance ${importance}): ${note.slice(0, 200)}`;
       }
       case 'journal_read': {
@@ -766,12 +771,27 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     ? await deps.loadSessionHistory(sessionId, env).catch(() => [])
     : [];
 
-  // Context assembler: page the top-priority durable memories into this turn's
-  // budget. Full scope + top-level only (delegates run lean), and never fatal —
-  // an empty result costs nothing.
+  // Dynamic KV cache: size the durable-memory pull to the DEMAND of this turn
+  // (a bare greeting warms nothing; a dense, recall-cued question warms a wider
+  // set) and reuse an already-assembled set for a repeated/rephrased ask inside
+  // the window instead of re-embedding + re-querying from scratch. Full scope +
+  // top-level only (delegates run lean), and never fatal — an empty result
+  // costs nothing. See src/kv-cache.ts.
   let memBlock = '';
   if (scope === 'full' && depth === 0) {
-    memBlock = await assembleContext(env as unknown as MemEnv, deps.embed, question, 1600).catch(() => '');
+    const ws = await assembleWorkingSet(env as unknown as MemEnv, deps.embed, question, sessionId)
+      .catch(() => ({ text: '', budget: 0, hit: false, cached: false }));
+    memBlock = ws.text;
+    // Best-effort observability: one event so the dev console can watch the
+    // cache breathe (budget, hit/miss). Never on the critical path.
+    if (ws.budget > 0) {
+      void emitEvent(env, {
+        run_id: runId, session_id: sessionId, source, scope, step_index: -1,
+        kind: 'tool_call', tool: 'kv_cache',
+        args: { budget: ws.budget, hit: ws.hit },
+        result_preview: `working set: ${ws.hit ? 'hit' : 'miss'} · budget ${ws.budget}ch · ${ws.text.length}ch loaded`,
+      });
+    }
   }
   // Dead drops: notes she left for her future self, tripped by THIS question.
   // Full scope, top level only, best-effort — a fired drop injects and disarms.
