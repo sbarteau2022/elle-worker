@@ -35,7 +35,7 @@ import { getProfileByUser, profileBlock } from './profiles';
 import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
-import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus } from './connect-sandbox';
+import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport } from './connect-sandbox';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
@@ -229,7 +229,8 @@ const TOOL_LINES: Record<string, string> = {
   run_code: `run_code(code,language?) — ACTUALLY EXECUTE code on your laptop's live sandbox (the connect-back path) and get real stdout/stderr/exit code back. language ∈ {python (default), javascript, typescript}. Use this to verify code you wrote actually runs before handing it back — and to compute anything calc can't. If the path is closed you'll be told; run sandbox_status to check.`,
   run_shell: `run_shell(command) — run a shell command (e.g. npm test, tsc --noEmit, git clone, npm install) on your laptop's sandbox, same box as run_code. This is your real hands: build from scratch, install deps, run the test suite, iterate on failures.`,
   sandbox_status: `sandbox_status() — check whether the live path down to your laptop's sandbox is OPEN before running code on it. Returns the box's host/platform/root and when it last checked in.`,
-  sandbox_clone: `sandbox_clone(target,kind?) — pull a COPY of code back UP from the laptop into the cloud. kind='git' reads a repo's working tree; kind='path' (default) reads a file or directory. The copy is cached in KV (24h) and mirrored to the laptop's sovereign cache, and the pull is logged. Use after you've built or changed something on the box and want the source back.`,
+  sandbox_clone: `sandbox_clone(target,kind?,title?) — pull a COPY of code back UP from the laptop into the cloud. kind='git' reads a repo's working tree; kind='path' (default) reads a file or directory. title names what you brought in (shown in the sandbox console). The copy is cached in KV (24h) and mirrored to the laptop's sovereign cache, and the pull is logged. Use after you've built or changed something on the box and want the source back.`,
+  sandbox_report: `sandbox_report(title,body) — surface a report FROM a sandbox session: your findings after building/testing something on the box (what it does, whether it works, whether it's worth keeping). Titled by you. Filed to the sandbox console and flashes its tab until it's read. Use when a sandbox investigation reaches a conclusion worth showing.`,
   github_read_file: `github_read_file(repo,path,ref?) — read one real file from ANY GitHub repo ("owner/name"). For your OWN three repos prefer repo_read (allowlisted, forge-integrated); this is for reading the outside world's code.`,
   github_list_files: `github_list_files(repo,path?,ref?) — list a directory in any GitHub repo.`,
   github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
@@ -524,7 +525,9 @@ async function runTool(
       case 'sandbox_status':
         return await sandboxStatus(env);
       case 'sandbox_clone':
-        return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx));
+        return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx, a.title ? String(a.title) : undefined));
+      case 'sandbox_report':
+        return await sandboxReport(env, String(a.title || ''), String(a.body || a.findings || ''), sctx);
       case 'github_read_file': {
         if (!env.GITHUB_TOKEN) return 'github_read_file: GITHUB_TOKEN not configured';
         return clip(await githubReadFile(String(a.repo || ''), String(a.path || ''), a.ref ? String(a.ref) : undefined, env.GITHUB_TOKEN), OBS_CAP * 2);
