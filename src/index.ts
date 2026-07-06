@@ -38,7 +38,7 @@ import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
 import { armOnboarding, disarmOnboarding } from './onboarding';
 import { pfarRoute } from './pfar';
-import { pathOpen as sandboxPathOpen, sandboxRunsRecent } from './connect-sandbox';
+import { pathOpen as sandboxPathOpen, sandboxRunsRecent, sandboxBroughtIn, sandboxThoughts, sandboxReportsRecent, unseenReportCount, markReportsSeen } from './connect-sandbox';
 
 // The connect-back sandbox Durable Object must be exported from the worker
 // entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
@@ -1201,7 +1201,21 @@ export default {
     if (path === '/api/elle-intents')      { if (!svc) return err('Unauthorized', 401); return json(await handleIntents(body, env)); }
     // Sandbox path status + the comprehensive use report (elle_sandbox_runs).
     if (path === '/api/elle-sandbox-runs') { if (!svc) return err('Unauthorized', 401);
-      return json({ path: await sandboxPathOpen(env), runs: await sandboxRunsRecent(env, Number((body as { limit?: number }).limit) || 50) });
+      const sb = body as { op?: string; limit?: number };
+      // Lightweight signals the console rail polls: mark reports read on open,
+      // or just count unseen ones to drive the flashing tab.
+      if (sb.op === 'seen')   { await markReportsSeen(env); return json({ ok: true }); }
+      if (sb.op === 'unseen') { return json({ unseen: await unseenReportCount(env) }); }
+      // Full console payload — runs, what she brought in, her chain of thought
+      // (off the event bus), and surfaced reports, all indexed by run_id.
+      const [pathState, runs, brought_in, thoughts, reports] = await Promise.all([
+        sandboxPathOpen(env),
+        sandboxRunsRecent(env, Number(sb.limit) || 60),
+        sandboxBroughtIn(env, 50),
+        sandboxThoughts(env, 80),
+        sandboxReportsRecent(env, 20),
+      ]);
+      return json({ path: pathState, runs, brought_in, thoughts, reports });
     }
     // Code security analysis — the Deep-Mind code tab's upload runs through here.
     // STATIC analysis (the code is never executed): deterministic scan + LLM
