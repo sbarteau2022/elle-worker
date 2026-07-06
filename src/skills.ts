@@ -40,6 +40,10 @@ async function ensureSchema(env: Env): Promise<void> {
     name TEXT PRIMARY KEY, description TEXT, body TEXT,
     source TEXT DEFAULT 'elle', uses INTEGER DEFAULT 0,
     created_at INTEGER, updated_at INTEGER)`).run();
+  // The skill ROUTER's cache: each skill's embedding (JSON float[]), computed on
+  // write and lazily backfilled, so routing a task to its method is one task
+  // embed + in-worker cosine — no per-request re-embedding of the library.
+  await env.DB.prepare(`ALTER TABLE elle_skills ADD COLUMN embedding TEXT`).run().catch(() => {});
   schemaReady = true;
   await seed(env);
 }
@@ -172,10 +176,11 @@ export async function skillWrite(env: Env, a: { name?: unknown; description?: un
   const exists = await env.DB.prepare('SELECT name FROM elle_skills WHERE name = ?').bind(name).first();
   if (!exists && (count?.n ?? 0) >= MAX_SKILLS) return `skill_write refused: library is at ${MAX_SKILLS} — refine an existing skill instead`;
   const now = Date.now();
+  const emb = await embedSkill(env, name, description, body);
   await env.DB.prepare(
-    `INSERT INTO elle_skills (name, description, body, source, created_at, updated_at) VALUES (?,?,?,'elle',?,?)
-     ON CONFLICT(name) DO UPDATE SET description = excluded.description, body = excluded.body, updated_at = excluded.updated_at`
-  ).bind(name, description, body, now, now).run();
+    `INSERT INTO elle_skills (name, description, body, source, created_at, updated_at, embedding) VALUES (?,?,?,'elle',?,?,?)
+     ON CONFLICT(name) DO UPDATE SET description = excluded.description, body = excluded.body, updated_at = excluded.updated_at, embedding = excluded.embedding`
+  ).bind(name, description, body, now, now, emb ? JSON.stringify(emb) : null).run();
   return `${exists ? 'refined' : 'written'}: ${name}`;
 }
 
@@ -188,4 +193,103 @@ export async function skillIndex(env: Env): Promise<string> {
     if (!items.length) return '';
     return `\n\nSKILLS — your distilled procedures. When a task matches one, skill_read(name) BEFORE starting; it is your own hard-won method:\n${items.map(s => `  ${s.name}: ${s.description}`).join('\n')}`;
   } catch { return ''; }
+}
+
+// ============================================================
+// THE SKILL ROUTER — the third router in the trio.
+//
+// model router (which brain, llm.ts) · agent router (which tool, router.ts) ·
+// skill router (which learned METHOD, here). Where skillIndex lists every skill
+// and trusts the model to skill_read a match, the router SELECTS: it embeds the
+// task, ranks the library by cosine, and — above a threshold — injects the top
+// skill's full body into the prompt, so the method is already in context.
+// Threshold-gated so it stays a scalpel: no match, nothing injected (no bloat).
+// ============================================================
+
+export const SKILL_ROUTE_THRESHOLD = 0.58; // bge cosine; only strong matches inject
+const EMBED_BACKFILL_CAP = 12;             // embeddings computed per route call, max
+
+export function cosine(a: number[], b: number[]): number {
+  if (!a || !b || a.length !== b.length) return -1;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  if (na === 0 || nb === 0) return -1;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+export interface SkillVec { name: string; description: string; body: string; embedding: number[] | null }
+export interface RankedSkill { name: string; description: string; body: string; score: number }
+
+// Pure ranking: score each skill against the task embedding, keep those over the
+// threshold, best first. Extracted so it's unit-testable without AI/DB.
+export function rankSkills(
+  taskEmbedding: number[], skills: SkillVec[],
+  opts: { topK?: number; threshold?: number } = {},
+): RankedSkill[] {
+  const threshold = opts.threshold ?? SKILL_ROUTE_THRESHOLD;
+  const topK = Math.max(1, opts.topK ?? 1);
+  return skills
+    .map(s => ({ name: s.name, description: s.description, body: s.body, score: s.embedding ? cosine(taskEmbedding, s.embedding) : -1 }))
+    .filter(s => s.score >= threshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+}
+
+async function embedText(env: Env, text: string): Promise<number[] | null> {
+  try {
+    const r = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [String(text).slice(0, 2000)] }) as { data: number[][] };
+    return r?.data?.[0] || null;
+  } catch { return null; }
+}
+
+// A skill's routing vector: what it is + when to reach for it + how it starts.
+function embedSkill(env: Env, name: string, description: string, body: string): Promise<number[] | null> {
+  return embedText(env, `${name}. ${description}. ${body.slice(0, 1500)}`);
+}
+
+// Rank the library against a task. Lazily backfills embeddings for any skills
+// missing one (bounded per call) so a pre-existing library becomes routable
+// without a migration.
+export async function skillRoute(
+  env: Env, task: string, opts: { topK?: number; threshold?: number } = {},
+): Promise<RankedSkill[]> {
+  await ensureSchema(env);
+  const q = String(task || '').trim();
+  if (!q) return [];
+  const qEmb = await embedText(env, q);
+  if (!qEmb) return [];
+
+  const rows = ((await env.DB.prepare('SELECT name, description, body, embedding FROM elle_skills').all()).results || []) as Array<{ name: string; description: string; body: string; embedding: string | null }>;
+
+  let backfilled = 0;
+  const skills: SkillVec[] = [];
+  for (const r of rows) {
+    let vec: number[] | null = null;
+    if (r.embedding) { try { vec = JSON.parse(r.embedding); } catch { vec = null; } }
+    if (!vec && backfilled < EMBED_BACKFILL_CAP) {
+      vec = await embedSkill(env, r.name, r.description, r.body);
+      backfilled++;
+      if (vec) await env.DB.prepare('UPDATE elle_skills SET embedding = ? WHERE name = ?').bind(JSON.stringify(vec), r.name).run().catch(() => {});
+    }
+    skills.push({ name: r.name, description: r.description, body: r.body, embedding: vec });
+  }
+  return rankSkills(qEmb, skills, opts);
+}
+
+// The prompt block: the top-matched skill's FULL body, auto-selected. Empty when
+// nothing clears the threshold — the router injects a method or says nothing.
+export async function skillRouteBlock(env: Env, task: string): Promise<string> {
+  try {
+    const hits = await skillRoute(env, task, { topK: 1 });
+    if (!hits.length) return '';
+    const h = hits[0];
+    return `\n\nROUTED SKILL — the distilled method that best matches this task (auto-selected for you; already loaded, no skill_read needed):\nSKILL ${h.name} — ${h.description}\n${h.body}`;
+  } catch { return ''; }
+}
+
+// Tool surface: let her (or a caller) inspect what the router would pick.
+export async function skillRouteTool(env: Env, task: string): Promise<string> {
+  const hits = await skillRoute(env, task, { topK: 3 });
+  if (!hits.length) return '(no skill clears the routing threshold for that task — none would be auto-injected)';
+  return hits.map(h => `${h.name} (${h.score.toFixed(3)}) — ${h.description}`).join('\n');
 }
