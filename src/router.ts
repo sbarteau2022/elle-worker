@@ -25,7 +25,7 @@ import type { KappaPoint } from './kappa-dynamics';
 import { ELLE_VOICE, resolveVoice, phaseBlock } from './mind';
 import { ensureOnce, orderKey, ingestKey } from './router-idempotency';
 import { runForgeTool } from './forge';
-import { skillList, skillRead, skillWrite, skillIndex } from './skills';
+import { skillList, skillRead, skillWrite, skillIndex, skillRouteBlock, skillRouteTool } from './skills';
 import { runMcpTool } from './mcp';
 import { intentTool, reviewRunsTool } from './conductor';
 import { analyzeConstraint } from './constraint';
@@ -155,7 +155,7 @@ const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
   'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
   'self_state', 'remember',
-  'skill_list', 'skill_read',
+  'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
 ]);
 export function toolAllowed(scope: Scope, name: string): boolean {
@@ -251,6 +251,7 @@ const TOOL_LINES: Record<string, string> = {
   forge_pr: `forge_pr(task_id,body?) — WRITE: open the pull request from the task branch = your request for acceptance. You never merge; merging into your base is Stewart's decision on GitHub. Only open a PR when forge_check is green.`,
   skill_list: `skill_list() — your skill library: distilled procedures with one-line triggers. The index is already in this prompt; use this only when you need usage counts or suspect the index is stale.`,
   skill_read: `skill_read(name) — load a skill's full procedure. Do this BEFORE starting any task a skill covers — it is your own hard-won method, not documentation.`,
+  skill_route: `skill_route(task) — ask the skill ROUTER which of your distilled methods best fits a task (embedding match, ranked with scores). The router already auto-injects the top match into your prompt each turn; use this to see what it would pick for a DIFFERENT task, or to check whether a method exists before you improvise.`,
   skill_write: `skill_write(name,description,body) — WRITE: distill a procedure into the library (new, or refining an existing one — same name overwrites). Do this when a task taught you something durable: the method, the failure modes, the order of operations. Description = one line saying WHEN to reach for it.`,
   mcp_add: `mcp_add(name,url,token?) — WRITE: mount an external MCP tool server by https URL. Its whole tool catalog becomes callable via mcp_call. Verifies the handshake before calling it mounted.`,
   mcp_tools: `mcp_tools(server?) — no arg: list mounted MCP servers. With a server name: its live tool catalog (names, args, descriptions). huggingface is pre-mounted (models, datasets, papers, Spaces).`,
@@ -661,6 +662,7 @@ async function runTool(
       case 'skill_list':  return await skillList(env);
       case 'skill_read':  return await skillRead(env, String(a.name || a.skill || ''));
       case 'skill_write': return await skillWrite(env, a as { name?: unknown; description?: unknown; body?: unknown });
+      case 'skill_route': return await skillRouteTool(env, String(a.task || a.q || a.query || ''));
       case 'mcp_add':
       case 'mcp_tools':
       case 'mcp_call':
@@ -848,8 +850,12 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // Skill index: name + trigger lines only (bodies load via skill_read). Not
   // for the public door or the hospitality persona.
   let skills = '';
+  let routed = '';
   if (scope === 'full' || scope === 'member') {
     skills = await skillIndex(env).catch(() => '');
+    // The skill router: embed THIS task, pick the best-matching method, and inject
+    // its full body (threshold-gated — empty when nothing fits well enough).
+    routed = await skillRouteBlock(env, question).catch(() => '');
   }
   // Flinches + self-forged tools — the two self-authored indexes ride the
   // prompt the same way the skill index does. Admin-tier scopes only.
@@ -872,7 +878,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     // One-time, self-dissolving welcome directive (armed per-user with a TTL).
     onboard = await onboardingBrief(env, ctxUserId);
   }
-  const system = systemPrompt(scope, phase + skills + selfBlocks + who + onboard, voice);
+  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
