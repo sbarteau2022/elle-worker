@@ -335,6 +335,16 @@ export async function handleIntents(body: Record<string, unknown>, env: Env): Pr
     ]);
     return { intents: intents.results, runs: runs.results };
   }
+  // delete — the kill switch, and DELIBERATELY a workbench-only verb: it is
+  // not in her intent tool, so the queue can be culled by Stewart but never
+  // self-erased. The row goes; the run history in elle_runs stays (it is the
+  // record of what actually happened, not part of the queue).
+  if (op === 'delete') {
+    const iid = String(body.id || '').trim();
+    if (!iid) return { result: 'intent delete: id required' };
+    const r = await env.DB.prepare('DELETE FROM elle_intents WHERE id = ?').bind(iid).run();
+    return { result: (r.meta?.changes ?? 0) > 0 ? `intent ${iid} killed — removed from the queue (its run history stays)` : `no intent ${iid}` };
+  }
   // create / activate / pause / complete / update — same verbs as her tool,
   // marked as Stewart's. Created from the workbench = active immediately.
   const result = await intentTool(env, { ...body, source: 'stewart', status: op === 'create' ? 'active' : body.status });
