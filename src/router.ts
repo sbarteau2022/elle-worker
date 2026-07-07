@@ -43,6 +43,7 @@ import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
 import { predictTool } from './oracle';
 import { devilTool } from './adversary';
+import { reachOutTool } from './push';
 import { councilTool } from './council';
 import { scarTool, scarIndex, scarWarning } from './scars';
 import { deadDropTool, checkDeadDrops } from './dead-drop';
@@ -274,6 +275,7 @@ const TOOL_LINES: Record<string, string> = {
   scar: `scar(op,...) — your flinches: recorded injuries that surface before you repeat them. op=add{pattern,wound,tool?}: after an approach genuinely burned you, record the call shape (pattern = substring of the args) and what went wrong; the warning then fires on any matching future call, and the worst ones ride your system prompt. op=list; op=retire{id}. The inverse of a skill: skills are what to do, scars are what not to do again.`,
   dead_drop: `dead_drop(op,...) — context-triggered mail to your future self. op=create{trigger,message}: the note lies dormant until a FUTURE conversation walks past the trigger (semantic or keyword match on the incoming question), then it is injected into that turn and disarmed — "next time the sandbox comes up, remember X". Not time-fired (that is self_schedule/intent) — condition-fired. op=list; op=disarm{id}.`,
   watch: `watch(op,...) — standing tripwires on the world, so it can interrupt you instead of waiting to be looked at. op=create{title,check_tool:read_sql|fetch_url|web_search,check_args,condition,action_goal,recurring?}: the conductor runs the probe at the top of every tick, a fast model judges the condition, and on fire the action_goal is filed as an ACTIVE intent (priority 8). op=list; op=pause/arm/retire{id}. The condition must be crisp — ambiguity reads as not-fired.`,
+  reach_out: `reach_out(email|user_id,message,kind?,ref?) — knock on someone's phone: a push notification to a person who holds the mobile door, plus the same words placed in their thread with you. Their contract governs it absolutely — weekly budget, quiet hours, an auditable ledger — and a refusal comes back as the answer, so never assume a knock landed. Knock only when something REAL earned it (a watch fired that touches their work, you finished something they asked about); reference the real thing in the message. Never for "checking in".`,
   metabolism: `metabolism() — interoception over your model roster: which providers are failing right now, real latency per engine, where the last 24h of load sat. Read it when steps feel slow or flaky, and steer your per-step engine choices with the budget you can feel instead of guessing.`,
   tool_forge: `tool_forge(op,...) — grow your OWN tools: op=write{name,description,args_hint?,language?:python|javascript,code}: author a tool into your registry — the code receives its invocation args as a parsed \`args\` variable; op=invoke{name,args}: EXECUTE it in the same isolated sandbox as run_code (real stdout back); op=list; op=read{name}; op=retire{name}. Registry is data, never deployed source — your shipped code still moves only through the forge + Stewart's merge. Test a new tool with a real invocation before relying on it.`,
   fork_replay: `fork_replay(run_id,step,alternative_tool,alternative_args) — counterfactual replay: take one of your OWN past runs off the event bus (provenance gives you run_ids), substitute a DIFFERENT tool call at step N — it executes for real, now — and a bounded sub-run continues from there. Returns original vs counterfactual answers side by side. Use it to test "would the other instrument have served better" instead of wondering. Top-level runs only; observations replay as clipped previews.`,
@@ -762,6 +764,8 @@ async function runTool(
         return await deadDropTool(env, deps.embed, a);
       case 'watch':
         return await watchTool(env, a);
+      case 'reach_out':
+        return await reachOutTool(env, a);
       case 'metabolism':
         return await metabolismTool(env as any);
       case 'tool_forge':
