@@ -32,6 +32,7 @@ import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas } from './ideas';
+import { handleDuplex } from './duplex';
 import { runConsolidation } from './consolidate';
 import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
@@ -1203,6 +1204,18 @@ export default {
     // The idea queue — her to-explore cache + the build lane the workbench
     // column renders (queued/scoping/spec/building/testing, PFAR fingerprints).
     if (path === '/api/elle-ideas')        { if (!svc) return err('Unauthorized', 401); return json(await handleIdeas(body as Record<string, unknown>, env, handleIngest)); }
+    // The duplex channel — the sovereign 7B (local, continuous, free) and the
+    // cloud (heavy inference + meta-observer) talking on one immutable,
+    // append-only master ledger. The local agent authenticates with the SAME
+    // shared secret the sandbox socket uses (x-sandbox-key); the workbench
+    // tab reads with its admin JWT. A sovereign 'say' wakes a bounded cloud
+    // reply through the full router (source 'duplex').
+    if (path === '/api/duplex') {
+      const viaAgentKey = !!env.SANDBOX_AGENT_KEY && request.headers.get('x-sandbox-key') === env.SANDBOX_AGENT_KEY;
+      if (!svc && !viaAgentKey) return err('Unauthorized', 401);
+      return json(await handleDuplex(body as Record<string, unknown>, env, async (prompt) =>
+        (await runRouter(prompt, env, routerDeps(), { maxSteps: 4, scope: 'full', sessionId: 'duplex-channel', source: 'duplex' })).answer));
+    }
     // Sandbox path status + the comprehensive use report (elle_sandbox_runs).
     if (path === '/api/elle-sandbox-runs') { if (!svc) return err('Unauthorized', 401);
       const sb = body as { op?: string; limit?: number };
