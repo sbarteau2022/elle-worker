@@ -1297,7 +1297,7 @@ export default {
     // every capability (corpus, SQL, web, code, trading, RAPID²AI) and answers.
     if (path === '/api/elle-router') {
       if (!svc) return err('Unauthorized', 401);
-      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string; voice?: string; voice_prosody?: { f0?: number[]; energy?: number[] } };
+      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string; voice?: string; prefer?: string; voice_prosody?: { f0?: number[]; energy?: number[] } };
       let q = String(rb.q || rb.query || '').trim();
       // LIVE VOICE PROSODY: the workbench captured the caller's actual voice
       // (pitch + energy over time) and sent the tracks. Run PFAR's prosody
@@ -1320,6 +1320,10 @@ export default {
         sessionId: rb.session_id || null,
         source: 'elle-router',
         voice: rb.voice,
+        // prefer:'local' pins the loop to the sovereign lane — same tools,
+        // generation on the laptop's own model over the sandbox socket, free.
+        // Demotes to hosted transparently when the laptop is away.
+        prefer: rb.prefer === 'local' ? ('local' as const) : undefined,
       };
       // LIVE MODE (stream:true): the loop's frames go out as Server-Sent
       // Events while she works — run_start, each step's thought + tool + args

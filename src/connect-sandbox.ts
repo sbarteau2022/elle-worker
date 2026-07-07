@@ -15,13 +15,14 @@
 // ============================================================
 
 import type { Env } from './index';
-import type { ExecResult, CloneResult, AgentStatus } from './sandbox-agent';
+import type { ExecResult, CloneResult, LlmResult, AgentStatus } from './sandbox-agent';
 
 const CLONE_TTL = 60 * 60 * 24; // a pulled-back copy lives 24h in KV
 const PREVIEW = 4000;           // clip previews the way the event bus clips observations
 const CODE_TIMEOUT_MS = 120_000;
 const SHELL_TIMEOUT_MS = 300_000;
 const CLONE_TIMEOUT_MS = 120_000;
+const LLM_TIMEOUT_MS = 180_000; // a 4B on laptop hardware can take a while on a long window
 
 export interface RunCtx { runId?: string; sessionId?: string | null; source?: string; userId?: string }
 
@@ -55,6 +56,32 @@ async function dispatchClone(env: Env, payload: Record<string, unknown>): Promis
     method: 'POST', body: JSON.stringify({ kind: 'clone', payload }),
   });
   return (await r.json()) as CloneResult;
+}
+
+// ── the sovereign inference lane ────────────────────────────
+// The router loop stays in the worker (so every tool still executes here,
+// scope-gated as always) but the GENERATION runs on the laptop's local model
+// — free, no provider quota. Callers treat a closed path or an agent-side
+// error as "fall back to a hosted engine"; this lane can only ever save
+// money, never strand a step.
+export async function sandboxLLM(
+  env: Env,
+  system: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  maxTokens: number,
+): Promise<LlmResult> {
+  if (!sandboxConfigured(env)) return { ok: false, error: 'sandbox not configured', path_open: false };
+  const st = await pathOpen(env);
+  if (!st.open) return { ok: false, error: 'sandbox path not open', path_open: false };
+  try {
+    const r = await stub(env).fetch('https://sandbox/dispatch', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'llm', payload: { id: newId(), system, messages, max_tokens: maxTokens, timeout_ms: LLM_TIMEOUT_MS } }),
+    });
+    return (await r.json()) as LlmResult;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e), path_open: false };
+  }
 }
 
 // ── the comprehensive use report ────────────────────────────

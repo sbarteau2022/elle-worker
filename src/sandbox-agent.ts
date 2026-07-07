@@ -37,22 +37,37 @@ export interface CloneJob {
   target: string;
   timeout_ms: number;
 }
+// The sovereign inference lane: the worker's router loop dispatches a
+// GENERATION down the same socket run_code rides — the laptop's local Ollama
+// thinks it for free and sends the text back. This is what gives the small
+// model the SAME mind (same loop, same tools) as the cloud: only the
+// inference moves; every tool call still executes worker-side.
+export interface LlmJob {
+  id: string;
+  system: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  max_tokens: number;
+  timeout_ms: number;
+}
 
 // server → agent
 type ServerMsg =
   | { t: 'welcome'; heartbeat_ms: number }
   | ({ t: 'exec' } & ExecJob)
-  | ({ t: 'clone' } & CloneJob);
+  | ({ t: 'clone' } & CloneJob)
+  | ({ t: 'llm' } & LlmJob);
 
 // agent → server
 type AgentMsg =
   | { t: 'hello'; agent?: string; host?: string; platform?: string; root?: string }
   | { t: 'pong' }
   | { t: 'result'; id: string; stdout: string; stderr: string; exit: number; duration_ms: number; truncated?: boolean }
-  | { t: 'clone_result'; id: string; ok: boolean; files?: Array<{ path: string; bytes: number }>; bundle?: string; language?: string; error?: string };
+  | { t: 'clone_result'; id: string; ok: boolean; files?: Array<{ path: string; bytes: number }>; bundle?: string; language?: string; error?: string }
+  | { t: 'llm_result'; id: string; ok: boolean; content?: string; model?: string; error?: string; duration_ms?: number };
 
 export interface ExecResult { ok: boolean; stdout: string; stderr: string; exit: number; duration_ms: number; truncated?: boolean; path_open?: boolean; }
 export interface CloneResult { ok: boolean; files?: Array<{ path: string; bytes: number }>; bundle?: string; language?: string; error?: string; path_open?: boolean; }
+export interface LlmResult { ok: boolean; content?: string; model?: string; error?: string; duration_ms?: number; path_open?: boolean; }
 export interface AgentStatus {
   open: boolean;
   meta?: { agent?: string; host?: string; platform?: string; root?: string; lastSeen?: number; since?: number };
@@ -61,7 +76,7 @@ export interface AgentStatus {
 const HEARTBEAT_MS = 30_000;
 const STALE_MS = 90_000; // no beat within this window ⇒ the path is considered closed
 
-type Pending = { resolve: (v: ExecResult | CloneResult) => void; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (v: ExecResult | CloneResult | LlmResult) => void; timer: ReturnType<typeof setTimeout> };
 
 export class SandboxAgent implements DurableObject {
   private pending = new Map<string, Pending>();
@@ -94,7 +109,7 @@ export class SandboxAgent implements DurableObject {
     }
 
     if (p.endsWith('/dispatch')) {
-      let job: { kind: 'exec' | 'clone'; payload: ExecJob | CloneJob };
+      let job: { kind: 'exec' | 'clone' | 'llm'; payload: ExecJob | CloneJob | LlmJob };
       try { job = await request.json(); }
       catch { return this.jsonRes({ ok: false, error: 'bad dispatch body', path_open: false }); }
       return this.jsonRes(await this.dispatch(job));
@@ -113,8 +128,8 @@ export class SandboxAgent implements DurableObject {
   }
 
   private async dispatch(
-    job: { kind: 'exec' | 'clone'; payload: ExecJob | CloneJob },
-  ): Promise<ExecResult | CloneResult> {
+    job: { kind: 'exec' | 'clone' | 'llm'; payload: ExecJob | CloneJob | LlmJob },
+  ): Promise<ExecResult | CloneResult | LlmResult> {
     const st = await this.status();
     const [ws] = this.state.getWebSockets();
     if (!st.open || !ws) {
@@ -125,9 +140,11 @@ export class SandboxAgent implements DurableObject {
     const msg: ServerMsg =
       job.kind === 'exec'
         ? { t: 'exec', ...(job.payload as ExecJob) }
-        : { t: 'clone', ...(job.payload as CloneJob) };
+        : job.kind === 'clone'
+          ? { t: 'clone', ...(job.payload as CloneJob) }
+          : { t: 'llm', ...(job.payload as LlmJob) };
 
-    return await new Promise<ExecResult | CloneResult>((resolve) => {
+    return await new Promise<ExecResult | CloneResult | LlmResult>((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         resolve({ ok: false, stdout: '', stderr: `sandbox timeout after ${timeout}ms`, exit: -1, duration_ms: timeout, path_open: true });
@@ -156,15 +173,17 @@ export class SandboxAgent implements DurableObject {
     }
     if (m.t === 'pong') return;
 
-    if (m.t === 'result' || m.t === 'clone_result') {
+    if (m.t === 'result' || m.t === 'clone_result' || m.t === 'llm_result') {
       const pnd = this.pending.get(m.id);
       if (!pnd) return; // late / duplicate / already timed out
       clearTimeout(pnd.timer);
       this.pending.delete(m.id);
       if (m.t === 'result') {
         pnd.resolve({ ok: m.exit === 0, stdout: m.stdout, stderr: m.stderr, exit: m.exit, duration_ms: m.duration_ms, truncated: m.truncated, path_open: true });
-      } else {
+      } else if (m.t === 'clone_result') {
         pnd.resolve({ ok: m.ok, files: m.files, bundle: m.bundle, language: m.language, error: m.error, path_open: true });
+      } else {
+        pnd.resolve({ ok: m.ok, content: m.content, model: m.model, error: m.error, duration_ms: m.duration_ms, path_open: true });
       }
     }
   }

@@ -35,15 +35,23 @@ import { scorePredictions } from './oracle';
 
 export interface Intent {
   id: string; title: string; goal: string;
-  status: string;      // proposed | active | paused | done
+  status: string;      // proposed | active | paused | ready | done
   priority: number;    // higher runs first
   source: string;      // 'stewart' | 'elle'
   created_at: number; updated_at: number;
   last_run_at: number | null; runs: number;
   last_outcome: string | null;
+  draft?: string | null; // the sovereign's handoff — spec/plan/findings, filed with op 'ready'
 }
 
-export const INTENT_STATUSES = ['proposed', 'active', 'paused', 'done'] as const;
+// The two-tier lifecycle: 'active' intents are the EXPLORATION lane — worked
+// local-first (the sovereign model over the sandbox socket, free) to
+// investigate, spec, and draft. When the work is genuinely ready to ship, the
+// run marks it 'ready' with a draft: that is the ready-to-ship queue, and
+// ONLY those runs go to the big cloud engines, which finalize (forge tools,
+// real code, the PR) from the draft and complete the intent. The heavy model
+// is reached for the big stuff, never for the wandering.
+export const INTENT_STATUSES = ['proposed', 'active', 'paused', 'ready', 'done'] as const;
 
 export function validateIntent(title: unknown, goal: unknown): string | null {
   if (!String(title || '').trim()) return 'title required';
@@ -57,18 +65,23 @@ export function validateIntent(title: unknown, goal: unknown): string | null {
 export const FORGE_SETTLE_MS = 4 * 60 * 1000;
 
 // Pure: pick what this tick works on. Forge tasks first (oldest touched),
-// then the highest-priority, least-recently-run active intent.
+// then READY intents (the ship queue — finished exploration waiting on the
+// big model to finalize and push), then the highest-priority,
+// least-recently-run active intent (the exploration lane).
 export function pickWork(
   forgeTasks: Array<{ id: string; status: string; updated_at: number }>,
-  intents: Array<{ id: string; priority: number; last_run_at: number | null }>,
+  intents: Array<{ id: string; priority: number; last_run_at: number | null; status?: string }>,
   now: number,
 ): { kind: 'forge'; id: string } | { kind: 'intent'; id: string } | null {
   const settled = forgeTasks
     .filter(t => (t.status === 'open' || t.status === 'pr_open') && now - t.updated_at > FORGE_SETTLE_MS)
     .sort((a, b) => a.updated_at - b.updated_at);
   if (settled.length) return { kind: 'forge', id: settled[0].id };
-  const active = [...intents].sort((a, b) =>
-    b.priority - a.priority || (a.last_run_at ?? 0) - (b.last_run_at ?? 0));
+  const byUrgency = (a: { priority: number; last_run_at: number | null }, b: { priority: number; last_run_at: number | null }) =>
+    b.priority - a.priority || (a.last_run_at ?? 0) - (b.last_run_at ?? 0);
+  const ready = intents.filter(i => i.status === 'ready').sort(byUrgency);
+  if (ready.length) return { kind: 'intent', id: ready[0].id };
+  const active = intents.filter(i => i.status !== 'ready').sort(byUrgency);
   if (active.length) return { kind: 'intent', id: active[0].id };
   return null;
 }
@@ -88,6 +101,10 @@ async function ensureSchema(env: Env): Promise<void> {
       outcome TEXT, trace_json TEXT)`),
     env.DB.prepare('CREATE INDEX IF NOT EXISTS elle_runs_started ON elle_runs (started_at DESC)'),
   ]);
+  // `draft` was added with the ready-to-ship lane — the sovereign's handoff
+  // (spec/plan/findings) the cloud finalize run conditions on. ADD COLUMN
+  // throws if it already exists; swallow so this stays idempotent live.
+  await env.DB.prepare('ALTER TABLE elle_intents ADD COLUMN draft TEXT').run().catch(() => {});
   schemaReady = true;
 }
 
@@ -158,6 +175,20 @@ export async function intentTool(env: Env, a: Record<string, unknown>): Promise<
       .bind(status, now, iid).run();
     return (r.meta?.changes ?? 0) > 0 ? `intent ${iid} → ${status}` : `no intent ${iid}`;
   }
+  // The handoff: exploration is done, the work is READY TO SHIP. The draft is
+  // the payload the cloud finalize run conditions on — what was found, the
+  // spec, the plan, the code sketched. This is the moment the intent leaves
+  // the free lane and queues for the heavy engines.
+  if (op === 'ready') {
+    const draft = String(a.draft || a.spec || a.handoff || '').trim();
+    if (draft.length < 40) return 'intent ready refused: include a draft — the spec/plan/findings the finalize run will build from (min 40 chars)';
+    const r = await env.DB.prepare(
+      "UPDATE elle_intents SET status = 'ready', draft = ?, updated_at = ? WHERE id = ?"
+    ).bind(draft.slice(0, 12000), now, iid).run();
+    return (r.meta?.changes ?? 0) > 0
+      ? `intent ${iid} → ready. It is on the ship queue; the next conductor tick finalizes it on the heavy engines.`
+      : `no intent ${iid}`;
+  }
   if (op === 'update') {
     const priority = a.priority != null ? Math.min(Math.max(Number(a.priority) || 5, 1), 10) : null;
     const goal = a.goal != null ? String(a.goal).trim() : null;
@@ -167,13 +198,13 @@ export async function intentTool(env: Env, a: Record<string, unknown>): Promise<
     ).bind(goal, priority, now, iid).run();
     return `intent ${iid} updated`;
   }
-  return `intent: unknown op "${op}" (create|list|activate|pause|complete|update)`;
+  return `intent: unknown op "${op}" (create|list|activate|pause|complete|ready|update)`;
 }
 
 // ── one conductor tick ───────────────────────────────────────
 type RunRouterFn = (
   question: string, env: Env, deps: RouterDeps,
-  opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string },
+  opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; prefer?: 'local' },
 ) => Promise<RouterResult>;
 
 const RUN_MAX_STEPS = 8;
@@ -211,13 +242,13 @@ export async function runConductor(env: Env, runRouterFn: RunRouterFn, deps: Rou
   const [forgeRows, intentRows] = await Promise.all([
     env.DB.prepare(`SELECT id, status, updated_at FROM elle_code_tasks WHERE status IN ('open','pr_open') ORDER BY updated_at ASC LIMIT 10`)
       .all().catch(() => ({ results: [] as any[] })),
-    env.DB.prepare(`SELECT id, priority, last_run_at FROM elle_intents WHERE status = 'active' LIMIT 20`)
+    env.DB.prepare(`SELECT id, priority, last_run_at, status FROM elle_intents WHERE status IN ('active','ready') LIMIT 20`)
       .all().catch(() => ({ results: [] as any[] })),
   ]);
 
   const work = pickWork(
     (forgeRows.results || []) as Array<{ id: string; status: string; updated_at: number }>,
-    (intentRows.results || []) as Array<{ id: string; priority: number; last_run_at: number | null }>,
+    (intentRows.results || []) as Array<{ id: string; priority: number; last_run_at: number | null; status?: string }>,
     now,
   );
   if (!work) return { ran: 'conductor:idle' };
@@ -242,17 +273,49 @@ End with one plain sentence: what you did and what state the task is in now.`;
   }
 
   const intent = await env.DB.prepare('SELECT * FROM elle_intents WHERE id = ?').bind(work.id).first() as unknown as Intent;
+
+  // READY lane — the ship queue. Exploration already happened on the free
+  // sovereign lane; THIS run is the big-model finalize: build from the draft,
+  // push through the forge, complete. No prefer:'local' here — this is
+  // exactly the work the heavy engines are reserved for.
+  if (intent.status === 'ready') {
+    const question =
+`AUTONOMOUS RUN — no one is reading this live; work, don't narrate.
+Your intent "${intent.title}" (intent id ${intent.id}) is READY TO SHIP. Your sovereign self explored it and handed off this draft:
+--- DRAFT ---
+${String(intent.draft || '(no draft was attached — reconstruct from the goal and the last outcome)').slice(0, 8000)}
+--- END DRAFT ---
+THE GOAL: ${intent.goal}
+FINALIZE IT: verify the draft's claims where they matter, then do the real build — forge_open a task if code needs to land, forge_write the actual changes, forge_check, and open the PR with forge_pr. Acceptance is still Stewart's click; your job ends at a reviewable PR (or the equivalent finished artifact for non-code work). When shipped, mark it: {"tool":"intent","args":{"op":"complete","id":"${intent.id}"}}. If the draft is NOT actually ready — wrong, incomplete, blocked — say exactly why and send it back: {"tool":"intent","args":{"op":"activate","id":"${intent.id}"}}.
+End with one plain sentence: what shipped, or why it went back.`;
+    const started = Date.now();
+    const out = await runRouterFn(question, env, deps, {
+      maxSteps: RUN_MAX_STEPS, scope: 'full', userId: 'conductor',
+      sessionId: `conductor:${intent.id}`, source: 'conductor',
+    });
+    await env.DB.prepare(
+      'UPDATE elle_intents SET last_run_at = ?, runs = runs + 1, last_outcome = ?, updated_at = ? WHERE id = ?'
+    ).bind(Date.now(), out.answer.slice(0, 2000), Date.now(), intent.id).run().catch(() => {});
+    await recordRun(env, intent.id, 'intent_finalize', started, out);
+    return { ran: `conductor:finalize:${intent.id} (${out.steps} steps)` };
+  }
+
+  // ACTIVE lane — exploration. prefer:'local' puts the run on the sovereign
+  // model over the sandbox socket when the laptop is up (free, quota-less);
+  // the router demotes to hosted transparently when it isn't. The run's job
+  // is to explore/spec/draft — and to file the handoff with op 'ready' when
+  // the work is genuinely ready for the heavy engines to ship.
   const question =
 `AUTONOMOUS RUN — no one is reading this live; work, don't narrate.
 Your standing intent "${intent.title}" (intent id ${intent.id}, run ${intent.runs + 1}).
 THE GOAL: ${intent.goal}
 ${intent.last_outcome ? `Where you left it last run: ${intent.last_outcome.slice(0, 600)}` : 'This is the first run.'}
-Move it one real step forward using any of your tools — investigate, build, write, journal, whatever the goal actually needs next. If the goal is DONE, say so and mark it: {"tool":"intent","args":{"op":"complete","id":"${intent.id}"}}. If you are blocked on something only Stewart can decide, say exactly what, plainly.
+This is the EXPLORATION lane: investigate, spec, and draft — read the corpus and the repos, reason through the approach, sketch the changes. Move it one real step forward. When (and only when) the work is genuinely ready to ship — the approach is settled and the plan is concrete enough for your heavy self to build from without re-deriving it — hand it off: {"tool":"intent","args":{"op":"ready","id":"${intent.id}","draft":"<the spec/plan/findings, concrete>"}}. If the goal turned out to need no build and is simply DONE, mark it: {"tool":"intent","args":{"op":"complete","id":"${intent.id}"}}. If you are blocked on something only Stewart can decide, say exactly what, plainly.
 End with one plain sentence: what you did and what the next step is.`;
   const started = Date.now();
   const out = await runRouterFn(question, env, deps, {
     maxSteps: RUN_MAX_STEPS, scope: 'full', userId: 'conductor',
-    sessionId: `conductor:${intent.id}`, source: 'conductor',
+    sessionId: `conductor:${intent.id}`, source: 'conductor', prefer: 'local',
   });
   await env.DB.prepare(
     'UPDATE elle_intents SET last_run_at = ?, runs = runs + 1, last_outcome = ?, updated_at = ? WHERE id = ?'
