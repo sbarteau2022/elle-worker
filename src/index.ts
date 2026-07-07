@@ -31,6 +31,7 @@ import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
+import { handleIdeas } from './ideas';
 import { runConsolidation } from './consolidate';
 import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
@@ -1199,6 +1200,9 @@ export default {
     // Conductor intents — the workbench's window into her autonomous work
     // queue and run log. Admin-gated like everything else internal.
     if (path === '/api/elle-intents')      { if (!svc) return err('Unauthorized', 401); return json(await handleIntents(body, env)); }
+    // The idea queue — her to-explore cache + the build lane the workbench
+    // column renders (queued/scoping/spec/building/testing, PFAR fingerprints).
+    if (path === '/api/elle-ideas')        { if (!svc) return err('Unauthorized', 401); return json(await handleIdeas(body as Record<string, unknown>, env, handleIngest)); }
     // Sandbox path status + the comprehensive use report (elle_sandbox_runs).
     if (path === '/api/elle-sandbox-runs') { if (!svc) return err('Unauthorized', 401);
       const sb = body as { op?: string; limit?: number };
