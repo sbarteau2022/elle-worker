@@ -72,12 +72,25 @@ export async function ensureSandboxSchema(env: Env): Promise<void> {
   )`).run();
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_time ON elle_sandbox_runs(created_at DESC)`).run().catch(() => {});
   await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_run ON elle_sandbox_runs(run_id)`).run().catch(() => {});
+  // `title` was added after the table first shipped — a clone can be named by
+  // her ("what she brought in, titled by her"). ADD COLUMN throws if it already
+  // exists; we swallow that so this stays idempotent across live deployments.
+  await env.DB.prepare(`ALTER TABLE elle_sandbox_runs ADD COLUMN title TEXT`).run().catch(() => {});
+  // Reports she surfaces from a sandbox session — the thing that flashes the
+  // console tab. seen=0 until the console is opened and marks them read.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_sandbox_reports (
+    id TEXT PRIMARY KEY,
+    run_id TEXT, session_id TEXT, user_id TEXT,
+    title TEXT, body TEXT,
+    seen INTEGER DEFAULT 0, created_at INTEGER
+  )`).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_reports_time ON elle_sandbox_reports(created_at DESC)`).run().catch(() => {});
   schemaReady = true;
 }
 
 interface RunRow {
   kind: string; language?: string; command?: string; code_preview?: string;
-  target?: string; clone_key?: string; exit?: number;
+  target?: string; clone_key?: string; exit?: number; title?: string;
   stdout_preview?: string; stderr_preview?: string;
   ok: boolean; path_open: boolean; duration_ms?: number;
 }
@@ -85,13 +98,13 @@ async function record(env: Env, ctx: RunCtx, row: RunRow): Promise<void> {
   try {
     await ensureSandboxSchema(env);
     await env.DB.prepare(`INSERT INTO elle_sandbox_runs
-      (id,run_id,session_id,source,user_id,kind,language,command,code_preview,target,clone_key,exit,stdout_preview,stderr_preview,ok,path_open,duration_ms,created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
+      (id,run_id,session_id,source,user_id,kind,language,command,code_preview,target,clone_key,exit,stdout_preview,stderr_preview,ok,path_open,duration_ms,created_at,title)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(
       newId(), ctx.runId ?? null, ctx.sessionId ?? null, ctx.source ?? null, ctx.userId ?? null,
       row.kind, row.language ?? null, row.command ?? null, row.code_preview ?? null,
       row.target ?? null, row.clone_key ?? null, row.exit ?? null,
       row.stdout_preview ?? null, row.stderr_preview ?? null,
-      row.ok ? 1 : 0, row.path_open ? 1 : 0, row.duration_ms ?? null, Date.now(),
+      row.ok ? 1 : 0, row.path_open ? 1 : 0, row.duration_ms ?? null, Date.now(), row.title ?? null,
     ).run();
   } catch {
     /* the use report is best-effort — it never blocks or fails a real run */
@@ -140,26 +153,26 @@ export async function sandboxRunShell(env: Env, command: string, ctx: RunCtx): P
   return res.path_open === false ? NOT_OPEN : formatExec(res);
 }
 
-export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git', ctx: RunCtx): Promise<string> {
+export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git', ctx: RunCtx, title?: string): Promise<string> {
   if (!sandboxConfigured(env)) return `sandbox_clone: ${NOT_CONFIGURED}`;
   if (!target) return 'sandbox_clone: target required (a path on the box, or a git repo)';
   const st = await pathOpen(env);
-  if (!st.open) { await record(env, ctx, { kind: 'clone', target, ok: false, path_open: false }); return NOT_OPEN; }
+  if (!st.open) { await record(env, ctx, { kind: 'clone', target, title, ok: false, path_open: false }); return NOT_OPEN; }
   const res = await dispatchClone(env, { id: newId(), kind, target, timeout_ms: CLONE_TIMEOUT_MS });
 
   let cloneKey: string | undefined;
   if (res.ok && res.bundle && env.SCRATCHPAD) {
-    cloneKey = `clone:${ctx.userId || 'elle'}:${slug(target)}:${Date.now().toString(36)}`;
+    cloneKey = `clone:${ctx.userId || 'elle'}:${slug(title || target)}:${Date.now().toString(36)}`;
     try { await env.SCRATCHPAD.put(cloneKey, res.bundle, { expirationTtl: CLONE_TTL }); }
     catch { cloneKey = undefined; }
   }
-  await record(env, ctx, { kind: 'clone', target, clone_key: cloneKey, ok: res.ok, path_open: res.path_open !== false });
+  await record(env, ctx, { kind: 'clone', target, title, clone_key: cloneKey, ok: res.ok, path_open: res.path_open !== false });
 
   if (res.path_open === false) return NOT_OPEN;
   if (!res.ok) return `sandbox_clone failed: ${res.error || 'unknown error'}`;
   const files = res.files || [];
   const list = files.slice(0, 50).map(f => `  ${f.path} (${f.bytes}b)`).join('\n');
-  return `cloned ${files.length} file(s) from ${target}.` +
+  return `cloned ${files.length} file(s) from ${target}${title ? ` as "${title}"` : ''}.` +
     (cloneKey ? `\na copy is cached at KV key "${cloneKey}" (24h) and mirrored to the laptop's sovereign cache.` : '') +
     (list ? `\n${list}${files.length > 50 ? `\n  …and ${files.length - 50} more` : ''}` : '');
 }
@@ -179,11 +192,91 @@ export async function sandboxRunsRecent(env: Env, limit = 50): Promise<unknown[]
   try {
     await ensureSandboxSchema(env);
     const r = await env.DB.prepare(
-      `SELECT id,run_id,session_id,source,user_id,kind,language,command,code_preview,target,clone_key,exit,stdout_preview,stderr_preview,ok,path_open,duration_ms,created_at
+      `SELECT id,run_id,session_id,source,user_id,kind,language,command,code_preview,target,title,clone_key,exit,stdout_preview,stderr_preview,ok,path_open,duration_ms,created_at
        FROM elle_sandbox_runs ORDER BY created_at DESC LIMIT ?`,
     ).bind(Math.min(Math.max(limit, 1), 200)).all();
     return r.results || [];
   } catch {
     return [];
+  }
+}
+
+// ── what she brought in: the clones, titled by her ──────────
+export async function sandboxBroughtIn(env: Env, limit = 50): Promise<unknown[]> {
+  try {
+    await ensureSandboxSchema(env);
+    const r = await env.DB.prepare(
+      `SELECT id,run_id,title,target,clone_key,ok,created_at FROM elle_sandbox_runs
+       WHERE kind = 'clone' ORDER BY created_at DESC LIMIT ?`,
+    ).bind(Math.min(Math.max(limit, 1), 100)).all();
+    return r.results || [];
+  } catch {
+    return [];
+  }
+}
+
+// ── her chain of thought: the sandbox steps off the event bus, indexed with
+//    the runs above by run_id (the replay record) ────────────
+export async function sandboxThoughts(env: Env, limit = 80): Promise<unknown[]> {
+  try {
+    const r = await env.DB.prepare(
+      `SELECT id,run_id,session_id,source,step_index,kind,tool,args,result_preview,duration_ms,created_at
+       FROM elle_events
+       WHERE tool IN ('run_code','run_shell','sandbox_clone','sandbox_status','sandbox_report')
+       ORDER BY created_at DESC LIMIT ?`,
+    ).bind(Math.min(Math.max(limit, 1), 200)).all();
+    return r.results || [];
+  } catch {
+    return [];
+  }
+}
+
+// ── reports she surfaces from the sandbox (the flash) ───────
+export async function sandboxReport(env: Env, title: string, body: string, ctx: RunCtx): Promise<string> {
+  const t = String(title || '').trim();
+  const b = String(body || '').trim();
+  if (!t) return 'sandbox_report: title required';
+  if (!b) return 'sandbox_report: body required — the findings to surface';
+  try {
+    await ensureSandboxSchema(env);
+    await env.DB.prepare(
+      `INSERT INTO elle_sandbox_reports (id,run_id,session_id,user_id,title,body,seen,created_at)
+       VALUES (?,?,?,?,?,?,0,?)`,
+    ).bind(newId(), ctx.runId ?? null, ctx.sessionId ?? null, ctx.userId ?? null, t, b, Date.now()).run();
+    return `report surfaced: "${t}". The sandbox console tab is flashing until it's opened.`;
+  } catch (e) {
+    return `sandbox_report failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+export async function sandboxReportsRecent(env: Env, limit = 20): Promise<unknown[]> {
+  try {
+    await ensureSandboxSchema(env);
+    const r = await env.DB.prepare(
+      `SELECT id,run_id,title,body,seen,created_at FROM elle_sandbox_reports
+       ORDER BY created_at DESC LIMIT ?`,
+    ).bind(Math.min(Math.max(limit, 1), 100)).all();
+    return r.results || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function unseenReportCount(env: Env): Promise<number> {
+  try {
+    await ensureSandboxSchema(env);
+    const r = await env.DB.prepare(`SELECT COUNT(*) as n FROM elle_sandbox_reports WHERE seen = 0`).first();
+    return Number((r as { n?: number } | null)?.n || 0);
+  } catch {
+    return 0;
+  }
+}
+
+export async function markReportsSeen(env: Env): Promise<void> {
+  try {
+    await ensureSandboxSchema(env);
+    await env.DB.prepare(`UPDATE elle_sandbox_reports SET seen = 1 WHERE seen = 0`).run();
+  } catch {
+    /* best effort */
   }
 }

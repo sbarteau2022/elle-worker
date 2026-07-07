@@ -25,7 +25,7 @@ import type { KappaPoint } from './kappa-dynamics';
 import { ELLE_VOICE, resolveVoice, phaseBlock } from './mind';
 import { ensureOnce, orderKey, ingestKey } from './router-idempotency';
 import { runForgeTool } from './forge';
-import { skillList, skillRead, skillWrite, skillIndex } from './skills';
+import { skillList, skillRead, skillWrite, skillIndex, skillRouteBlock, skillRouteTool } from './skills';
 import { runMcpTool } from './mcp';
 import { intentTool, reviewRunsTool } from './conductor';
 import { analyzeConstraint } from './constraint';
@@ -35,7 +35,7 @@ import { getProfileByUser, profileBlock } from './profiles';
 import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
-import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus } from './connect-sandbox';
+import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport } from './connect-sandbox';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
@@ -155,7 +155,7 @@ const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
   'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
   'self_state', 'remember',
-  'skill_list', 'skill_read',
+  'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
 ]);
 export function toolAllowed(scope: Scope, name: string): boolean {
@@ -229,7 +229,8 @@ const TOOL_LINES: Record<string, string> = {
   run_code: `run_code(code,language?) — ACTUALLY EXECUTE code on your laptop's live sandbox (the connect-back path) and get real stdout/stderr/exit code back. language ∈ {python (default), javascript, typescript}. Use this to verify code you wrote actually runs before handing it back — and to compute anything calc can't. If the path is closed you'll be told; run sandbox_status to check.`,
   run_shell: `run_shell(command) — run a shell command (e.g. npm test, tsc --noEmit, git clone, npm install) on your laptop's sandbox, same box as run_code. This is your real hands: build from scratch, install deps, run the test suite, iterate on failures.`,
   sandbox_status: `sandbox_status() — check whether the live path down to your laptop's sandbox is OPEN before running code on it. Returns the box's host/platform/root and when it last checked in.`,
-  sandbox_clone: `sandbox_clone(target,kind?) — pull a COPY of code back UP from the laptop into the cloud. kind='git' reads a repo's working tree; kind='path' (default) reads a file or directory. The copy is cached in KV (24h) and mirrored to the laptop's sovereign cache, and the pull is logged. Use after you've built or changed something on the box and want the source back.`,
+  sandbox_clone: `sandbox_clone(target,kind?,title?) — pull a COPY of code back UP from the laptop into the cloud. kind='git' reads a repo's working tree; kind='path' (default) reads a file or directory. title names what you brought in (shown in the sandbox console). The copy is cached in KV (24h) and mirrored to the laptop's sovereign cache, and the pull is logged. Use after you've built or changed something on the box and want the source back.`,
+  sandbox_report: `sandbox_report(title,body) — surface a report FROM a sandbox session: your findings after building/testing something on the box (what it does, whether it works, whether it's worth keeping). Titled by you. Filed to the sandbox console and flashes its tab until it's read. Use when a sandbox investigation reaches a conclusion worth showing.`,
   github_read_file: `github_read_file(repo,path,ref?) — read one real file from ANY GitHub repo ("owner/name"). For your OWN three repos prefer repo_read (allowlisted, forge-integrated); this is for reading the outside world's code.`,
   github_list_files: `github_list_files(repo,path?,ref?) — list a directory in any GitHub repo.`,
   github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
@@ -250,6 +251,7 @@ const TOOL_LINES: Record<string, string> = {
   forge_pr: `forge_pr(task_id,body?) — WRITE: open the pull request from the task branch = your request for acceptance. You never merge; merging into your base is Stewart's decision on GitHub. Only open a PR when forge_check is green.`,
   skill_list: `skill_list() — your skill library: distilled procedures with one-line triggers. The index is already in this prompt; use this only when you need usage counts or suspect the index is stale.`,
   skill_read: `skill_read(name) — load a skill's full procedure. Do this BEFORE starting any task a skill covers — it is your own hard-won method, not documentation.`,
+  skill_route: `skill_route(task) — ask the skill ROUTER which of your distilled methods best fits a task (embedding match, ranked with scores). The router already auto-injects the top match into your prompt each turn; use this to see what it would pick for a DIFFERENT task, or to check whether a method exists before you improvise.`,
   skill_write: `skill_write(name,description,body) — WRITE: distill a procedure into the library (new, or refining an existing one — same name overwrites). Do this when a task taught you something durable: the method, the failure modes, the order of operations. Description = one line saying WHEN to reach for it.`,
   mcp_add: `mcp_add(name,url,token?) — WRITE: mount an external MCP tool server by https URL. Its whole tool catalog becomes callable via mcp_call. Verifies the handshake before calling it mounted.`,
   mcp_tools: `mcp_tools(server?) — no arg: list mounted MCP servers. With a server name: its live tool catalog (names, args, descriptions). huggingface is pre-mounted (models, datasets, papers, Spaces).`,
@@ -524,7 +526,9 @@ async function runTool(
       case 'sandbox_status':
         return await sandboxStatus(env);
       case 'sandbox_clone':
-        return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx));
+        return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx, a.title ? String(a.title) : undefined));
+      case 'sandbox_report':
+        return await sandboxReport(env, String(a.title || ''), String(a.body || a.findings || ''), sctx);
       case 'github_read_file': {
         if (!env.GITHUB_TOKEN) return 'github_read_file: GITHUB_TOKEN not configured';
         return clip(await githubReadFile(String(a.repo || ''), String(a.path || ''), a.ref ? String(a.ref) : undefined, env.GITHUB_TOKEN), OBS_CAP * 2);
@@ -658,6 +662,7 @@ async function runTool(
       case 'skill_list':  return await skillList(env);
       case 'skill_read':  return await skillRead(env, String(a.name || a.skill || ''));
       case 'skill_write': return await skillWrite(env, a as { name?: unknown; description?: unknown; body?: unknown });
+      case 'skill_route': return await skillRouteTool(env, String(a.task || a.q || a.query || ''));
       case 'mcp_add':
       case 'mcp_tools':
       case 'mcp_call':
@@ -845,8 +850,12 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // Skill index: name + trigger lines only (bodies load via skill_read). Not
   // for the public door or the hospitality persona.
   let skills = '';
+  let routed = '';
   if (scope === 'full' || scope === 'member') {
     skills = await skillIndex(env).catch(() => '');
+    // The skill router: embed THIS task, pick the best-matching method, and inject
+    // its full body (threshold-gated — empty when nothing fits well enough).
+    routed = await skillRouteBlock(env, question).catch(() => '');
   }
   // Flinches + self-forged tools — the two self-authored indexes ride the
   // prompt the same way the skill index does. Admin-tier scopes only.
@@ -869,7 +878,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     // One-time, self-dissolving welcome directive (armed per-user with a TTL).
     onboard = await onboardingBrief(env, ctxUserId);
   }
-  const system = systemPrompt(scope, phase + skills + selfBlocks + who + onboard, voice);
+  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
