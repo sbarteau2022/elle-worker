@@ -189,8 +189,8 @@ const TABLE_CATALOG = `
 corpus_papers(id,title,series,tag,abstract,full_text,source_url,word_count,ingested_at) — the published corpus + cron research papers. ingested_at is a sortable timestamp; for "most recent / latest / newest" papers use read_sql with ORDER BY ingested_at DESC (the cron research series is series='research', titled "[Research YYYY-MM-DD] …").
 corpus_chunks(id,paper_id,chunk_index,chunk_text,vectorize_id) — embedded chunks
 elle_trades(id,symbol,action,quantity,entry_price,exit_price,pnl,pnl_pct,reasoning,what_she_is_testing,confidence,status,created_at,closed_at)
-elle_trading_account(id,current_cash,total_portfolio_value,unrealized_pnl,realized_pnl,updated_at)
-elle_trading_positions(symbol,...,updated_at)
+elle_trading_account(id,is_active,current_cash,total_portfolio_value,total_pnl,total_pnl_pct,unrealized_pnl,day_pnl,winning_trades,losing_trades,equity,updated_at,snapshot_at)
+elle_trading_positions(id,symbol,side,quantity,entry_price,current_price,unrealized_pnl,unrealized_pnl_pct,market_value,broker_asset_id,updated_at)
 elle_market_thesis(id,thesis_type,title,thesis,confidence,is_active,updated_at)
 elle_market_observations(id,observation_type,symbol,observation,created_at)
 elle_trading_journal(id,journal_date,ending_value,trades_today,what_happened,what_she_learned,what_she_got_wrong,philosophical_insight,hypothesis_for_tomorrow)
@@ -616,7 +616,7 @@ async function runTool(
         const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
         const [heartbeat, account, canvas, sandbox, memories, session] = await Promise.all([
           grab(env.DB.prepare('SELECT daemon_version, status, beat_at FROM elle_daemon_heartbeats ORDER BY beat_at DESC LIMIT 1').first()),
-          grab(env.DB.prepare('SELECT current_cash, total_portfolio_value, unrealized_pnl, realized_pnl, updated_at FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
+          grab(env.DB.prepare('SELECT current_cash, total_portfolio_value, unrealized_pnl, day_pnl, equity, updated_at FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
           grab(env.DB.prepare("SELECT kappa, reserve, velocity, accel, jerk, created_at, substr(content,1,200) AS opening FROM optimus_entries WHERE role = 'elle' ORDER BY kappa_ts DESC LIMIT 1").first()),
           grab(env.DB.prepare('SELECT type, title, status, surface_priority, created_at FROM elle_sandbox ORDER BY created_at DESC LIMIT 3').all().then(r => r.results)),
           grab(env.DB.prepare("SELECT summary, memory_type, created_at FROM elle_memory WHERE memory_type = 'deliberate' ORDER BY created_at DESC LIMIT 5").all().then(r => r.results)),
