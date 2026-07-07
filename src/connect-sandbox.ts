@@ -16,6 +16,7 @@
 
 import type { Env } from './index';
 import type { ExecResult, CloneResult, LlmResult, AgentStatus } from './sandbox-agent';
+import { resolveRepo } from './forge';
 
 const CLONE_TTL = 60 * 60 * 24; // a pulled-back copy lives 24h in KV
 const PREVIEW = 4000;           // clip previews the way the event bus clips observations
@@ -194,6 +195,18 @@ const CLOUD_MAX_FILE = 256 * 1024;
 const CLOUD_MAX_BUNDLE = 5 * 1024 * 1024;
 const CLOUD_SKIP = /^(node_modules|dist|build|coverage|\.next|\.cache)\//;
 
+// A bare OWN-repo name ("elle-worker", no slash) resolves through the forge
+// allowlist to sbarteau2022/<name> — without this, kind:'git' + a bare name
+// fell to the laptop lane, looked for that folder inside the (empty) sandbox
+// workspace, and failed with "not a git repo", stranding the run. Anything
+// already repo-shaped, pathlike, or unknown passes through untouched.
+export function normalizeCloneTarget(target: string): string {
+  const t = String(target || '').trim();
+  if (parseRepoTarget(t) || /[/\\]/.test(t)) return t;
+  const own = resolveRepo(t);
+  return own ? `sbarteau2022/${own}` : t;
+}
+
 // "owner/name", "owner/name#ref", or a github.com URL → { repo, ref }. A
 // local path ("/Users/…", "./x", "src") is NOT repo-shaped and returns null.
 export function parseRepoTarget(target: string): { repo: string; ref?: string } | null {
@@ -270,7 +283,7 @@ export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git
   // the cloud lane even with the laptop up (it names the source of truth);
   // a bare git target uses the laptop's working tree when it's open (that
   // tree may be ahead of what's pushed). Local paths require the box.
-  const repoRef = parseRepoTarget(target);
+  const repoRef = parseRepoTarget(normalizeCloneTarget(target));
   const laptop: AgentStatus = sandboxConfigured(env) ? await pathOpen(env) : { open: false };
   if (repoRef && (!laptop.open || /github\.com/i.test(target))) {
     return await cloudCloneGitHub(env, repoRef.repo, repoRef.ref, ctx, title);
@@ -279,6 +292,14 @@ export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git
   const st = laptop;
   if (!st.open) { await record(env, ctx, { kind: 'clone', target, title, ok: false, path_open: false }); return NOT_OPEN; }
   const res = await dispatchClone(env, { id: newId(), kind, target, timeout_ms: CLONE_TIMEOUT_MS });
+
+  // The laptop lane looked for the target under the sandbox workspace and it
+  // wasn't there (or wasn't a repo) — but the target IS GitHub-shaped, so the
+  // cloud lane can still deliver it. Without this fallback the run stranded on
+  // "not a git repo" and burned steps improvising in an empty workspace.
+  if (!res.ok && res.path_open !== false && repoRef) {
+    return await cloudCloneGitHub(env, repoRef.repo, repoRef.ref, ctx, title);
+  }
 
   let cloneKey: string | undefined;
   if (res.ok && res.bundle && env.SCRATCHPAD) {
@@ -289,7 +310,8 @@ export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git
   await record(env, ctx, { kind: 'clone', target, title, clone_key: cloneKey, ok: res.ok, path_open: res.path_open !== false });
 
   if (res.path_open === false) return NOT_OPEN;
-  if (!res.ok) return `sandbox_clone failed: ${res.error || 'unknown error'}`;
+  if (!res.ok) return `sandbox_clone failed: ${res.error || 'unknown error'}. ` +
+    `The laptop lane resolves targets against the sandbox workspace — for a GitHub repo use "owner/name" (e.g. "sbarteau2022/elle-worker"), for code on the box give the real absolute path. Do not try to rebuild the repo with run_shell; re-call sandbox_clone with a corrected target.`;
   const files = res.files || [];
   const list = files.slice(0, 50).map(f => `  ${f.path} (${f.bytes}b)`).join('\n');
   return `cloned ${files.length} file(s) from ${target}${title ? ` as "${title}"` : ''}.` +
