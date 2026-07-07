@@ -32,6 +32,7 @@ import type { Env } from './index';
 import type { RouterDeps, RouterResult, Scope } from './router';
 import { evaluateWatches } from './watches';
 import { scorePredictions } from './oracle';
+import { pathOpen } from './connect-sandbox';
 
 export interface Intent {
   id: string; title: string; goal: string;
@@ -220,29 +221,56 @@ async function recordRun(env: Env, intentId: string, kind: string, started: numb
   ).bind(id(), `conductor: ${kind}`, JSON.stringify({ intent_id: intentId, steps: out.steps, outcome: out.answer.slice(0, 400) })).run().catch(() => {});
 }
 
-export async function runConductor(env: Env, runRouterFn: RunRouterFn, deps: RouterDeps): Promise<{ ran: string }> {
+// Two tick modes, one conductor:
+//   'full'    — the hourly tick. Sentry passes, forge sweeps, READY finalizes,
+//               exploration: everything, including the lanes that spend cloud
+//               quota. One work item per tick, so conductor cloud outflow is
+//               structurally capped at ~1 heavy run/hour — and the ready queue
+//               sits in the workbench where Stewart can pause/kill before it
+//               ships. He controls the outflow.
+//   'explore' — the fast tick (every 10 min). ONLY runs when the sandbox path
+//               is open (the free sovereign lane absorbs the whole extra
+//               volume; a closed laptop means these ticks are no-ops, so the
+//               faster clock can never multiply cloud spend). Picks only
+//               ACTIVE intents — no sentry (watches ride research quota), no
+//               forge sweeps, no finalizes.
+export async function runConductor(
+  env: Env, runRouterFn: RunRouterFn, deps: RouterDeps,
+  opts: { mode?: 'full' | 'explore' } = {},
+): Promise<{ ran: string }> {
   await ensureSchema(env);
   const now = Date.now();
+  const explore = opts.mode === 'explore';
+
+  if (explore) {
+    const st = await pathOpen(env).catch(() => ({ open: false }));
+    if (!st.open) return { ran: 'conductor:explore:skipped (sandbox path closed — the free lane is the whole point of this tick)' };
+  }
 
   // Sentry pass — BEFORE picking work: evaluate due watches (a fired watch
   // files an active intent this very tick can then pick up) and settle any
   // predictions that have matured. Both capped and best-effort; the tick's
-  // real work is never hostage to the sentry.
-  try {
-    const research = async (q: string) => {
-      const r = await deps.handleResearch({ query: q }, env);
-      const d = await r.json() as { content?: string; search_results?: string };
-      return `${d.content || ''}\n${d.search_results || ''}`;
-    };
-    await evaluateWatches(env, research, (args) => intentTool(env, args));
-  } catch (e) { console.error('[CONDUCTOR] watch pass failed:', (e as Error).message); }
-  try { await scorePredictions(env); }
-  catch (e) { console.error('[CONDUCTOR] oracle pass failed:', (e as Error).message); }
+  // real work is never hostage to the sentry. Hourly tick only — watches
+  // spend research quota, and 6x/hour would multiply it for nothing.
+  if (!explore) {
+    try {
+      const research = async (q: string) => {
+        const r = await deps.handleResearch({ query: q }, env);
+        const d = await r.json() as { content?: string; search_results?: string };
+        return `${d.content || ''}\n${d.search_results || ''}`;
+      };
+      await evaluateWatches(env, research, (args) => intentTool(env, args));
+    } catch (e) { console.error('[CONDUCTOR] watch pass failed:', (e as Error).message); }
+    try { await scorePredictions(env); }
+    catch (e) { console.error('[CONDUCTOR] oracle pass failed:', (e as Error).message); }
+  }
 
   const [forgeRows, intentRows] = await Promise.all([
-    env.DB.prepare(`SELECT id, status, updated_at FROM elle_code_tasks WHERE status IN ('open','pr_open') ORDER BY updated_at ASC LIMIT 10`)
-      .all().catch(() => ({ results: [] as any[] })),
-    env.DB.prepare(`SELECT id, priority, last_run_at, status FROM elle_intents WHERE status IN ('active','ready') LIMIT 20`)
+    explore
+      ? Promise.resolve({ results: [] as any[] })
+      : env.DB.prepare(`SELECT id, status, updated_at FROM elle_code_tasks WHERE status IN ('open','pr_open') ORDER BY updated_at ASC LIMIT 10`)
+          .all().catch(() => ({ results: [] as any[] })),
+    env.DB.prepare(`SELECT id, priority, last_run_at, status FROM elle_intents WHERE status IN (${explore ? "'active'" : "'active','ready'"}) LIMIT 20`)
       .all().catch(() => ({ results: [] as any[] })),
   ]);
 
@@ -251,7 +279,7 @@ export async function runConductor(env: Env, runRouterFn: RunRouterFn, deps: Rou
     (intentRows.results || []) as Array<{ id: string; priority: number; last_run_at: number | null; status?: string }>,
     now,
   );
-  if (!work) return { ran: 'conductor:idle' };
+  if (!work) return { ran: explore ? 'conductor:explore:idle' : 'conductor:idle' };
 
   if (work.kind === 'forge') {
     const task = await env.DB.prepare('SELECT * FROM elle_code_tasks WHERE id = ?').bind(work.id).first() as any;
