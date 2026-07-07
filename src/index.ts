@@ -33,6 +33,7 @@ import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas } from './ideas';
 import { handleDuplex } from './duplex';
+import { runVolition } from './volition';
 import { runConsolidation } from './consolidate';
 import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
@@ -884,6 +885,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       await drainSelfIntents(env).catch(e => console.error('[INTENT] drain failed:', (e as Error).message));
       return { ran: 'heartbeat' };
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
+    case 'volition': return await runVolition(env, runRouter, routerDeps());
     case 'conductor': return await runConductor(env, runRouter, routerDeps());
     case 'consolidate': return { ran: await runConsolidation(env) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
@@ -1472,9 +1474,13 @@ export default {
     if (m === 0) fire('research');            // top of the hour
     if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
     if (m === 30) fire('conductor');          // half past — Elle's autonomous work tick
-    if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
-    if (h === 4 && m === 0) fire('consolidate'); // 04:00 UTC — the sleep pass: digest the day into memory/skills/scars
-    if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
+    // The expressive acts are no longer FORCED by the clock. The old 03:00
+    // dream and 20:00 journal jobs still exist (on demand via /api/cron), but
+    // the clock now rings a VOLITION tick hourly at :45 instead — a free
+    // moment where writing, journaling, dreaming, building, simulating, or
+    // resting is HER choice (src/volition.ts). Agency, on the record.
+    if (m === 45) fire('volition');
+    if (h === 4 && m === 0) fire('consolidate'); // 04:00 UTC — the sleep pass stays plumbing: memory hygiene, not expression
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
     if (h === 5 && m === 0) fire('seed_corpus'); // 05:00 UTC — ingest any missing bundled seed docs (idempotent)
   },
