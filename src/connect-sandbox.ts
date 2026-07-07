@@ -153,10 +153,103 @@ export async function sandboxRunShell(env: Env, command: string, ctx: RunCtx): P
   return res.path_open === false ? NOT_OPEN : formatExec(res);
 }
 
+// ── cloud clone: migrate code into the KV cache ANYTIME ─────
+// The laptop lane pulls a working tree up the socket — but the socket only
+// exists while the workbench is running. This is the always-open lane: a
+// GitHub repo ("owner/name" or a github.com URL, optional #ref) is read
+// worker-side via the GitHub API and lands in the SAME clone bundle format,
+// the same SCRATCHPAD keys, the same use-report rows — so everything above
+// (idea scoping, the sandbox console, bundle reads) sees one kind of clone
+// regardless of which lane carried it. Bounded like the agent's walker:
+// same file-count / per-file / bundle caps.
+const CLOUD_MAX_FILES = 200;
+const CLOUD_MAX_FILE = 256 * 1024;
+const CLOUD_MAX_BUNDLE = 5 * 1024 * 1024;
+const CLOUD_SKIP = /^(node_modules|dist|build|coverage|\.next|\.cache)\//;
+
+// "owner/name", "owner/name#ref", or a github.com URL → { repo, ref }. A
+// local path ("/Users/…", "./x", "src") is NOT repo-shaped and returns null.
+export function parseRepoTarget(target: string): { repo: string; ref?: string } | null {
+  const t = String(target || '').trim()
+    .replace(/^https?:\/\/(www\.)?github\.com\//i, '')
+    .replace(/\.git$/, '');
+  if (t.startsWith('/') || t.startsWith('.') || /\s/.test(t)) return null;
+  const m = t.match(/^([\w.-]+\/[\w.-]+)(?:[#@](.+))?$/);
+  return m ? { repo: m[1], ref: m[2] } : null;
+}
+
+async function gh(env: Env, path: string): Promise<Response> {
+  return fetch(`https://api.github.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      'User-Agent': 'elle-worker-clone',
+      Accept: 'application/vnd.github+json',
+    },
+  });
+}
+
+async function cloudCloneGitHub(env: Env, repo: string, ref: string | undefined, ctx: RunCtx, title?: string): Promise<string> {
+  if (!env.GITHUB_TOKEN) return 'sandbox_clone: the cloud lane needs GITHUB_TOKEN configured on the worker';
+  // Resolve the ref (default branch when none given), then walk the tree.
+  let sha = ref;
+  if (!sha) {
+    const r = await gh(env, `/repos/${repo}`);
+    if (!r.ok) return `sandbox_clone: cannot reach ${repo} (HTTP ${r.status})`;
+    sha = String(((await r.json()) as { default_branch?: string }).default_branch || 'main');
+  }
+  const tr = await gh(env, `/repos/${repo}/git/trees/${encodeURIComponent(sha)}?recursive=1`);
+  if (!tr.ok) return `sandbox_clone: cannot read the tree of ${repo}@${sha} (HTTP ${tr.status})`;
+  const tree = (await tr.json()) as { tree?: Array<{ path: string; type: string; size?: number }> };
+  const blobs = (tree.tree || []).filter(e =>
+    e.type === 'blob' && !CLOUD_SKIP.test(e.path) &&
+    !e.path.split('/').some(p => p.startsWith('.') && p !== '.env.example'));
+
+  const payload: Array<{ path: string; content: string }> = [];
+  const meta: Array<{ path: string; bytes: number }> = [];
+  let totalBundle = 0;
+  for (const b of blobs) {
+    if (payload.length >= CLOUD_MAX_FILES || totalBundle >= CLOUD_MAX_BUNDLE) break;
+    if ((b.size ?? 0) > CLOUD_MAX_FILE) { meta.push({ path: b.path, bytes: b.size ?? 0 }); continue; }
+    const fr = await fetch(`https://raw.githubusercontent.com/${repo}/${sha}/${b.path}`, {
+      headers: { Authorization: `Bearer ${env.GITHUB_TOKEN}`, 'User-Agent': 'elle-worker-clone' },
+    }).catch(() => null);
+    if (!fr || !fr.ok) continue;
+    const content = await fr.text();
+    totalBundle += content.length;
+    payload.push({ path: b.path, content });
+    meta.push({ path: b.path, bytes: content.length });
+  }
+
+  const bundle = JSON.stringify({ target: `${repo}@${sha}`, kind: 'github', clonedAt: Date.now(), files: payload });
+  let cloneKey: string | undefined;
+  if (env.SCRATCHPAD) {
+    cloneKey = `clone:${ctx.userId || 'elle'}:${slug(title || repo)}:${Date.now().toString(36)}`;
+    try { await env.SCRATCHPAD.put(cloneKey, bundle, { expirationTtl: CLONE_TTL }); }
+    catch { cloneKey = undefined; }
+  }
+  await record(env, ctx, { kind: 'clone', target: `${repo}@${sha}`, title, clone_key: cloneKey, ok: payload.length > 0, path_open: false });
+  if (!payload.length) return `sandbox_clone: ${repo}@${sha} yielded no readable files`;
+  const list = meta.slice(0, 50).map(f => `  ${f.path} (${f.bytes}b)`).join('\n');
+  return `migrated ${payload.length} file(s) from ${repo}@${sha} via the CLOUD lane (no laptop needed)${title ? ` as "${title}"` : ''}.` +
+    (cloneKey ? `\na copy is cached at KV key "${cloneKey}" (24h).` : '') +
+    (list ? `\n${list}${meta.length > 50 ? `\n  …and ${meta.length - 50} more` : ''}` : '');
+}
+
 export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git', ctx: RunCtx, title?: string): Promise<string> {
+  if (!target) return 'sandbox_clone: target required (a path on the box, a git repo, or "owner/name" on GitHub)';
+  // The always-open lane: a GitHub-shaped target never needs the socket when
+  // the laptop is closed — "clone or migrate whatever, anytime" holds
+  // regardless of which machine is awake. An explicit github.com URL prefers
+  // the cloud lane even with the laptop up (it names the source of truth);
+  // a bare git target uses the laptop's working tree when it's open (that
+  // tree may be ahead of what's pushed). Local paths require the box.
+  const repoRef = parseRepoTarget(target);
+  const laptop: AgentStatus = sandboxConfigured(env) ? await pathOpen(env) : { open: false };
+  if (repoRef && (!laptop.open || /github\.com/i.test(target))) {
+    return await cloudCloneGitHub(env, repoRef.repo, repoRef.ref, ctx, title);
+  }
   if (!sandboxConfigured(env)) return `sandbox_clone: ${NOT_CONFIGURED}`;
-  if (!target) return 'sandbox_clone: target required (a path on the box, or a git repo)';
-  const st = await pathOpen(env);
+  const st = laptop;
   if (!st.open) { await record(env, ctx, { kind: 'clone', target, title, ok: false, path_open: false }); return NOT_OPEN; }
   const res = await dispatchClone(env, { id: newId(), kind, target, timeout_ms: CLONE_TIMEOUT_MS });
 

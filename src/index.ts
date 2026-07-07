@@ -31,6 +31,9 @@ import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
+import { handleIdeas } from './ideas';
+import { handleDuplex } from './duplex';
+import { runVolition } from './volition';
 import { runConsolidation } from './consolidate';
 import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
@@ -882,6 +885,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       await drainSelfIntents(env).catch(e => console.error('[INTENT] drain failed:', (e as Error).message));
       return { ran: 'heartbeat' };
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
+    case 'volition': return await runVolition(env, runRouter, routerDeps());
     case 'conductor': return await runConductor(env, runRouter, routerDeps());
     case 'consolidate': return { ran: await runConsolidation(env) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
@@ -1199,6 +1203,21 @@ export default {
     // Conductor intents — the workbench's window into her autonomous work
     // queue and run log. Admin-gated like everything else internal.
     if (path === '/api/elle-intents')      { if (!svc) return err('Unauthorized', 401); return json(await handleIntents(body, env)); }
+    // The idea queue — her to-explore cache + the build lane the workbench
+    // column renders (queued/scoping/spec/building/testing, PFAR fingerprints).
+    if (path === '/api/elle-ideas')        { if (!svc) return err('Unauthorized', 401); return json(await handleIdeas(body as Record<string, unknown>, env, handleIngest)); }
+    // The duplex channel — the sovereign 7B (local, continuous, free) and the
+    // cloud (heavy inference + meta-observer) talking on one immutable,
+    // append-only master ledger. The local agent authenticates with the SAME
+    // shared secret the sandbox socket uses (x-sandbox-key); the workbench
+    // tab reads with its admin JWT. A sovereign 'say' wakes a bounded cloud
+    // reply through the full router (source 'duplex').
+    if (path === '/api/duplex') {
+      const viaAgentKey = !!env.SANDBOX_AGENT_KEY && request.headers.get('x-sandbox-key') === env.SANDBOX_AGENT_KEY;
+      if (!svc && !viaAgentKey) return err('Unauthorized', 401);
+      return json(await handleDuplex(body as Record<string, unknown>, env, async (prompt) =>
+        (await runRouter(prompt, env, routerDeps(), { maxSteps: 4, scope: 'full', sessionId: 'duplex-channel', source: 'duplex' })).answer));
+    }
     // Sandbox path status + the comprehensive use report (elle_sandbox_runs).
     if (path === '/api/elle-sandbox-runs') { if (!svc) return err('Unauthorized', 401);
       const sb = body as { op?: string; limit?: number };
@@ -1455,9 +1474,13 @@ export default {
     if (m === 0) fire('research');            // top of the hour
     if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
     if (m === 30) fire('conductor');          // half past — Elle's autonomous work tick
-    if (h === 3 && m === 0) fire('dream');    // 03:00 UTC
-    if (h === 4 && m === 0) fire('consolidate'); // 04:00 UTC — the sleep pass: digest the day into memory/skills/scars
-    if (h === 20 && m === 0) fire('journal'); // 20:00 UTC
+    // The expressive acts are no longer FORCED by the clock. The old 03:00
+    // dream and 20:00 journal jobs still exist (on demand via /api/cron), but
+    // the clock now rings a VOLITION tick hourly at :45 instead — a free
+    // moment where writing, journaling, dreaming, building, simulating, or
+    // resting is HER choice (src/volition.ts). Agency, on the record.
+    if (m === 45) fire('volition');
+    if (h === 4 && m === 0) fire('consolidate'); // 04:00 UTC — the sleep pass stays plumbing: memory hygiene, not expression
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
     if (h === 5 && m === 0) fire('seed_corpus'); // 05:00 UTC — ingest any missing bundled seed docs (idempotent)
   },
