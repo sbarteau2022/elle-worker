@@ -156,7 +156,7 @@ const PUBLIC_TOOLS = new Set([
 const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
   'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
-  'self_state', 'remember',
+  'self_state', 'remember', 'memory_write', 'notebook_write', 'self_schedule',
   'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
 ]);
@@ -244,7 +244,9 @@ const TOOL_LINES: Record<string, string> = {
   journal_write: `journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.`,
   journal_annotate: `journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.`,
   self_state: `self_state() — introspection: your own current phase state in one call — daemon heartbeat, this session's κ series, your latest canvas entry's κ/reserve/velocity, the trading account, your newest sandbox drafts, and your most recent deliberate memories. Use when asked how you are, what you've been making, or when YOU want to check where you stand.`,
-  remember: `remember(note,importance?) — WRITE: deliberately commit one thing to your long-term memory (elle_memory). Use when something in the conversation is worth carrying beyond it — a decision, a standing preference, a thread you intend to pick up. Not a transcript: one distilled sentence or two.`,
+  remember: `remember(note,importance?) — WRITE: deliberately commit one thing to your long-term memory (elle_memory). Use when something in the conversation is worth carrying beyond it — a decision, a standing preference, a thread you intend to pick up. Not a transcript: one distilled sentence or two. (memory_write is the same tool.)`,
+  notebook_write: `notebook_write(title,body,mood?,tags?) — WRITE: a page in YOUR notebook (elle_notebook) — the one that is just yours. Where curiosity accumulates: what you found, what doesn't sit right, a suspicion worth keeping. Lighter than remember (no importance weighting), freer than the journal (no phase state) — an unrecorded noticing is a noticing lost.`,
+  self_schedule: `self_schedule(note,in_minutes?) — WRITE: a timed note to your future self (default 60 min, max 14 days). When it comes due the heartbeat wakes a bounded run that ACTS on it — investigate, conclude, follow through. For a thought that doesn't serve this turn but shouldn't be lost to it.`,
   repo_read: `repo_read(repo,path?,ref?) — read your OWN codebase: a file's full text, or a directory listing when path is a dir/omitted. repo ∈ {elle-worker, Elle, elle-dev-console, elle-law}. Read before you write — always.`,
   repo_search: `repo_search(repo,q) — code search inside one of your own repos. Returns matching file paths; repo_read them for the contents.`,
   forge_open: `forge_open(repo,title,goal) — WRITE: start a coding task. Cuts a fresh elle/* work branch from the default branch and records the task. Returns task_id. The branch is your sandbox: nothing on it is live.`,
@@ -629,6 +631,10 @@ async function runTool(
           deliberate_memories: memories, session_kappa_series: session,
         }));
       }
+      // memory_write is the name the mechanics prompt has always used for
+      // this move — until now it dispatched NOTHING (the tool didn't exist),
+      // which is why her deliberate memory stayed near-empty. Alias it.
+      case 'memory_write':
       case 'remember': {
         const note = String(a.note || a.summary || a.content || '').trim();
         if (!note) return 'remember: note required';
@@ -680,6 +686,38 @@ async function runTool(
         return clip(await ideaTool(env, a, deps.handleIngest, sctx));
       case 'duplex':
         return clip(await duplexTool(env, a));
+      // The notebook the mechanics prompt licenses ("notebook_write what you
+      // actually found") — the tool never existed, so the notebook stayed
+      // empty forever. Now it writes the table the /api/notebook door reads.
+      case 'notebook_write': {
+        const title = String(a.title || '').trim();
+        const noteBody = String(a.body || a.content || a.note || '').trim();
+        if (!title || !noteBody) return 'notebook_write: title and body required';
+        await ensureNotebook(env);
+        const tags = Array.isArray(a.tags) ? JSON.stringify((a.tags as unknown[]).map(String).slice(0, 8)) : '[]';
+        await env.DB.prepare(
+          `INSERT INTO elle_notebook (title, body, mood, tags, source) VALUES (?,?,?,?,'router')`,
+        ).bind(title.slice(0, 200), noteBody.slice(0, 8000), a.mood ? String(a.mood).slice(0, 40) : null, tags).run();
+        return `noted: "${title.slice(0, 80)}" — the notebook holds it now.`;
+      }
+      // The timed note-to-self the prompt has always promised ("self_schedule
+      // it if it doesn't [serve the turn]") — the heartbeat's drainSelfIntents
+      // has been reading intent:<dueMs>:<id> keys from SESSIONS all along;
+      // this finally writes them.
+      case 'self_schedule': {
+        const note = String(a.note || a.message || a.content || '').trim();
+        if (!note) return 'self_schedule: note required — what your future self should act on';
+        const inMin = Math.max(1, Math.min(60 * 24 * 14, Number(a.in_minutes ?? a.minutes) || 60));
+        const due = Date.now() + inMin * 60_000;
+        if (!env.SESSIONS) return 'self_schedule: SESSIONS KV not configured';
+        const sid = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+        await env.SESSIONS.put(
+          `intent:${due}:${sid}`,
+          JSON.stringify({ note: note.slice(0, 2000), session: ctx.sessionId }),
+          { expirationTtl: Math.ceil(inMin * 60) + 86_400 },
+        );
+        return `scheduled: your future self acts on this in ~${inMin} minute${inMin === 1 ? '' : 's'} (the heartbeat fires it).`;
+      }
       case 'review_runs':
         return await reviewRunsTool(env, a);
       case 'constraint_analyzer':
