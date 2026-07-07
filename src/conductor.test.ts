@@ -58,6 +58,28 @@ describe('conductor pickWork', () => {
   it('is idle with nothing to do', () => {
     expect(pickWork([], [], NOW)).toBeNull();
   });
+
+  it('the ship queue jumps the exploration lane: ready intents finalize before active ones run', () => {
+    expect(pickWork([], [
+      { id: 'exploring', priority: 10, last_run_at: null, status: 'active' },
+      { id: 'shippable', priority: 1, last_run_at: NOW - 1000, status: 'ready' },
+    ], NOW)).toEqual({ kind: 'intent', id: 'shippable' });
+  });
+
+  it('among ready intents, priority then least-recently-run still decides', () => {
+    expect(pickWork([], [
+      { id: 'r-low', priority: 2, last_run_at: null, status: 'ready' },
+      { id: 'r-high', priority: 8, last_run_at: NOW - 1000, status: 'ready' },
+    ], NOW)).toEqual({ kind: 'intent', id: 'r-high' });
+  });
+
+  it('a settled forge task still outranks the ship queue', () => {
+    expect(pickWork(
+      [{ id: 'f1', status: 'open', updated_at: settled }],
+      [{ id: 'shippable', priority: 9, last_run_at: null, status: 'ready' }],
+      NOW,
+    )).toEqual({ kind: 'forge', id: 'f1' });
+  });
 });
 
 describe('intent validation', () => {
