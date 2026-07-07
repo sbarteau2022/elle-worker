@@ -50,14 +50,24 @@ export function marketOpen(): boolean {
   return isMarketHours();
 }
 
+// The account/position sync writers below target the SCHEMA ALREADY LIVE IN
+// PRODUCTION (elle_trading_account / elle_trading_positions predate this
+// file's current shape) — not the leaner columns an earlier version of this
+// module assumed. That mismatch (e.g. a nonexistent `realized_pnl` column)
+// meant every sync INSERT threw and was swallowed by a bare catch: the desk
+// tables stayed empty forever regardless of whether Alpaca keys were valid.
+// Alpaca's /v2/account and /v2/positions responses carry more fields than
+// the types below declare (equity, last_equity, asset_id, side, …) — reading
+// them here doesn't change what's fetched, only what this file is honest
+// about receiving.
 async function getAccount(env: Env) {
   const res = await fetch(`${alpacaBase(env)}/v2/account`, { headers: alpacaHeaders(env) });
   if (!res.ok) return null;
   return res.json() as Promise<{
     portfolio_value: string;
     cash: string;
-    unrealized_pl?: string;
-    realized_pl?: string;
+    equity?: string;
+    last_equity?: string;
   }>;
 }
 
@@ -66,34 +76,34 @@ async function getPositions(env: Env) {
   if (!res.ok) return [];
   return res.json() as Promise<Array<{
     symbol: string;
+    side?: string;
     qty: string;
     avg_entry_price: string;
     current_price: string;
     unrealized_plpc: string;
     market_value?: string;
     unrealized_pl?: string;
+    asset_id?: string;
   }>>;
 }
 
 // Mirror the live Alpaca positions into D1 so the desk shows them 24/7. The
-// set is authoritative each cycle: clear it and rewrite. Best-effort — the UI
-// reads SELECT *, so we populate exactly the fields it renders.
-async function syncPositions(env: Env, positions: Array<{ symbol: string; qty: string; avg_entry_price: string; current_price: string; unrealized_plpc: string; market_value?: string; unrealized_pl?: string }>): Promise<void> {
+// set is authoritative each cycle: clear it and rewrite. Best-effort — a
+// broker hiccup here never blocks the cycle.
+async function syncPositions(env: Env, positions: Array<{ symbol: string; side?: string; qty: string; avg_entry_price: string; current_price: string; unrealized_plpc: string; market_value?: string; unrealized_pl?: string; asset_id?: string }>): Promise<void> {
   try {
-    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_trading_positions (
-      symbol TEXT PRIMARY KEY, qty REAL, avg_entry_price REAL, current_price REAL,
-      market_value REAL, unrealized_pl REAL, unrealized_plpc REAL, updated_at TEXT)`).run();
     await env.DB.prepare('DELETE FROM elle_trading_positions').run();
     for (const p of positions) {
       await env.DB.prepare(
-        `INSERT OR REPLACE INTO elle_trading_positions (symbol, qty, avg_entry_price, current_price, market_value, unrealized_pl, unrealized_plpc, updated_at)
-         VALUES (?,?,?,?,?,?,?, datetime('now'))`
+        `INSERT INTO elle_trading_positions (symbol, side, quantity, entry_price, current_price, unrealized_pnl, unrealized_pnl_pct, market_value, broker_asset_id, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?, datetime('now'))`
       ).bind(
-        p.symbol, parseFloat(p.qty), parseFloat(p.avg_entry_price), parseFloat(p.current_price),
-        parseFloat(p.market_value || '0'), parseFloat(p.unrealized_pl || '0'), parseFloat(p.unrealized_plpc || '0'),
+        p.symbol, p.side || 'long', parseFloat(p.qty), parseFloat(p.avg_entry_price), parseFloat(p.current_price),
+        parseFloat(p.unrealized_pl || '0'), parseFloat(p.unrealized_plpc || '0'), parseFloat(p.market_value || '0'),
+        p.asset_id || null,
       ).run();
     }
-  } catch { /* best-effort: an existing table with a different schema is left alone */ }
+  } catch (e) { console.error('[TRADING] position sync failed:', (e as Error).message); }
 }
 
 async function gatherMarketData(env: Env) {
@@ -142,24 +152,34 @@ export async function runTradingCycle(env: Env): Promise<void> {
   const account = await getAccount(env);
   if (!account) { console.error('[TRADING] Cannot reach Alpaca'); return; }
 
+  const positions = await getPositions(env);
+  await syncPositions(env, positions);
+
+  // unrealized_pnl is the sum of the open positions (a real, always-available
+  // number); day_pnl is equity vs. yesterday's close when Alpaca returns
+  // last_equity. Fields the real table has no confident source for
+  // (total_pnl, winning/losing counts) are left untouched rather than guessed.
+  const unrealizedTotal = positions.reduce((s, p) => s + parseFloat(p.unrealized_pl || '0'), 0);
+  const equity = parseFloat(account.equity || account.portfolio_value);
+  const dayPnl = account.last_equity ? equity - parseFloat(account.last_equity) : null;
+
   await env.DB.prepare(`
-    INSERT INTO elle_trading_account (id, current_cash, total_portfolio_value, unrealized_pnl, realized_pnl, is_active, updated_at)
-    VALUES ('primary', ?, ?, ?, ?, 1, datetime('now'))
+    INSERT INTO elle_trading_account (id, current_cash, total_portfolio_value, unrealized_pnl, equity, day_pnl, is_active, updated_at)
+    VALUES ('primary', ?, ?, ?, ?, ?, 1, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       current_cash=excluded.current_cash,
       total_portfolio_value=excluded.total_portfolio_value,
       unrealized_pnl=excluded.unrealized_pnl,
-      realized_pnl=excluded.realized_pnl,
+      equity=excluded.equity,
+      day_pnl=COALESCE(excluded.day_pnl, elle_trading_account.day_pnl),
       updated_at=excluded.updated_at
   `).bind(
     parseFloat(account.cash),
     parseFloat(account.portfolio_value),
-    parseFloat(account.unrealized_pl || '0'),
-    parseFloat(account.realized_pl   || '0'),
-  ).run().catch(() => {});
-
-  const positions = await getPositions(env);
-  await syncPositions(env, positions);
+    unrealizedTotal,
+    equity,
+    dayPnl,
+  ).run().catch(e => console.error('[TRADING] account sync failed:', (e as Error).message));
 
   // Trading decisions only fire when the market is open. The desk above is
   // already live regardless.
