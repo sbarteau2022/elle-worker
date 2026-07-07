@@ -920,6 +920,11 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       await reachOutPass(env, embed).catch(e => console.error('[REACH] pass failed:', (e as Error).message));
       return out;
     }
+    // The fast exploration tick: free-lane only. Skips itself when the sandbox
+    // path is closed, touches only ACTIVE intents (no forge, no finalizes, no
+    // sentry), and runs prefer:'local' — so a faster clock costs nothing.
+    case 'conductor_explore':
+      return await runConductor(env, runRouter, routerDeps(), { mode: 'explore' });
     case 'consolidate': return { ran: await runConsolidation(env) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
@@ -1101,7 +1106,7 @@ export default {
         chunks: (chunks as { n: number })?.n,
         timestamp: new Date().toISOString(),
         scheduler: 'native — Cloudflare cron */1 tick → clock-dispatch in scheduled()',
-        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor', 'consolidate', 'seed_corpus', 'seed_welcome'],
+        jobs: ['heartbeat', 'trading', 'research', 'dream', 'journal', 'optimus', 'conductor', 'conductor_explore', 'consolidate', 'seed_corpus', 'seed_welcome'],
       });
     }
 
@@ -1561,7 +1566,13 @@ export default {
     if (m % 15 === 0) fire('trading');        // :00 :15 :30 :45 (market-gated server-side)
     if (m === 0) fire('research');            // top of the hour
     if (m === 0) fire('backfill');            // embed any chunkless papers (research-first)
-    if (m === 30) fire('conductor');          // half past — Elle's autonomous work tick
+    if (m === 30) fire('conductor');          // half past — the FULL tick (sentry, forge, ready finalizes, exploration)
+    // The exploration lane runs on a faster clock — every 10 minutes, offset
+    // off the quarter-hours so it never stacks on trading/volition/the full
+    // tick. It is free by construction: the job exits immediately unless the
+    // laptop's sandbox path is open, and then generation runs on the local
+    // model. Cloud-spending lanes stay on the :30 tick above, ~1 run/hour max.
+    if (m % 10 === 2) fire('conductor_explore'); // :02 :12 :22 :32 :42 :52
     // The expressive acts are no longer FORCED by the clock. The old 03:00
     // dream and 20:00 journal jobs still exist (on demand via /api/cron), but
     // the clock now rings a VOLITION tick hourly at :45 instead — a free
