@@ -42,6 +42,10 @@ import { upsertProfile, getProfileByEmail } from './profiles';
 import { armOnboarding, disarmOnboarding } from './onboarding';
 import { pfarRoute } from './pfar';
 import { pathOpen as sandboxPathOpen, sandboxRunsRecent, sandboxBroughtIn, sandboxThoughts, sandboxReportsRecent, unseenReportCount, markReportsSeen } from './connect-sandbox';
+import { sseDoor, memberDonePayload } from './stream';
+import { handleArrival } from './arrival';
+import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
+import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 
 // The connect-back sandbox Durable Object must be exported from the worker
 // entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
@@ -265,6 +269,13 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
   const emailL = email.toLowerCase();
 
   if (action === 'signup') {
+    // The door is open to everyone, but not to a script: a handful of new
+    // accounts per IP per hour is every honest signup and no farm.
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const rlKey = `signup-rl:${ip}`;
+    const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+    if (count >= 5) return err('Too many signups from this address — try again in an hour', 429);
+    await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
     if (await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL).first()) return err('Email already registered', 409);
     const salt = generateSalt(); const id = generateId();
     await env.DB.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)').bind(id, emailL, `${salt}:${await hashPassword(password, salt)}`).run();
@@ -617,9 +628,9 @@ function routerDeps() {
 // caller supplies its own system prompt (evals/dev overrides), explicitly opts
 // out with tools:false, or the loop throws unexpectedly.
 async function handleMindConversation(
-  body: Record<string, unknown>, env: Env, userId: string, scope: Scope,
+  body: Record<string, unknown>, env: Env, userId: string, scope: Scope, ctx?: ExecutionContext,
 ): Promise<Response> {
-  const b = body as { query?: string; messages?: Array<{ role: string; content: string }>; session_id?: string; system?: string; source?: string; paper_id?: string; tools?: boolean; max_steps?: number; voice?: string };
+  const b = body as { query?: string; messages?: Array<{ role: string; content: string }>; session_id?: string; system?: string; source?: string; paper_id?: string; tools?: boolean; max_steps?: number; voice?: string; stream?: boolean };
   // Caller-controlled system prompt or explicit opt-out → the legacy path is
   // the honest one (the loop's mechanics assume HER prompt). paper_id too: an
   // exact-document pull is a stuffing pattern, not a retrieval decision.
@@ -628,20 +639,35 @@ async function handleMindConversation(
   const userMessage = b.query || b.messages?.filter(m => m.role === 'user').at(-1)?.content || '';
   if (!userMessage) return err('query or messages required');
   const sessionId = b.session_id || generateId();
+  // The mobile door's forever-thread ('door:<user id>') is private to its
+  // owner: naming someone else's door session would load THEIR history into
+  // her context. Any other session id keeps today's semantics.
+  if (sessionId.startsWith('door:') && sessionId !== `door:${userId}`) return err('Forbidden session', 403);
   const src = b.source || 'elle-conversation';
+  const opts = {
+    maxSteps: Math.min(Number(b.max_steps) || (scope === 'public' ? 4 : 6), 8),
+    scope, userId, sessionId, source: src, voice: b.voice,
+  };
+
+  // LIVE MODE (stream:true) — same wire the admin router speaks: run_start,
+  // each step as she commits to it, each observation, then one 'done' frame
+  // that is byte-for-byte the JSON this endpoint would have returned. In
+  // stream mode an unexpected throw becomes an 'error' frame (the client
+  // retries non-streaming); the single-shot fallback below stays the
+  // non-streaming path's safety net.
+  if (b.stream && ctx) {
+    return sseDoor(ctx, corsHeaders(), async (send) => {
+      const out = await runRouter(userMessage, env, routerDeps(), {
+        ...opts,
+        onEvent: (ev) => { send(ev.kind, ev); },
+      });
+      send('done', memberDonePayload(out, sessionId));
+    });
+  }
 
   try {
-    const out = await runRouter(userMessage, env, routerDeps(), {
-      maxSteps: Math.min(Number(b.max_steps) || (scope === 'public' ? 4 : 6), 8),
-      scope, userId, sessionId, source: src, voice: b.voice,
-    });
-    return json({
-      content:        out.answer,
-      response:       out.answer,
-      session_id:     sessionId,
-      steps:          out.steps,
-      kappa_dynamics: out.kappa_dynamics ?? null,
-    });
+    const out = await runRouter(userMessage, env, routerDeps(), opts);
+    return json(memberDonePayload(out, sessionId));
   } catch (e) {
     // The loop degrades internally; a throw here is a bug, not a model outage.
     // Never let it cost the user the answer — fall back to single-shot.
@@ -886,7 +912,14 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       return { ran: 'heartbeat' };
     case 'trading':  await runTradingCycle(env); return { ran: 'trading' };
     case 'volition': return await runVolition(env, runRouter, routerDeps());
-    case 'conductor': return await runConductor(env, runRouter, routerDeps());
+    case 'conductor': {
+      const out = await runConductor(env, runRouter, routerDeps());
+      // The reach-out pass rides the conductor's clock: did anything she just
+      // finished touch what a door-holder talked about? Best-effort — the
+      // tick's outcome never hangs on a knock.
+      await reachOutPass(env, embed).catch(e => console.error('[REACH] pass failed:', (e as Error).message));
+      return out;
+    }
     case 'consolidate': return { ran: await runConsolidation(env) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
@@ -1142,7 +1175,7 @@ export default {
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
       if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
-      return handleMindConversation(body, env, 'widget', 'public');
+      return handleMindConversation(body, env, 'widget', 'public', ctx);
     }
 
     // RAPID / Atlas consumer door — public, rate-limited, HOSPITALITY-SCOPED.
@@ -1181,7 +1214,7 @@ export default {
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
       if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
-      return handleMindConversation(body, env, 'guest', 'public');
+      return handleMindConversation(body, env, 'guest', 'public', ctx);
     }
     // Build-posture error diagnosis — public in v1 (like /api/chat); moves behind
     // auth in v2 when it gains live-infra context. Takes an error string, returns a fix.
@@ -1343,7 +1376,7 @@ export default {
     if (svc) {
       const privUser = await getUser(request, env);
       const privScope = routerScope(privUser?.tier);
-      if (path === '/api/elle-conversation')     return handleMindConversation(body, env, privUser?.id || 'svc', privScope);
+      if (path === '/api/elle-conversation')     return handleMindConversation(body, env, privUser?.id || 'svc', privScope, ctx);
       if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, privUser?.id || 'svc', 'reasoning');
     }
 
@@ -1360,7 +1393,58 @@ export default {
 
     // Authenticated users converse in 'member' scope: the reading mind plus
     // their own (user-gated) journal — never read_sql, trading, or corpus writes.
-    if (path === '/api/elle-conversation')      return handleMindConversation(body, env, user.id, 'member');
+    if (path === '/api/elle-conversation') {
+      // Per-user valve on the member door: the loop can spend several model
+      // calls per question, so a runaway client gets an hour's ceiling.
+      const rlKey = `member-rl:${user.id}`;
+      const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+      if (count >= 60) return err('Rate limit reached — try again in an hour', 429);
+      await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
+      return handleMindConversation(body, env, user.id, 'member', ctx);
+    }
+    // The mobile door's opening surface: her "since you were gone" lines +
+    // heartbeat + phase state, one call. GET or POST, member-gated above.
+    if (path === '/api/arrival')                return json(await handleArrival(env, user.id));
+
+    // The knock's plumbing (see push.ts): device registration, the user's
+    // reach-out contract (budget + quiet hours), and their auditable ledger.
+    if (path === '/api/push/register') {
+      const t = String((body as { expo_token?: string }).expo_token || '');
+      if (!t) return err('expo_token required');
+      await registerDevice(env, user.id, t, String((body as { platform?: string }).platform || ''));
+      return json({ ok: true });
+    }
+    if (path === '/api/push/unregister') {
+      const t = String((body as { expo_token?: string }).expo_token || '');
+      if (!t) return err('expo_token required');
+      await unregisterDevice(env, user.id, t);
+      return json({ ok: true });
+    }
+    if (path === '/api/prefs') {
+      if (request.method === 'GET') return json(await getPrefs(env, user.id));
+      return json(await putPrefs(env, user.id, body as Record<string, unknown>));
+    }
+    if (path === '/api/reach-outs')             return json({ reach_outs: await reachOutLedger(env, user.id) });
+
+    // Glass for members (see member-feed.ts): her published life, their own
+    // thread, what she remembers from them, export, and the full goodbye.
+    if (path === '/api/feed')                   return json(await handleFeed(env, { limit: Number(url.searchParams.get('limit')) || undefined, before: Number(url.searchParams.get('before')) || undefined }));
+    if (path === '/api/feed/provenance')        return json(await handleFeedProvenance(env, String(url.searchParams.get('run_id') || (body as { run_id?: string }).run_id || '')));
+    if (path === '/api/thread')                 return json(await handleThread(env, user.id, { limit: Number(url.searchParams.get('limit')) || undefined, before: url.searchParams.get('before') || undefined }));
+    if (path === '/api/me/memories') {
+      const del = String((body as { delete_id?: string }).delete_id || url.searchParams.get('delete_id') || '');
+      if (del && request.method !== 'GET') return json({ deleted: await deleteMyMemory(env, user.id, del) });
+      return json(await handleMyMemories(env, user.id));
+    }
+    if (path === '/api/me/export')              return json(await handleMyExport(env, user.id));
+    if (path === '/api/me/delete') {
+      // The full goodbye is POST-only and must be asked for in the body — a
+      // stray GET can never erase a person.
+      if (request.method !== 'POST' || (body as { confirm?: string }).confirm !== 'erase everything') {
+        return err('POST {"confirm":"erase everything"} to erase your account and data', 400);
+      }
+      return json(await handleMyErasure(env, user.id));
+    }
     if (path === '/api/elle-reasoning-engine')  return handleConversation(body, env, user.id, 'reasoning');
     if (path === '/api/elle-research')          return handleResearch(body, env);
     if (path === '/api/elle-cognitive-mapping') {
