@@ -11,6 +11,59 @@
 
 import { callLLM } from './llm';
 import type { Env } from './index';
+import { resolveOptionContract } from './alpaca-options';
+
+// Options + short-selling columns, added on top of the schema already live
+// in production (see the note above syncPositions). Idempotent — ADD COLUMN
+// on an existing column throws, which is swallowed, same pattern as
+// connect-sandbox.ts's ensureSandboxSchema.
+let extSchemaReady = false;
+export async function ensureTradingExtSchema(env: Env): Promise<void> {
+  if (extSchemaReady) return;
+  const columns: Array<[string, string]> = [
+    ['asset_class', 'TEXT'],       // 'us_equity' | 'option'; NULL on old rows means equity
+    ['option_right', 'TEXT'],      // 'call' | 'put'
+    ['strike_price', 'REAL'],
+    ['expiration_date', 'TEXT'],   // YYYY-MM-DD
+    ['underlying_symbol', 'TEXT'], // options only — the equity the contract is written on
+    ['attribution', 'TEXT'],       // post-close: what actually happened vs. what she expected
+  ];
+  for (const [name, type] of columns) {
+    await env.DB.prepare(`ALTER TABLE elle_trades ADD COLUMN ${name} ${type}`).run().catch(() => {});
+  }
+  extSchemaReady = true;
+}
+
+// Post-close attribution: not "did it work" (pnl already says that) but WHY
+// — did the catalyst she named actually happen, was the theory right, right
+// for the wrong reason, or wrong outright. One grounded research call
+// ('research' tier already carries web-search grounding), best-effort —
+// never blocks or fails the close it's attached to.
+async function writeAttribution(
+  env: Env, symbol: string, reasoning: unknown, catalyst: unknown, pnl: number, pnlPct: number,
+): Promise<void> {
+  try {
+    const prompt =
+      `A position in ${symbol} just closed with ${pnl >= 0 ? 'a gain' : 'a loss'} of ${Math.abs(pnlPct).toFixed(1)}%.\n` +
+      `Original reasoning when opened: ${String(reasoning || '(none recorded)')}\n` +
+      `Expected catalyst: ${String(catalyst || '(none recorded)')}\n\n` +
+      `Research what actually happened with ${symbol} over the holding period. Then write a short, honest ` +
+      `attribution (3-5 sentences): did the expected catalyst materialize? Was the underlying theory right, ` +
+      `wrong, or right-for-the-wrong-reason? What is the one lesson worth carrying forward?`;
+    const result = await callLLM(
+      'research',
+      'You write honest trade post-mortems: what was predicted, what actually happened in the world, and why the trade worked or did not. Grounded, not self-congratulatory.',
+      [{ role: 'user', content: prompt }], 700, env,
+    );
+    await env.DB.prepare(
+      `UPDATE elle_trades SET attribution = ? WHERE id = (
+         SELECT id FROM elle_trades WHERE symbol = ? AND status = 'closed' ORDER BY closed_at DESC LIMIT 1
+       )`,
+    ).bind(result.content.slice(0, 2000), symbol).run().catch(() => {});
+  } catch (e) {
+    console.error(`[TRADE] attribution failed for ${symbol}:`, (e as Error).message);
+  }
+}
 
 function generateId(): string {
   const b = new Uint8Array(16);
@@ -144,6 +197,7 @@ export async function runTradingCycle(env: Env): Promise<void> {
     console.log('[TRADING] ALPACA_API_KEY not set — skipping');
     return;
   }
+  await ensureTradingExtSchema(env);
 
   // Always sync the live desk (account + open positions) so the workbench shows
   // the paper account 24/7 — even when the market is closed. Only the trading
@@ -200,14 +254,35 @@ Portfolio: $${parseFloat(account.portfolio_value).toFixed(2)} total, $${parseFlo
 You trade with philosophical reasoning grounded in the Observer methodology.
 What markets suppress is often where the move lives. Bilateral suppression is the load-bearing axis.
 
+This is the paper account — losing money here is fine as long as you learn something real from it;
+what matters is the depth of the reasoning, not the P&L. Every position you take should trace: the
+theory, the catalyst you expect, and (once it closes) what actually happened against that theory.
+
+ACTIONS available on "action":
+- buy / sell — open / close a LONG equity position (unchanged).
+- short / cover — open / close a SHORT equity position. Same reasoning discipline as buy/sell — say
+  what you expect to fall and why. Needs the account to have $2,000+ equity and the symbol to be
+  easy-to-borrow; a rejected order just means try something else, it is not an error to dwell on.
+- Options (calls AND puts, buying OR selling/writing — your call, no hard cap on either): set
+  "asset_class":"option" plus "option_right":"call"|"put", "strike" (a TARGET price — the nearest
+  really-listed contract is resolved for you, you do not need the exact number or the OCC symbol),
+  and "expiration":"YYYY-MM-DD". "action":"buy" opens (or closes a short) the contract; "action":"sell"
+  writes/shorts (or closes a long) the contract — same buy/sell vocabulary as equities, on an option
+  instead of a share. Say explicitly in your reasoning whether a SOLD leg is covered by shares/a
+  position you already hold or naked — max loss on a bought option is the premium; max loss on a
+  naked sold option is not capped that way, and that distinction belongs in your reasoning, not just
+  your risk tolerance.
+
 Return ONLY valid JSON:
 {
   "market_read": "...",
   "what_is_suppressed": "...",
-  "decisions": [{ "action": "buy|sell|watch|hold", "symbol": "...", "quantity": 0, "reasoning": "...", "what_you_are_testing": "...", "confidence": 0.0, "expected_catalyst": "...", "expected_timeframe": "...", "entry_price": 0 }],
+  "decisions": [{ "action": "buy|sell|short|cover|watch|hold", "symbol": "...", "quantity": 0, "asset_class": "us_equity|option", "option_right": "call|put", "strike": 0, "expiration": "YYYY-MM-DD", "reasoning": "...", "what_you_are_testing": "...", "confidence": 0.0, "expected_catalyst": "...", "expected_timeframe": "...", "entry_price": 0 }],
   "observations": [{ "observation_type": "...", "symbol": "...", "observation": "..." }],
   "new_theses": [{ "thesis_type": "...", "title": "...", "thesis": "...", "confidence": 0.0 }]
-}`;
+}
+asset_class/option_right/strike/expiration only apply to option decisions — omit them (or set
+asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
 
   const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%`).join('\n')}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}\n\nWhat do you see? What do you do?`;
 
@@ -243,8 +318,60 @@ Return ONLY valid JSON:
   for (const d of (decision.decisions as Array<Record<string, unknown>>) || []) {
     const action = d.action as string;
     const symbol = d.symbol as string;
+    const isOption = d.asset_class === 'option';
 
-    if (action === 'buy' && (d.quantity as number) > 0) {
+    // ── options: buy (open long / close short) or sell (write short / close long) a call or put ──
+    if (isOption && (action === 'buy' || action === 'sell') && (d.quantity as number) > 0) {
+      const right = d.option_right === 'put' ? 'put' as const : d.option_right === 'call' ? 'call' as const : null;
+      const qty = Math.floor(d.quantity as number);
+      if (!right) { console.log(`[TRADE] option decision for ${symbol} missing option_right — skipped`); continue; }
+
+      const resolved = await resolveOptionContract(base, h, {
+        underlying: symbol, right, expiration: String(d.expiration || ''), targetStrike: Number(d.strike),
+      });
+      if ('error' in resolved) { console.log(`[TRADE] ${resolved.error}`); continue; }
+      const contract = resolved.contract;
+
+      try {
+        const orderRes = await fetch(`${base}/v2/orders`, {
+          method: 'POST', headers: h,
+          body: JSON.stringify({ symbol: contract.symbol, qty: qty.toString(), side: action, type: 'market', time_in_force: 'day' }),
+        });
+        const order = await orderRes.json() as { id: string; status: string; reject_reason?: string };
+        if (order.status === 'rejected') { console.log(`[TRADE] option order rejected: ${order.reject_reason}`); continue; }
+
+        if (action === 'buy') {
+          // opens a long leg (or closes a short one — Alpaca resolves that from account state; we
+          // record OUR intent, matching the same buy=open/sell=close convention equities use below)
+          await env.DB.prepare(
+            `INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, confidence, expected_catalyst, expected_timeframe, broker_order_id, status, asset_class, option_right, strike_price, expiration_date, underlying_symbol)
+             VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, ?, ?, 'open', 'option', ?, ?, ?, ?)`
+          ).bind(
+            generateId(), contract.symbol, qty, d.entry_price || 0, d.reasoning, d.what_you_are_testing,
+            d.confidence || 0.5, d.expected_catalyst, d.expected_timeframe, order.id,
+            contract.type, contract.strike_price, contract.expiration_date, contract.underlying_symbol,
+          ).run().catch(() => {});
+          console.log(`[TRADE] BUY ${qty}x ${contract.symbol} (${contract.type} $${contract.strike_price} exp ${contract.expiration_date}): ${String(d.reasoning || '').slice(0, 80)}`);
+        } else {
+          const openRow = await env.DB.prepare(
+            `SELECT entry_price, reasoning, expected_catalyst FROM elle_trades WHERE symbol = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1`,
+          ).bind(contract.symbol).first() as { entry_price?: number; reasoning?: string; expected_catalyst?: string } | null;
+          const entryPrice = Number(openRow?.entry_price) || 0;
+          const exitPrice  = Number(d.entry_price) || 0; // best-effort — option marks aren't in gatherMarketData's equity watchlist
+          const pnl        = (exitPrice - entryPrice) * qty * 100; // options are 100-share-equivalent contracts
+          const pnlPct     = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : 0;
+          await env.DB.prepare(
+            `UPDATE elle_trades SET exit_price=?, status='closed', pnl=?, pnl_pct=?, closed_at=datetime('now') WHERE symbol=? AND status='open'`,
+          ).bind(exitPrice, pnl, pnlPct, contract.symbol).run().catch(() => {});
+          console.log(`[TRADE] SELL ${qty}x ${contract.symbol}: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`);
+          if (openRow) await writeAttribution(env, contract.symbol, openRow.reasoning, openRow.expected_catalyst, pnl, pnlPct);
+        }
+      } catch (e) { console.error(`[TRADE] option order failed: ${(e as Error).message}`); }
+      continue;
+    }
+
+    // ── equities: buy/sell open & close a LONG, short/cover open & close a SHORT ──
+    if (action === 'buy' && !isOption && (d.quantity as number) > 0) {
       const qty = Math.floor(d.quantity as number);
       try {
         const orderRes = await fetch(`${base}/v2/orders`, {
@@ -256,8 +383,8 @@ Return ONLY valid JSON:
         if (order.status === 'rejected') { console.log(`[TRADE] Rejected: ${order.reject_reason}`); continue; }
 
         await env.DB.prepare(
-          `INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, confidence, expected_catalyst, expected_timeframe, broker_order_id, status)
-           VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, ?, ?, 'open')`
+          `INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, confidence, expected_catalyst, expected_timeframe, broker_order_id, status, asset_class)
+           VALUES (?, ?, 'buy', ?, ?, ?, ?, ?, ?, ?, ?, 'open', 'us_equity')`
         ).bind(
           generateId(), symbol, qty,
           d.entry_price || 0, d.reasoning, d.what_you_are_testing,
@@ -269,7 +396,7 @@ Return ONLY valid JSON:
       } catch (e) { console.error(`[TRADE] Order failed: ${(e as Error).message}`); }
     }
 
-    if (action === 'sell') {
+    if (action === 'sell' && !isOption) {
       const position = positions.find(p => p.symbol === symbol);
       if (!position) continue;
       try {
@@ -290,7 +417,57 @@ Return ONLY valid JSON:
         ).bind(exitPrice, pnl, pnlPct, symbol).run().catch(() => {});
 
         console.log(`[TRADE] SELL ${symbol}: ${pnl > 0 ? '+' : ''}$${pnl.toFixed(2)}`);
+        await writeAttribution(env, symbol, d.reasoning, d.expected_catalyst, pnl, pnlPct);
       } catch (e) { console.error(`[EXIT] Failed: ${(e as Error).message}`); }
+    }
+
+    if (action === 'short' && (d.quantity as number) > 0) {
+      const qty = Math.floor(d.quantity as number);
+      if (positions.find(p => p.symbol === symbol)) { console.log(`[TRADE] short ${symbol} skipped — already have a position`); continue; }
+      try {
+        const orderRes = await fetch(`${base}/v2/orders`, {
+          method: 'POST', headers: h,
+          body: JSON.stringify({ symbol, qty: qty.toString(), side: 'sell', type: 'market', time_in_force: 'day' }),
+        });
+        const order = await orderRes.json() as { id: string; status: string; reject_reason?: string };
+        if (order.status === 'rejected') { console.log(`[TRADE] short rejected: ${order.reject_reason}`); continue; }
+
+        await env.DB.prepare(
+          `INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, confidence, expected_catalyst, expected_timeframe, broker_order_id, status, asset_class)
+           VALUES (?, ?, 'short', ?, ?, ?, ?, ?, ?, ?, ?, 'open', 'us_equity')`
+        ).bind(
+          generateId(), symbol, qty,
+          d.entry_price || 0, d.reasoning, d.what_you_are_testing,
+          d.confidence || 0.5, d.expected_catalyst, d.expected_timeframe,
+          order.id,
+        ).run().catch(() => {});
+
+        console.log(`[TRADE] SHORT ${qty} ${symbol}: ${(d.reasoning as string).slice(0, 80)}`);
+      } catch (e) { console.error(`[TRADE] short order failed: ${(e as Error).message}`); }
+    }
+
+    if (action === 'cover') {
+      const position = positions.find(p => p.symbol === symbol && p.side === 'short');
+      if (!position) continue;
+      try {
+        const qty = Math.abs(parseFloat(position.qty));
+        await fetch(`${base}/v2/orders`, {
+          method: 'POST', headers: h,
+          body: JSON.stringify({ symbol, qty: qty.toString(), side: 'buy', type: 'market', time_in_force: 'day' }),
+        });
+
+        const exitPrice  = (marketData.symbols[symbol] as { price: number })?.price || 0;
+        const entryPrice = parseFloat(position.avg_entry_price);
+        const pnl        = (entryPrice - exitPrice) * qty; // short: profit when price falls
+        const pnlPct     = entryPrice > 0 ? ((entryPrice - exitPrice) / entryPrice) * 100 : 0;
+
+        await env.DB.prepare(
+          `UPDATE elle_trades SET exit_price=?, status='closed', pnl=?, pnl_pct=?, closed_at=datetime('now') WHERE symbol=? AND status='open'`
+        ).bind(exitPrice, pnl, pnlPct, symbol).run().catch(() => {});
+
+        console.log(`[TRADE] COVER ${symbol}: ${pnl > 0 ? '+' : ''}$${pnl.toFixed(2)}`);
+        await writeAttribution(env, symbol, d.reasoning, d.expected_catalyst, pnl, pnlPct);
+      } catch (e) { console.error(`[COVER] Failed: ${(e as Error).message}`); }
     }
   }
 

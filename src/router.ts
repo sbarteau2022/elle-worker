@@ -38,6 +38,8 @@ import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
+import { deepResearch } from './deep-research';
+import { resolveOptionContract } from './alpaca-options';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
@@ -157,6 +159,7 @@ const PUBLIC_TOOLS = new Set([
 ]);
 const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
+  'deep_research', // multi-round — costlier per call than web_search, so kept off the unauthenticated `public` door
   'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
   'self_state', 'remember', 'memory_write', 'notebook_write', 'self_schedule',
   'skill_list', 'skill_read', 'skill_route',
@@ -216,6 +219,7 @@ const TOOL_LINES: Record<string, string> = {
   search_corpus: `search_corpus(q) — SEMANTIC search over the published corpus + cron research papers. Use for prose/ideas/papers ("the proof that φ is forced"). Returns matching passages with titles.`,
   read_sql: `read_sql(sql) — run ONE read-only SELECT/WITH query over D1 (SQLite). Use for structured facts: trades, P&L, journal, dream artifacts, memory, events, vault. Tables below. No writes. If you omit LIMIT one is added.`,
   web_search: `web_search(q) — live web search (current external facts, news, prices). Cite what it returns.`,
+  deep_research: `deep_research(topic,rounds?) — a real investigation, not one query: runs multiple search rounds (search → spot the biggest remaining gap → search again → …, up to 5, default 3) and returns one cited, synthesized dossier. Costs only ONE of your step-budget slots regardless of how many rounds run underneath — reach for this instead of chaining several web_search calls yourself when a question needs actual depth ("what's the real state of X", not "what is X's price"). For an investigation too large even for this — spanning multiple sessions, needing the corpus AND the web AND code — file it as an intent instead; that lane already runs local-first and keeps going indefinitely across ticks, which is where genuinely uncapped work belongs, not a single tool call.`,
   fetch_url: `fetch_url(url) — fetch one http(s) page and return its text.`,
   fetch_document: `fetch_document(id) — return the full text of one corpus paper by its id.`,
   find_document: `find_document(q,series?) — pull a FULL corpus document by DESCRIPTION, no title or id needed: "the dream paper about recursive coherence", "my trading research on regime shifts". Returns the whole winning document (or a short candidate list if ambiguous). series filters to e.g. 'research', 'dream', 'trading'.`,
@@ -240,7 +244,7 @@ const TOOL_LINES: Record<string, string> = {
   github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
   ingest_paper: `ingest_paper(title,text,series,tag,abstract?,source_url?) — WRITE: add a paper to the corpus. It passes a 2-check gate first (integrity: structure + no duplicate; verification: coherent, real writing) and is embedded/indexed live only if both pass; a rejection comes back with the reason.`,
   trigger_dream: `trigger_dream() — WRITE: run one libre/dream cycle now.`,
-  trade_execute: `trade_execute(action,symbol,qty?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). buy/sell need qty; close exits the whole position.`,
+  trade_execute: `trade_execute(action,symbol,qty?,asset_class?,option_right?,strike?,expiration?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). buy/sell need qty (a sell on a symbol with no long position opens a SHORT — Alpaca's own semantics, not a separate action here); close exits the whole position, long or short, correctly either way. For an OPTION instead of the equity itself: asset_class:"option", option_right:"call"|"put", strike (a target — nearest real listed contract is resolved for you), expiration:"YYYY-MM-DD" — action buy/sell then means go long/write that contract, same vocabulary as equities. Say explicitly whether a sold option leg is covered or naked; naked-sold risk is not capped at the premium.`,
   journal_read: `journal_read(q) — semantic search over the Optimus journal/manuscript (ON-RECORD entries only; off-record is never surfaced). Returns entries with their phase state (κ, reserve, velocity, accel).`,
   journal_thread: `journal_thread(thread_id) — full manuscript for one thread: ordered entries + phase-state series + marginalia.`,
   journal_write: `journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.`,
@@ -415,8 +419,25 @@ function guardSelect(raw: string): { ok: true; sql: string } | { ok: false; erro
   return { ok: true, sql };
 }
 
+// Pure — which side closes a position, given which side it's on. Exported
+// for a direct test: getting this wrong on a short (using 'sell' instead of
+// 'buy') doubles the short instead of closing it.
+export function closingSideFor(positionSide: string | undefined): 'buy' | 'sell' {
+  return positionSide === 'short' ? 'buy' : 'sell';
+}
+
 // ── Alpaca order (paper unless ALPACA_BASE_URL points live) ───
-async function alpacaOrder(env: Env, action: string, symbol: string, qty?: number): Promise<unknown> {
+// action='sell' on a symbol with no existing long position opens a SHORT —
+// that's Alpaca's own semantics (side is all it looks at to place the order;
+// open-vs-close is inferred from account state), not something this function
+// has to special-case for the open side. 'close' is the one place that DOES
+// have to know which side it's closing: buying back a short needs side='buy',
+// selling out of a long needs side='sell' — using the wrong one on a short
+// would double it instead of closing it.
+async function alpacaOrder(
+  env: Env, action: string, symbol: string, qty?: number,
+  opts?: { assetClass?: 'us_equity' | 'option'; optionRight?: 'call' | 'put'; expiration?: string; strike?: number },
+): Promise<unknown> {
   const key = (env as any).ALPACA_API_KEY as string | undefined;
   const secret = (env as any).ALPACA_SECRET_KEY as string | undefined;
   if (!key || !secret) return { error: 'Alpaca not configured (ALPACA_API_KEY/SECRET missing)' };
@@ -425,12 +446,26 @@ async function alpacaOrder(env: Env, action: string, symbol: string, qty?: numbe
   const sym = String(symbol || '').toUpperCase().trim();
   if (!sym) return { error: 'symbol required' };
 
+  if (opts?.assetClass === 'option' && (action === 'buy' || action === 'sell')) {
+    const q = Math.floor(Number(qty) || 0);
+    if (q <= 0) return { error: 'qty must be a positive integer for an option order' };
+    if (opts.optionRight !== 'call' && opts.optionRight !== 'put') return { error: 'optionRight must be "call" or "put"' };
+    const resolved = await resolveOptionContract(base, headers, {
+      underlying: sym, right: opts.optionRight, expiration: String(opts.expiration || ''), targetStrike: Number(opts.strike),
+    });
+    if ('error' in resolved) return { error: resolved.error };
+    const r = await fetch(`${base}/v2/orders`, { method: 'POST', headers, body: JSON.stringify({ symbol: resolved.contract.symbol, qty: String(q), side: action, type: 'market', time_in_force: 'day' }) });
+    return { paper: base.includes('paper'), contract: resolved.contract, order: await r.json() };
+  }
+
   if (action === 'close') {
     const pr = await fetch(`${base}/v2/positions/${sym}`, { headers });
     if (!pr.ok) return { error: `no open position in ${sym} (HTTP ${pr.status})` };
-    const pos = await pr.json() as { qty?: string };
-    const r = await fetch(`${base}/v2/orders`, { method: 'POST', headers, body: JSON.stringify({ symbol: sym, qty: pos.qty, side: 'sell', type: 'market', time_in_force: 'day' }) });
-    return { paper: base.includes('paper'), order: await r.json() };
+    const pos = await pr.json() as { qty?: string; side?: string };
+    const closingSide = closingSideFor(pos.side);
+    const closeQty = String(Math.abs(Number(pos.qty) || 0));
+    const r = await fetch(`${base}/v2/orders`, { method: 'POST', headers, body: JSON.stringify({ symbol: sym, qty: closeQty, side: closingSide, type: 'market', time_in_force: 'day' }) });
+    return { paper: base.includes('paper'), closed_side: pos.side || 'long', order: await r.json() };
   }
   if (action === 'buy' || action === 'sell') {
     const q = Math.floor(Number(qty) || 0);
@@ -483,6 +518,15 @@ async function runTool(
         const r = await deps.handleResearch({ query: String(a.q || a.query || '') }, env);
         const d = await r.json() as { content?: string; search_results?: string };
         return clip(`${d.content || ''}\n\nSOURCES:\n${d.search_results || '(none)'}`);
+      }
+      case 'deep_research': {
+        const search = async (query: string) => {
+          const r = await deps.handleResearch({ query }, env);
+          const d = await r.json() as { content?: string; search_results?: string };
+          return { content: d.content || '', search_results: d.search_results };
+        };
+        const rounds = a.rounds != null ? Number(a.rounds) : undefined;
+        return clip(await deepResearch(env, String(a.topic || a.q || a.query || ''), search, rounds));
       }
       case 'fetch_url': {
         const url = String(a.url || '');
@@ -605,11 +649,18 @@ async function runTool(
         const action = String(a.action || '');
         const symbol = String(a.symbol || '');
         const qty = Number(a.qty);
+        const isOption = a.asset_class === 'option';
+        const optOpts = isOption
+          ? { assetClass: 'option' as const, optionRight: (a.option_right === 'put' ? 'put' : 'call') as 'call' | 'put', expiration: String(a.expiration || ''), strike: Number(a.strike) }
+          : undefined;
         // Exactly-once within 90s: identical orders (double-tap / LLM re-emit)
-        // replay the stored result instead of hitting Alpaca twice.
+        // replay the stored result instead of hitting Alpaca twice. Option
+        // orders fold their strike/expiration into the key so two different
+        // contracts on the same underlying never collide.
+        const idemExtra = isOption ? `${optOpts!.optionRight}:${optOpts!.strike}:${optOpts!.expiration}` : undefined;
         const { replayed, result } = await ensureOnce(
-          env, orderKey(action, symbol, qty), 'trade_execute',
-          () => alpacaOrder(env, action, symbol, qty),
+          env, orderKey(action, symbol, qty, idemExtra), 'trade_execute',
+          () => alpacaOrder(env, action, symbol, qty, optOpts),
           { windowSec: 90 },
         );
         return clip(JSON.stringify(replayed ? { ...(result as object), idempotent_replay: true } : result));

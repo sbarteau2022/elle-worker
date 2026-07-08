@@ -58,9 +58,15 @@ One question in plain English → a transparent ReAct loop:
    (`mind.ts`) + her **κ phase** this session + her **skill index** + the
    **tool catalog for this scope** (+ the D1 schema when `read_sql` is in scope).
 2. Each turn the model emits one JSON object: `{"tool","args"}` or `{"answer"}`.
-   It may add `{"engine":"code|reasoning|fast|research|conversation"}` to steer
-   which model tier runs its **next** step — she picks the model like she picks
-   the tool.
+   It may add `{"engine":"code|reasoning|fast|research|conversation|local"}` to
+   steer which model tier runs its **next** step — she picks the model like she
+   picks the tool. `local` is the sovereign dispatch mode: generation runs on
+   the operator's own laptop over the connect-back sandbox socket (free, no
+   provider quota) instead of a hosted provider; a caller can also default a
+   whole run to it with `prefer:'local'` (the conductor's exploration lane
+   does — see **"Hand off a project"** below). Any local failure, timeout, or
+   closed path demotes that step (and the rest of the run) to hosted
+   transparently — a closed laptop lid can slow a run down, never strand it.
 3. Tools execute; the observation feeds back; the loop runs to a step budget,
    then answers.
 4. On the way out: κ dynamics over her output, the exchange persisted to memory,
@@ -88,7 +94,25 @@ description, no title), `fetch_document`, `read_sql` (SELECT-only over D1),
 (one-call introspection: heartbeat, κ series, canvas, trading, sandbox,
 memories), `scratchpad_read`/`scratchpad_write` (short-TTL working memory).
 
-**World** — `web_search` (Gemini + grounding), `fetch_url`, `calc`, `diagnose`.
+**World** — `web_search` (Gemini + grounding, one query in/one answer out),
+`deep_research` (`src/deep-research.ts`) — a real investigation rather than
+one query: chains multiple search rounds (search → the biggest remaining gap
+→ search again → …, up to 5, default 3) into one synthesized, cited dossier.
+Costs only **one** of her step-budget slots regardless of how many rounds run
+underneath, since the chaining happens *inside* the tool call, not as
+additional ReAct steps — the fix for "she runs out of steps mid-investigation"
+that doesn't require raising the step cap. The gap-detection step between
+rounds (mechanical: "what's still missing?") dispatches local-first on a
+short, tight timeout (15s, not the general 180s `sandboxLLM` default) so a
+slow or busy laptop demotes that one round to hosted in seconds rather than
+stalling the whole call; the opening search and the closing synthesis always
+run hosted, where quality matters most. `member` scope and above only — a
+multi-round tool call costs meaningfully more than one `web_search`, so it
+stays off the unauthenticated `public` door. For an investigation too big
+even for this (spanning sessions, needing the corpus *and* the web *and*
+code), file it as an `intent` instead — that lane is where genuinely uncapped
+work belongs (see **"Hand off a project"**), not a single tool call.
+`fetch_url`, `calc`, `diagnose`.
 
 **Real execution** — `run_code` (python/js/ts, real stdout/stderr/exit),
 `run_shell`, `sandbox_clone` (pull a working tree in — laptop or, for a GitHub
@@ -185,7 +209,19 @@ than the world:
   that can mint a page).
 
 **Writes / sensitive** — `ingest_paper` (gated, see below), `trigger_dream`,
-`trade_execute` (Alpaca; idempotent within 90s).
+`trade_execute` (Alpaca; idempotent within 90s). Equities: buy/sell/close,
+where a `sell` on a symbol with no long position opens a **short** (Alpaca's
+own semantics — not a separate action) and `close` exits whatever's actually
+open, long or short, on the right side either way. Options: pass
+`asset_class:"option"` + `option_right` + `strike` (a target — the nearest
+really-listed contract is resolved via `src/alpaca-options.ts`, no OCC symbol
+needed) + `expiration`; buying or selling/writing either, no hard cap — the
+same reasoning-is-the-gate model as the rest of the trading desk, so a naked
+short leg is a judgment call she has to name explicitly, not something the
+code blocks. Every closed position (equity or option, long or short) gets a
+post-close **attribution** pass — a grounded research call comparing the
+original reasoning/catalyst against what actually happened, stored on the
+trade and shown on the workbench's trading tab.
 
 ---
 
@@ -426,6 +462,7 @@ to Elle by construction. `main` auto-deploys via
 | `sandbox-agent.ts` | the `SandboxAgent` DO — holds the laptop's WebSocket, dispatches jobs down it |
 | `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane |
 | `duplex.ts` | the duplex channel — sovereign (laptop) ↔ cloud, append-only ledger, `/api/duplex` |
+| `deep-research.ts` | `deep_research` tool — chained multi-round web research, local-first gap detection |
 | `github-tools.ts` | read any repo via the worker token |
 | `calc.ts` / `scratchpad.ts` | arithmetic / working memory |
 | `journal.ts` | Optimus phase-state manuscript |
@@ -440,7 +477,8 @@ to Elle by construction. `main` auto-deploys via
 | `consolidate.ts` | nightly memory consolidation (memories→skills→scars) |
 | `mirror.ts` | /api/elle-self — one snapshot of the reflexive organs |
 | `libre.ts` | dream/libre autonomous production |
-| `trading.ts` | Alpaca cycle + daily journal |
+| `trading.ts` | Alpaca cycle + daily journal + post-close attribution |
+| `alpaca-options.ts` | resolves human option terms (underlying/right/strike/expiration) to a real OCC contract |
 | `kappa-*.ts` | coherence measure + derivatives |
 | `law.ts` | law bench (duel/tutor/doctrine/cohort/replays) |
 | `madmind.ts` / `diagnose.ts` / `research.ts` / `widget.ts` | submissions, diagnostics, research cron, embeddable widget |
