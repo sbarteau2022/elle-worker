@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeField, analyzeRhythm, analyzePalette, resynthImage } from './vfar';
+import { analyzeField, analyzeRhythm, analyzePalette, resynthImage, structureTensor, gaborSignature, glcmFeatures } from './vfar';
 
 // Synthetic images with KNOWN structure — the cores are deterministic, so
 // ground truth is checkable exactly.
@@ -81,7 +81,76 @@ describe('analyzePalette', () => {
   });
 });
 
+describe('structureTensor — the continuous orientation instrument', () => {
+  it('reads vertical stripes as vertical edges with near-total coherence', () => {
+    const t = structureTensor(verticalStripes, W, H)!;
+    expect(Math.min(Math.abs(t.orientation_deg - 90), Math.abs(t.orientation_deg - 90 + 180))).toBeLessThan(3);
+    expect(t.coherence).toBeGreaterThan(0.95);
+  });
+
+  it('reads a 45° diagonal grating at 45°, which the 4-bin histogram could only approximate', () => {
+    const diag = image((x, y) => 128 + 100 * Math.sin(((x + y) * 2 * Math.PI) / 8));
+    const t = structureTensor(diag, W, H)!;
+    // edges run along x+y=const → 135° in screen coords (y down): accept either fold
+    expect(Math.min(Math.abs(t.orientation_deg - 135), Math.abs(t.orientation_deg - 45))).toBeLessThan(5);
+    expect(t.coherence).toBeGreaterThan(0.9);
+  });
+
+  it('a flat field has no orientation and zero coherence', () => {
+    const t = structureTensor(flat, W, H)!;
+    expect(t.coherence).toBe(0);
+  });
+});
+
+describe('gaborSignature — the classic texture signature', () => {
+  it('peaks at the stripe wavelength and orientation', () => {
+    // stripes with period 8 px → wavelength 8; wave vector runs horizontally (0°)
+    const stripes8 = image((x) => (Math.floor(x / 4) % 2 ? 255 : 0));
+    const g = gaborSignature(stripes8, W, H)!;
+    expect(g.peak.wavelength).toBe(8);
+    expect(g.peak.orientation_deg).toBe(0);
+  });
+
+  it('a flat field yields an all-zero signature, honestly', () => {
+    const g = gaborSignature(flat, W, H)!;
+    expect(g.signature.every((s) => s.energy === 0)).toBe(true);
+  });
+});
+
+describe('glcmFeatures — Haralick statistics', () => {
+  it('a checkerboard maximizes contrast; a flat field maximizes homogeneity and energy', () => {
+    const checker = image((x, y) => ((x + y) % 2 ? 255 : 0));
+    const c = glcmFeatures(checker, W, H)!;
+    const f = glcmFeatures(flat, W, H)!;
+    expect(c.contrast).toBeGreaterThan(f.contrast + 50);
+    expect(f.homogeneity).toBe(1);
+    expect(f.energy).toBe(1);
+    expect(f.entropy).toBe(0);
+    expect(c.entropy).toBeGreaterThan(0.5);
+  });
+
+  it('a smooth gradient co-occurs with its neighbors: high correlation, low contrast', () => {
+    const g = glcmFeatures(leftBright, W, H)!;
+    expect(g.correlation).toBeGreaterThan(0.9);
+    expect(g.contrast).toBeLessThan(2);
+  });
+});
+
 describe('resynthImage — the decomposer inverted, no model', () => {
+  it('carries the tensor angle: an angled weave rips back at that angle', () => {
+    const png = resynthImage({ size: 64, hfreq: 8, vfreq: 0, angle_deg: 45, colors: ['#000000', '#ffffff'] });
+    const raw = storedIdatPayload(png);
+    const luma: number[] = [];
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const o = y * (64 * 3 + 1) + 1 + x * 3;
+      luma.push(raw[o]);
+    }
+    const t = structureTensor(luma, 64, 64)!;
+    // grating waves along the rotated x-axis at 45° → edges run at 45° or its fold
+    expect(Math.min(Math.abs(t.orientation_deg - 45), Math.abs(t.orientation_deg - 135))).toBeLessThan(8);
+    expect(t.coherence).toBeGreaterThan(0.8);
+  });
+
   it('emits a structurally valid PNG at the requested size', () => {
     const png = resynthImage({ size: 64, hfreq: 8, vfreq: 3, colors: ['#0f0f1a', '#C9A84C'] });
     // PNG signature

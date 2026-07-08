@@ -160,6 +160,173 @@ export function analyzeRhythm(lumaIn: number[], w: number, h: number): RhythmRes
   return { horizontal: analyzeSpectrum(colMeans), vertical: analyzeSpectrum(rowMeans) };
 }
 
+// ── the texture rippers (pure — the specialists' math, ported) ────────────
+// The upgrade wave: instead of reinventing, these port the doctrine of the
+// mature image-analysis stack (scikit-image / classical CV) into
+// zero-dependency Worker code:
+//   • structure tensor  — the continuous orientation instrument (a single
+//     dominant angle + coherence), the mature form of the 4-bin histogram.
+//   • Gabor bank        — the classic texture signature: filter energy at
+//     2 wavelengths × 4 orientations.
+//   • GLCM (Haralick)   — gray-level co-occurrence statistics: contrast,
+//     correlation, energy, homogeneity, entropy.
+
+export interface TensorResult {
+  orientation_deg: number;  // dominant EDGE orientation, 0..180 (0 = horizontal edges)
+  coherence: number;        // 0 (isotropic) .. 1 (one clean direction)
+}
+
+export function structureTensor(lumaIn: number[], w: number, h: number): TensorResult | null {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 3 || h < 3 || w * h > MAX_PIXELS) return null;
+  const luma = normalizeLuma(lumaIn, w * h);
+  if (!luma) return null;
+  const px = (x: number, y: number) => luma[y * w + x];
+  let jxx = 0, jyy = 0, jxy = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const gx = (px(x + 1, y) - px(x - 1, y)) / 2;
+      const gy = (px(x, y + 1) - px(x, y - 1)) / 2;
+      jxx += gx * gx; jyy += gy * gy; jxy += gx * gy;
+    }
+  }
+  const trace = jxx + jyy;
+  if (trace < 1e-9) return { orientation_deg: 0, coherence: 0 }; // flat field: no orientation
+  // Gradient-dominant direction; the EDGE runs perpendicular to it.
+  const gradAngle = 0.5 * Math.atan2(2 * jxy, jxx - jyy);
+  const edgeDeg = ((gradAngle * 180) / Math.PI + 90 + 180) % 180;
+  const coherence = Math.sqrt((jxx - jyy) ** 2 + 4 * jxy * jxy) / trace;
+  return { orientation_deg: round(edgeDeg, 1), coherence: round(Math.min(1, coherence), 4) };
+}
+
+export interface GaborResult {
+  // energy per (wavelength, orientation), normalized by image contrast
+  signature: Array<{ wavelength: number; orientation_deg: number; energy: number }>;
+  peak: { wavelength: number; orientation_deg: number };
+}
+
+const GABOR_WAVELENGTHS = [4, 8];           // px
+const GABOR_ORIENTATIONS = [0, 45, 90, 135]; // deg — direction of the wave vector
+const GABOR_KERNEL = 9;                      // 9×9 kernels
+const GABOR_MAX_SIDE = 64;                   // internally downsample beyond this
+
+export function gaborSignature(lumaIn: number[], w: number, h: number): GaborResult | null {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < GABOR_KERNEL || h < GABOR_KERNEL || w * h > MAX_PIXELS) return null;
+  let luma = normalizeLuma(lumaIn, w * h);
+  if (!luma) return null;
+
+  // Box-downsample so the convolution cost is bounded regardless of input.
+  let dw = w, dh = h;
+  while (dw > GABOR_MAX_SIDE || dh > GABOR_MAX_SIDE) {
+    const nw = Math.floor(dw / 2), nh = Math.floor(dh / 2);
+    const next = new Array(nw * nh);
+    for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+      next[y * nw + x] = (luma[(2 * y) * dw + 2 * x] + luma[(2 * y) * dw + 2 * x + 1]
+        + luma[(2 * y + 1) * dw + 2 * x] + luma[(2 * y + 1) * dw + 2 * x + 1]) / 4;
+    }
+    luma = next; dw = nw; dh = nh;
+  }
+  if (dw < GABOR_KERNEL || dh < GABOR_KERNEL) return null;
+
+  const mean = luma.reduce((a, b) => a + b, 0) / luma.length;
+  const std = Math.sqrt(luma.reduce((a, b) => a + (b - mean) ** 2, 0) / luma.length);
+  if (std < 1e-6) {
+    // no texture at all — an honest all-zero signature
+    const signature = GABOR_WAVELENGTHS.flatMap((wl) => GABOR_ORIENTATIONS.map((o) => ({ wavelength: wl, orientation_deg: o, energy: 0 })));
+    return { signature, peak: { wavelength: GABOR_WAVELENGTHS[0], orientation_deg: 0 } };
+  }
+
+  const half = (GABOR_KERNEL - 1) / 2;
+  const signature: GaborResult['signature'] = [];
+  for (const wavelength of GABOR_WAVELENGTHS) {
+    const sigma = 0.56 * wavelength;
+    for (const orientationDeg of GABOR_ORIENTATIONS) {
+      const th = (orientationDeg * Math.PI) / 180;
+      const cos = Math.cos(th), sin = Math.sin(th);
+      // build the (even) Gabor kernel
+      const kernel = new Array(GABOR_KERNEL * GABOR_KERNEL);
+      for (let ky = -half; ky <= half; ky++) for (let kx = -half; kx <= half; kx++) {
+        const xr = kx * cos + ky * sin;
+        const yr = -kx * sin + ky * cos;
+        kernel[(ky + half) * GABOR_KERNEL + (kx + half)] =
+          Math.exp(-(xr * xr + 0.25 * yr * yr) / (2 * sigma * sigma)) * Math.cos((2 * Math.PI * xr) / wavelength);
+      }
+      // convolve interior, accumulate |response|
+      let acc = 0, cnt = 0;
+      for (let y = half; y < dh - half; y++) for (let x = half; x < dw - half; x++) {
+        let r = 0;
+        for (let ky = -half; ky <= half; ky++) for (let kx = -half; kx <= half; kx++) {
+          r += (luma[(y + ky) * dw + (x + kx)] - mean) * kernel[(ky + half) * GABOR_KERNEL + (kx + half)];
+        }
+        acc += Math.abs(r); cnt++;
+      }
+      signature.push({ wavelength, orientation_deg: orientationDeg, energy: round(acc / cnt / std / GABOR_KERNEL, 4) });
+    }
+  }
+  const peak = signature.reduce((a, b) => (b.energy > a.energy ? b : a));
+  return { signature, peak: { wavelength: peak.wavelength, orientation_deg: peak.orientation_deg } };
+}
+
+export interface GlcmResult {
+  contrast: number;     // Haralick contrast (gray-level distance²)
+  correlation: number;  // -1..1
+  energy: number;       // 0..1 (angular second moment)
+  homogeneity: number;  // 0..1
+  entropy: number;      // bits
+}
+
+const GLCM_LEVELS = 16;
+
+export function glcmFeatures(lumaIn: number[], w: number, h: number): GlcmResult | null {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 2 || h < 2 || w * h > MAX_PIXELS) return null;
+  const luma = normalizeLuma(lumaIn, w * h);
+  if (!luma) return null;
+  const q = luma.map((v) => Math.min(GLCM_LEVELS - 1, Math.floor((v / 256) * GLCM_LEVELS)));
+  const glcm = new Array(GLCM_LEVELS * GLCM_LEVELS).fill(0);
+  let total = 0;
+  // Symmetric co-occurrence at distance 1, all four directions.
+  const OFFSETS = [[1, 0], [0, 1], [1, 1], [1, -1]];
+  for (const [dx, dy] of OFFSETS) {
+    for (let y = Math.max(0, -dy); y < h - Math.max(0, dy); y++) {
+      for (let x = 0; x < w - dx; x++) {
+        const a = q[y * w + x], b = q[(y + dy) * w + (x + dx)];
+        glcm[a * GLCM_LEVELS + b]++; glcm[b * GLCM_LEVELS + a]++;
+        total += 2;
+      }
+    }
+  }
+  if (!total) return null;
+  let contrast = 0, energy = 0, homogeneity = 0, entropy = 0;
+  let meanI = 0;
+  for (let i = 0; i < GLCM_LEVELS; i++) for (let j = 0; j < GLCM_LEVELS; j++) {
+    const p = glcm[i * GLCM_LEVELS + j] / total;
+    if (p <= 0) continue;
+    contrast += p * (i - j) * (i - j);
+    energy += p * p;
+    homogeneity += p / (1 + Math.abs(i - j));
+    entropy -= p * Math.log2(p);
+    meanI += i * p;
+  }
+  let varI = 0;
+  for (let i = 0; i < GLCM_LEVELS; i++) for (let j = 0; j < GLCM_LEVELS; j++) {
+    const p = glcm[i * GLCM_LEVELS + j] / total;
+    varI += p * (i - meanI) * (i - meanI);
+  }
+  let correlation = 0;
+  if (varI > 1e-12) {
+    for (let i = 0; i < GLCM_LEVELS; i++) for (let j = 0; j < GLCM_LEVELS; j++) {
+      const p = glcm[i * GLCM_LEVELS + j] / total;
+      correlation += p * (i - meanI) * (j - meanI);
+    }
+    correlation /= varI;
+  } else {
+    correlation = 1; // a flat image co-occurs with itself perfectly
+  }
+  return {
+    contrast: round(contrast, 4), correlation: round(Math.max(-1, Math.min(1, correlation)), 4),
+    energy: round(energy, 4), homogeneity: round(homogeneity, 4), entropy: round(entropy, 4),
+  };
+}
+
 // ── the palette ripper (pure) ─────────────────────────────────────────────
 
 export interface PaletteResult {
@@ -221,6 +388,7 @@ export interface ResynthSpec {
   vfreq?: number;       // cycles down the height   (from rhythm.vertical)
   colors?: string[];    // hex ramp, dark→light; default void black → gold
   balance?: number;     // 0..1 mix between the two gratings (default 0.5)
+  angle_deg?: number;   // rotate the whole weave (from the structure tensor)
 }
 
 export function resynthImage(spec: ResynthSpec = {}): Uint8Array {
@@ -228,6 +396,8 @@ export function resynthImage(spec: ResynthSpec = {}): Uint8Array {
   const hfreq = clampNum(spec.hfreq, 0, size / 2, 3);
   const vfreq = clampNum(spec.vfreq, 0, size / 2, 2);
   const mix = clampNum(spec.balance, 0, 1, 0.5);
+  const angle = (clampNum(spec.angle_deg, -180, 180, 0) * Math.PI) / 180;
+  const cosA = Math.cos(angle), sinA = Math.sin(angle);
   const ramp = (spec.colors && spec.colors.length ? spec.colors : ['#0f0f1a', '#C9A84C'])
     .map(parseHex).filter((c): c is [number, number, number] => !!c);
   if (!ramp.length) ramp.push([15, 15, 26], [201, 168, 76]);
@@ -238,8 +408,12 @@ export function resynthImage(spec: ResynthSpec = {}): Uint8Array {
     const row = y * (size * 3 + 1);
     raw[row] = 0; // PNG filter: none
     for (let x = 0; x < size; x++) {
-      const hWave = 0.5 + 0.5 * Math.sin((2 * Math.PI * hfreq * x) / size);
-      const vWave = 0.5 + 0.5 * Math.sin((2 * Math.PI * vfreq * y) / size);
+      // rotate coordinates about the center so the tensor's angle carries in
+      const cx = x - size / 2, cy = y - size / 2;
+      const xr = cx * cosA + cy * sinA + size / 2;
+      const yr = -cx * sinA + cy * cosA + size / 2;
+      const hWave = 0.5 + 0.5 * Math.sin((2 * Math.PI * hfreq * xr) / size);
+      const vWave = 0.5 + 0.5 * Math.sin((2 * Math.PI * vfreq * yr) / size);
       const t = (1 - mix) * hWave + mix * vWave;
       // interpolate along the ramp
       const pos = t * (ramp.length - 1);
@@ -337,13 +511,14 @@ function round(x: number, p: number): number {
 // ── the vFAR router ───────────────────────────────────────────────────────
 
 export interface VfarInput {
-  mode?: 'rip' | 'resynth' | 'generate' | 'auto';
+  mode?: 'rip' | 'resynth' | 'generate' | 'describe' | 'auto';
   luma?: number[];      // grayscale pixels, row-major (0..1 or 0..255)
   rgb?: number[];       // interleaved r,g,b — enables the palette ripper
   width?: number;
   height?: number;
-  prompt?: string;      // for generate
+  prompt?: string;      // for generate; optional question for describe
   spec?: ResynthSpec;   // for resynth (or omit and it uses the last rip's numbers you pass back)
+  image_path?: string;  // for describe: a stored /vfar/... artifact path
   interpret?: boolean;  // default true: LLM reading over the rip numbers
   context?: string;     // what the caller is looking at / for
 }
@@ -374,6 +549,14 @@ export async function vfarRoute(env: Env, input: VfarInput): Promise<string> {
       if (!field || !rhythm) return JSON.stringify({ mode, error: `vfar rip: need luma[] of exactly width*height finite values, 2≤side, ≤${MAX_PIXELS} px. The eyes downsample before sending.` });
       report.field = field;
       report.rhythm = rhythm;
+      // The specialists' instruments (see the texture rippers above) ride
+      // every rip; each is best-effort on degenerate sizes.
+      const tensor = structureTensor(input.luma ?? [], w, h);
+      if (tensor) report.tensor = tensor;
+      const gabor = gaborSignature(input.luma ?? [], w, h);
+      if (gabor) report.gabor = gabor;
+      const glcm = glcmFeatures(input.luma ?? [], w, h);
+      if (glcm) report.glcm = glcm;
       if (input.rgb?.length) report.palette = analyzePalette(input.rgb, w, h);
       // Hand back the inverse: the spec that resynth would use to make this
       // structure visible again. Rip → resynth is one round trip.
@@ -381,7 +564,25 @@ export async function vfarRoute(env: Env, input: VfarInput): Promise<string> {
         hfreq: rhythm.horizontal.dominant[0] ? round(rhythm.horizontal.dominant[0].freq * w, 2) : 0,
         vfreq: rhythm.vertical.dominant[0] ? round(rhythm.vertical.dominant[0].freq * h, 2) : 0,
         colors: (report.palette as PaletteResult | undefined)?.colors?.slice(0, 3).map((c) => c.hex),
+        // the weave leans the way the tensor says the edges run
+        angle_deg: tensor && tensor.coherence > 0.3 ? round(tensor.orientation_deg % 90, 1) : 0,
       } satisfies ResynthSpec;
+    } else if (mode === 'describe') {
+      // The content layer — llava-hf/llava-1.5-7b-hf (Hugging Face lineage,
+      // mirrored on Workers AI). The rip sees structure; this sees THINGS.
+      // Only works on artifacts she already holds in R2 (/vfar/…), so the
+      // consent boundary stays: no fetching arbitrary outside images.
+      const path = String(input.image_path || '').trim();
+      if (!/^\/vfar\/[0-9a-f]{32}\.(png|jpg)$/.test(path)) return JSON.stringify({ mode, error: 'vfar describe: image_path must be a stored /vfar/<id>.png|jpg artifact' });
+      const obj = await env.DOCUMENTS.get(path.slice(1));
+      if (!obj) return JSON.stringify({ mode, error: `vfar describe: no artifact at ${path}` });
+      const bytes = new Uint8Array(await obj.arrayBuffer());
+      const out = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf' as Parameters<Env['AI']['run']>[0], {
+        image: Array.from(bytes),
+        prompt: String(input.prompt || 'Describe this image precisely: what is depicted, its composition, and anything notable.').slice(0, 500),
+        max_tokens: 384,
+      }) as { description?: string };
+      return JSON.stringify({ mode, image: path, description: String(out?.description || '').trim() || '(the vision model returned nothing)' });
     } else if (mode === 'resynth') {
       const png = resynthImage(input.spec ?? {});
       const path = await storeArtifact(env, png, 'image/png', 'png');
@@ -403,7 +604,7 @@ export async function vfarRoute(env: Env, input: VfarInput): Promise<string> {
   // stands on its own if synthesis is unreachable.
   if (mode === 'rip' && input.interpret !== false) {
     try {
-      const facts = JSON.stringify({ field: report.field, rhythm: report.rhythm, palette: report.palette ?? null });
+      const facts = JSON.stringify({ field: report.field, rhythm: report.rhythm, tensor: report.tensor ?? null, gabor: report.gabor ?? null, glcm: report.glcm ?? null, palette: report.palette ?? null });
       const ctx = input.context ? `\nCaller context: ${String(input.context).slice(0, 400)}` : '';
       const r = await callLLM('reasoning', SYNTH_SYSTEM, [{ role: 'user', content: `Ripper output:\n${facts}${ctx}` }], 300, env);
       report.reading = String(r.content).trim();
@@ -415,6 +616,7 @@ export async function vfarRoute(env: Env, input: VfarInput): Promise<string> {
 
 function inferMode(input: VfarInput): VfarInput['mode'] | null {
   if (input.luma && input.luma.length) return 'rip';
+  if (input.image_path) return 'describe';
   if (input.prompt && input.prompt.trim()) return 'generate';
   if (input.spec) return 'resynth';
   return null;
