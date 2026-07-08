@@ -90,8 +90,12 @@ export async function ensureOnce<T>(
   return { replayed: false, result };
 }
 
-export function orderKey(action: string, symbol: string, qty: number): string {
-  return `trade:${String(action).toLowerCase()}:${String(symbol).toUpperCase().trim()}:${Math.floor(Number(qty) || 0)}`;
+// `extra` distinguishes option orders that would otherwise collide: two
+// different puts on the same underlying, same action/qty, would share a key
+// without it (e.g. a $150 put and a $160 put both "trade:buy:AAPL:1").
+export function orderKey(action: string, symbol: string, qty: number, extra?: string): string {
+  const base = `trade:${String(action).toLowerCase()}:${String(symbol).toUpperCase().trim()}:${Math.floor(Number(qty) || 0)}`;
+  return extra ? `${base}:${extra}` : base;
 }
 
 export function ingestKey(title: string): string {

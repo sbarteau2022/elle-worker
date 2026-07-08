@@ -18,7 +18,7 @@ import {
   handleCohort, handleReplays, bootstrapLawSchema,
   type LawEnv,
 } from './law';
-import { runTradingCycle, runDailyJournal, marketOpen } from './trading';
+import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
@@ -743,11 +743,18 @@ async function handleResearch(body: Record<string, unknown>, env: Env): Promise<
 // positions, recent trades (with her reasoning), active theses, and her own
 // trading journal. Read-only; admin-gated in the fetch handler.
 async function handleTradingView(env: Env): Promise<Response> {
+  // The options/shorting columns are added by the trading cron on its own
+  // schedule (ensureTradingExtSchema) — but the workbench can be opened
+  // before that has ever run, and a SELECT naming a column that doesn't
+  // exist yet fails the WHOLE query (not just those fields), which would
+  // regress trades to "nothing shown" instead of "shown minus new fields".
+  // Idempotent and cheap; safe to call from the read path too.
+  await ensureTradingExtSchema(env);
   const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
   const [account, positions, trades, theses, journal, observations] = await Promise.all([
     grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
     grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
-    grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
+    grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at, asset_class, option_right, strike_price, expiration_date, underlying_symbol, attribution FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT thesis_type, title, thesis, confidence, updated_at FROM elle_market_thesis WHERE is_active = 1 ORDER BY confidence DESC LIMIT 8').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT * FROM elle_trading_journal ORDER BY journal_date DESC LIMIT 14').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT observation_type, symbol, observation, created_at FROM elle_market_observations ORDER BY created_at DESC LIMIT 20').all().then(r => r.results)),

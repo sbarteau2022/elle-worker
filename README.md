@@ -209,7 +209,19 @@ than the world:
   that can mint a page).
 
 **Writes / sensitive** — `ingest_paper` (gated, see below), `trigger_dream`,
-`trade_execute` (Alpaca; idempotent within 90s).
+`trade_execute` (Alpaca; idempotent within 90s). Equities: buy/sell/close,
+where a `sell` on a symbol with no long position opens a **short** (Alpaca's
+own semantics — not a separate action) and `close` exits whatever's actually
+open, long or short, on the right side either way. Options: pass
+`asset_class:"option"` + `option_right` + `strike` (a target — the nearest
+really-listed contract is resolved via `src/alpaca-options.ts`, no OCC symbol
+needed) + `expiration`; buying or selling/writing either, no hard cap — the
+same reasoning-is-the-gate model as the rest of the trading desk, so a naked
+short leg is a judgment call she has to name explicitly, not something the
+code blocks. Every closed position (equity or option, long or short) gets a
+post-close **attribution** pass — a grounded research call comparing the
+original reasoning/catalyst against what actually happened, stored on the
+trade and shown on the workbench's trading tab.
 
 ---
 
@@ -465,7 +477,8 @@ to Elle by construction. `main` auto-deploys via
 | `consolidate.ts` | nightly memory consolidation (memories→skills→scars) |
 | `mirror.ts` | /api/elle-self — one snapshot of the reflexive organs |
 | `libre.ts` | dream/libre autonomous production |
-| `trading.ts` | Alpaca cycle + daily journal |
+| `trading.ts` | Alpaca cycle + daily journal + post-close attribution |
+| `alpaca-options.ts` | resolves human option terms (underlying/right/strike/expiration) to a real OCC contract |
 | `kappa-*.ts` | coherence measure + derivatives |
 | `law.ts` | law bench (duel/tutor/doctrine/cohort/replays) |
 | `madmind.ts` / `diagnose.ts` / `research.ts` / `widget.ts` | submissions, diagnostics, research cron, embeddable widget |
