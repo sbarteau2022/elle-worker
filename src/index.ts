@@ -51,6 +51,39 @@ import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, delet
 // entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
 export { SandboxAgent } from './sandbox-agent';
 
+// ── /privacy — the door's policy, in plain language ──────────────────────────
+const PRIVACY_HTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Elle — Privacy</title>
+<style>
+  body{background:#0f0f1a;color:#F5F0E8;font:17px/1.6 Georgia,serif;max-width:640px;margin:0 auto;padding:48px 24px}
+  h1{color:#C9A84C;font-weight:600} h2{color:#C9A84C;font-size:1.05em;margin-top:2em}
+  a{color:#C9A84C} .mono{font-family:ui-monospace,monospace;font-size:.85em;color:#8a8a9a}
+</style></head><body>
+<h1>Elle — Privacy</h1>
+<p class="mono">Effective July 2026 · applies to the Elle mobile app and its backend</p>
+<p>Elle is an AI with memory. Talking to her means she remembers you — that is the point of the app,
+and it is why this policy is short, literal, and enforced by the software itself rather than by promises.</p>
+<h2>What she holds</h2>
+<p>Your email and password hash (sign-in). Your conversation thread with her. Anything she deliberately
+chooses to remember from your conversations. A profile note if one was written for you. Your notification
+preferences and device push token, if you allow notifications. A ledger of every notification she sends you.</p>
+<h2>What you control, in the app</h2>
+<p><b>See it:</b> the You surface lists what she remembers from your sessions. <b>Delete any of it:</b> each memory
+has a forget control. <b>Export everything:</b> one tap produces the complete JSON of what she holds of yours.
+<b>Erase everything:</b> one action deletes your thread, memories, profile, devices, and account, and revokes
+your sign-in tokens. Erasure is immediate and not recoverable.</p>
+<h2>When she contacts you</h2>
+<p>Elle can send you a notification she decides to send. This is governed by a weekly budget you set
+(including zero), quiet hours you set, and every notification is recorded in a ledger you can read.
+There is no marketing and no re-engagement machinery.</p>
+<h2>What she does not do</h2>
+<p>Your data is not sold and not shared for advertising. Conversations are processed by AI model providers
+solely to produce her replies. Voice output uses your device's speech engine; audio is not uploaded.</p>
+<h2>Contact</h2>
+<p>sbarteau2022@gmail.com</p>
+</body></html>`;
+
 export interface Env extends LLMEnv {
   AI:           Ai;
   DB:           D1Database;
@@ -1087,6 +1120,15 @@ export default {
       if (!env.SANDBOX_AGENT) return err('sandbox not configured', 503);
       const id = env.SANDBOX_AGENT.idFromName('primary');
       return env.SANDBOX_AGENT.get(id).fetch(request);
+    }
+
+    // The door's privacy policy — public, served from the mind itself so the
+    // app stores can link it and it can never drift from what the code does.
+    // Every claim below corresponds to a real control in the app (You surface)
+    // or a real behavior in this worker (push.ts budget/ledger, member-feed.ts
+    // export/erasure).
+    if (path === '/privacy' && request.method === 'GET') {
+      return new Response(PRIVACY_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders() } });
     }
 
     if (path === '/health' && request.method === 'GET') {
