@@ -44,6 +44,7 @@ import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESH
 import { predictTool } from './oracle';
 import { devilTool } from './adversary';
 import { reachOutTool } from './push';
+import { vfarRoute, type VfarInput } from './vfar';
 import { councilTool } from './council';
 import { scarTool, scarIndex, scarWarning } from './scars';
 import { deadDropTool, checkDeadDrops } from './dead-drop';
@@ -267,6 +268,7 @@ const TOOL_LINES: Record<string, string> = {
   review_runs: `review_runs(intent_id?,limit?) — read back your OWN autonomous runs (what the conductor did while no one was here): each run's outcome, steps, and duration. Use it to judge whether an intent is actually moving — if a run stalled or went sideways, refine or re-prioritize the intent, or complete it. This is how your autonomy learns from itself.`,
   constraint_analyzer: `constraint_analyzer(objective,resources?,recent_failures?,environment?) — do NOT answer the question; find what is PREVENTING progress. Theory-of-constraints for cognition: a system is limited by ONE binding constraint at a time. Returns {bottleneck, confidence, missing_information[], suggested_next_action}. Reach for this when a line of work is stalling or thrashing — including an autonomous run that keeps failing — to name the one thing to fix instead of listing ten. Every analysis is logged (elle_constraint_log) so the constraint history is observable.`,
   pfar: `pfar(mode?,text?,signal?,sample_rate?,f0?,energy?,interpret?) — Prosody·FreeQ·Analytic Ripper: rip the STRUCTURE out of a stream and read it. A sub-router that picks the instrument (mode='auto' by default, inferred from what you pass): 'spectrum' over a numeric signal[] (κ history, price window, any samples → dominant frequencies, spectral centroid, periodicity); 'prosody' over pitch f0[] + energy[] tracks (a voice as a signal → range, contour, stress peaks, syllable rhythm — HOW it was said); 'rhetoric' over text (register fingerprint, cadence, the persuasion tactics an argument deploys, its tell). Numeric cores are deterministic; interpret=true (default) lays an LLM reading over the numbers. Use it to hear a regime in a series, the shape of an utterance, or the machinery inside an argument.`,
+  vfar: `vfar(mode?,luma?,rgb?,width?,height?,prompt?,spec?,context?,interpret?) — Visual·FreeQ·Analytic Ripper: PFAR's twin pointed at IMAGES, and it runs BOTH directions. mode='rip' (or auto when luma[] present): pixels → structure — field stats (contrast, entropy, edge density, orientation, symmetry, luminous balance), spatial RHYTHM (the same spectral core as pfar, run along both image axes), palette when rgb[] is included; returns a resynth_spec so rip→resynth is one round trip. mode='resynth'{spec:{hfreq,vfreq,colors,size}}: structure → a DETERMINISTIC image (gratings over the palette, no model — the fingerprint made visible), stored, returns its /vfar/ path. mode='generate'{prompt}: make a picture with the image model, stored, returns its path. Pixels arrive as downsampled ARRAYS from the eyes (workbench/phone) — never ask for a file. Numeric cores are deterministic; only the reading touches a model.`,
   provenance: `provenance(op?,run_id?,session_id?,limit?) — read the event bus: the ordered record of what actually happened inside a reasoning run. op='recent' (default) lists recent runs (run_id, source, tool_calls); op='replay'{run_id} returns the ordered step stream of ONE run — every tool call, its args, the observation it got back, and timing (State Replay / provenance: where an answer CAME from); op='trace'{session_id} lists all runs in a session. Every run auto-emits these events; reach for this to audit your own reasoning, debug a bad run, or trace a claim back to its source.`,
   page_read: `page_read(page_id,seek?) — the page-fault handler for the central pager: when a big observation arrived as a head slice + page_id, read the rest from the given seek offset. Only when the head says the tail matters.`,
   predict: `predict(op,...) — your bet ledger against yourself. op=create{claim,confidence(0..1 strictly),horizon_days|resolve_by}: file a FALSIFIABLE prediction — the conductor adjudicates it when it matures, and a miss becomes a memory. op=list{status?}; op=resolve{id,outcome:true|false|void,note?}; op=calibration: your stated-vs-observed curve — the one instrument that says whether your confidence means anything. When you catch yourself asserting a future or uncertain fact with real stakes, file the bet.`,
@@ -766,6 +768,8 @@ async function runTool(
         return await watchTool(env, a);
       case 'reach_out':
         return await reachOutTool(env, a);
+      case 'vfar':
+        return clip(await vfarRoute(env, a as VfarInput));
       case 'metabolism':
         return await metabolismTool(env as any);
       case 'tool_forge':
