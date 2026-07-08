@@ -1122,6 +1122,21 @@ export default {
       return env.SANDBOX_AGENT.get(id).fetch(request);
     }
 
+    // vFAR artifacts — images she resynthesized or generated, straight from
+    // R2. Public: the ids are unguessable UUIDs and the artifacts are hers.
+    if (path.startsWith('/vfar/') && request.method === 'GET') {
+      if (!/^\/vfar\/[0-9a-f]{32}\.(png|jpg)$/.test(path)) return err('Not found', 404);
+      const obj = await env.DOCUMENTS.get(path.slice(1));
+      if (!obj) return err('Not found', 404);
+      return new Response(obj.body, {
+        headers: {
+          'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          ...corsHeaders(),
+        },
+      });
+    }
+
     // The door's privacy policy — public, served from the mind itself so the
     // app stores can link it and it can never drift from what the code does.
     // Every claim below corresponds to a real control in the app (You surface)
