@@ -169,6 +169,29 @@ export async function sandboxRunCode(env: Env, code: string, language: string | 
   return res.path_open === false ? NOT_OPEN : formatExec(res);
 }
 
+// Structured run_code for programmatic callers (the forge loop): returns the
+// raw ExecResult so a caller can judge pass/fail on the exit code instead of
+// parsing formatExec's prose. Same path-open guard and use-report row as
+// sandboxRunCode — this is that function without the string formatting.
+export async function sandboxExecCode(
+  env: Env, code: string, language: string | undefined, ctx: RunCtx, timeoutMs: number = CODE_TIMEOUT_MS,
+): Promise<ExecResult> {
+  if (!sandboxConfigured(env)) return { ok: false, stdout: '', stderr: NOT_CONFIGURED, exit: -1, duration_ms: 0, path_open: false };
+  const lang = language || 'python';
+  const st = await pathOpen(env);
+  if (!st.open) {
+    await record(env, ctx, { kind: 'code', language: lang, code_preview: code.slice(0, PREVIEW), ok: false, path_open: false });
+    return { ok: false, stdout: '', stderr: 'sandbox path not open', exit: -1, duration_ms: 0, path_open: false };
+  }
+  const res = await dispatchExec(env, { id: newId(), mode: 'code', code, language: lang, timeout_ms: timeoutMs });
+  await record(env, ctx, {
+    kind: 'code', language: lang, code_preview: code.slice(0, PREVIEW), exit: res.exit,
+    stdout_preview: (res.stdout || '').slice(0, PREVIEW), stderr_preview: (res.stderr || '').slice(0, PREVIEW),
+    ok: res.ok, path_open: res.path_open !== false, duration_ms: res.duration_ms,
+  });
+  return res;
+}
+
 export async function sandboxRunShell(env: Env, command: string, ctx: RunCtx): Promise<string> {
   if (!sandboxConfigured(env)) return `run_shell: ${NOT_CONFIGURED}`;
   const st = await pathOpen(env);

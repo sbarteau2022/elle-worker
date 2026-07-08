@@ -31,7 +31,8 @@ import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
-import { handleIdeas } from './ideas';
+import { handleIdeas, ideaToForgeSpec } from './ideas';
+import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
 import { handleDuplex } from './duplex';
 import { runVolition } from './volition';
 import { runConsolidation } from './consolidate';
@@ -1314,6 +1315,54 @@ export default {
     // The idea queue — her to-explore cache + the build lane the workbench
     // column renders (queued/scoping/spec/building/testing, PFAR fingerprints).
     if (path === '/api/elle-ideas')        { if (!svc) return err('Unauthorized', 401); return json(await handleIdeas(body as Record<string, unknown>, env, handleIngest)); }
+    // The FORGE — ship a tool into the sandbox and iterate it out, LIVE. The
+    // whole loop (write→check→refine→review→PR) runs here in the turn and, with
+    // stream:true, its frames go out as SSE so the split Forge panel can render
+    // the code + goal runs on the left and the reasoning + review on the right.
+    // Body is either an inline spec {name,description,language,goals[]} or an
+    // {idea_id} — a 70B-proposed bubble carrying its own forge_spec. op:'registry'
+    // returns the forged-tool ledger the panel lists.
+    if (path === '/api/elle-forge') {
+      if (!svc) return err('Unauthorized', 401);
+      const fb = body as { op?: string; idea_id?: string; stream?: boolean; name?: string; description?: string; language?: string; goals?: unknown[]; limit?: number };
+      if (fb.op === 'registry') return json({ tools: await forgeRegistry(env, Number(fb.limit) || 50) });
+
+      // Resolve the spec: an idea bubble's stored forge_spec, or an inline spec.
+      let spec: ForgeSpec | null = null;
+      if (fb.idea_id) {
+        const row = await env.DB.prepare('SELECT * FROM elle_ideas WHERE id = ?').bind(String(fb.idea_id)).first();
+        spec = row ? ideaToForgeSpec(row as never) : null;
+        if (!spec) return err('that bubble has no forge-ready spec (no acceptance goals) — have the 70B ideate/spec it first', 400);
+      } else {
+        const candidate = { name: fb.name, description: fb.description, language: fb.language, goals: fb.goals } as Partial<ForgeSpec>;
+        const bad = validateForgeSpec(candidate);
+        if (bad) return err(`forge spec rejected: ${bad}`, 400);
+        spec = candidate as ForgeSpec;
+      }
+
+      const forgeUser = await getUser(request, env);
+      const runOpts = { userId: forgeUser?.id || 'superadmin', sessionId: (fb as { session_id?: string }).session_id || null };
+
+      if (fb.stream) {
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const enc = new TextEncoder();
+        const send = (event: string, data: unknown) =>
+          writer.write(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)).catch(() => {});
+        ctx.waitUntil((async () => {
+          try {
+            const out = await runForge(env, spec!, { ...runOpts, onEvent: (ev) => { void send(ev.kind, ev); } });
+            await send('done', out);
+          } catch (e) {
+            await send('forge_error', { message: (e as Error).message || 'forge failed' });
+          } finally {
+            try { await writer.close(); } catch { /* already closed */ }
+          }
+        })());
+        return new Response(readable, { status: 200, headers: { ...corsHeaders(), 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } });
+      }
+      return json(await runForge(env, spec, runOpts));
+    }
     // The duplex channel — the sovereign 7B (local, continuous, free) and the
     // cloud (heavy inference + meta-observer) talking on one immutable,
     // append-only master ledger. The local agent authenticates with the SAME

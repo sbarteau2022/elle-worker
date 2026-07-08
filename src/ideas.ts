@@ -33,8 +33,9 @@
 // ============================================================
 
 import type { Env } from './index';
-import { intentTool } from './conductor';
 import { pfarRoute } from './pfar';
+import { ideateTools } from './forge-ideate';
+import { runForge, validateForgeSpec, type ForgeSpec } from './forge-loop';
 
 export type IdeaStatus =
   | 'pondering' | 'queued' | 'scoping' | 'spec'
@@ -51,7 +52,12 @@ const TRANSITIONS: Record<string, { from: IdeaStatus[]; to: IdeaStatus }> = {
   queue:   { from: ['pondering'], to: 'queued' },
   select:  { from: ['queued'], to: 'scoping' },
   spec:    { from: ['scoping'], to: 'spec' },
-  build:   { from: ['spec'], to: 'building' },
+  // forge (a.k.a. build) ships the bubble straight to the sandbox forge loop.
+  // Allowed from any stage where a forge_spec can exist — a 70B-proposed
+  // bubble lands at 'scoping' already ship-ready, so it need not walk to 'spec'
+  // first. Re-shipping a build (retry) is allowed too.
+  forge:   { from: ['queued', 'scoping', 'spec', 'building'], to: 'building' },
+  build:   { from: ['queued', 'scoping', 'spec', 'building'], to: 'building' },
   extend:  { from: ['building'], to: 'building' },
   test:    { from: ['building'], to: 'testing' },
   verdict: { from: ['testing'], to: 'held' }, // or 'killed' by outcome
@@ -114,6 +120,10 @@ export async function ensureIdeasSchema(env: Env): Promise<void> {
       id TEXT PRIMARY KEY, idea_id TEXT, stage TEXT, note TEXT, created_at INTEGER)`),
     env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_idea_log ON elle_idea_log(idea_id, created_at DESC)`),
   ]);
+  // forge_spec (JSON ForgeSpec) rides the row when the 70B proposes a bubble
+  // that's already forge-ready — name, language, and acceptance goals — so
+  // "ship to the sandbox" needs no further authoring. Idempotent add.
+  await env.DB.prepare(`ALTER TABLE elle_ideas ADD COLUMN forge_spec TEXT`).run().catch(() => {});
   schemaReady = true;
 }
 
@@ -130,7 +140,21 @@ interface IdeaRow {
   status: IdeaStatus; plan: string | null; clones: string; refs: string;
   spec_paper_id: string | null; intent_id: string | null; extend_count: number;
   verdict: string | null; pfar: string | null; source: string;
+  forge_spec: string | null;
   created_at: number; updated_at: number;
+}
+
+// A bubble ships to the sandbox from its stored forge_spec (the 70B attached
+// one when it proposed the tool). Falls back to composing a spec from the
+// summary + plan bullets for a hand-filed idea that never got a 70B pass.
+export function ideaToForgeSpec(idea: IdeaRow): ForgeSpec | null {
+  if (idea.forge_spec) {
+    try {
+      const spec = JSON.parse(idea.forge_spec) as ForgeSpec;
+      if (!validateForgeSpec(spec)) return spec;
+    } catch { /* fall through to composition */ }
+  }
+  return null; // no forge-ready spec — the caller tells her to have it ideated/spec'd first
 }
 
 async function getIdea(env: Env, id: string): Promise<IdeaRow | null> {
@@ -183,6 +207,21 @@ export async function ideaTool(
     ).run();
     await logStage(env, id, 'pondering', 'filed to the to-explore cache');
     return JSON.stringify({ id, status: 'pondering', note: 'in the cache — queue it when it is worth sandbox time' });
+  }
+
+  // The 70B proposes novel tooling grounded in her codebase + goals and files
+  // each as a ship-ready bubble. This is how she stops needing Stewart to hand
+  // her every idea. Returns the bubbles it added.
+  if (op === 'ideate') {
+    const count = a.count != null ? Number(a.count) : 4;
+    const focus = a.focus ? String(a.focus) : undefined;
+    const { proposals, idea_ids } = await ideateTools(env, { count, focus });
+    if (!idea_ids.length) return 'ideate: the model returned no forge-ready proposals this round — try again or narrow the focus';
+    return JSON.stringify({
+      added: idea_ids.length,
+      bubbles: proposals.slice(0, idea_ids.length).map((p, i) => ({ id: idea_ids[i], name: p.name, goals: p.goals.length })),
+      note: 'filed to the idea column at scoping, each with acceptance goals — op=forge{id} ships one to the sandbox',
+    });
   }
 
   if (op === 'list') {
@@ -288,25 +327,37 @@ export async function ideaTool(
     return JSON.stringify({ id, status: 'spec', spec_paper_id: paperId || null, note: 'spec saved and queryable. op=build files the conductor intent.' });
   }
 
-  if (op === 'build') {
-    // File the standing work: the conductor picks it up on its tick and runs
-    // the full-scope loop — sandbox first, forge if it earns shipping.
-    const goal =
-      `Build idea ${id} ("${idea.title}") from scratch in the sandbox, against its spec` +
-      (idea.spec_paper_id ? ` (corpus paper ${idea.spec_paper_id})` : '') +
-      `. Iterate until it runs (run_code/run_shell), then EXTEND it at most ${MAX_EXTENDS} times ` +
-      `(record each with idea op=extend id=${id} — a third is refused). Then pressure-test it and file the report with ` +
-      `idea op=test id=${id}. Done looks like: a working build, a test report, and a verdict.`;
-    const res = await intentTool(env, {
-      op: 'create', title: `build: ${idea.title}`.slice(0, 200), goal,
-      priority: 7, status: 'active', source: 'stewart',
+  if (op === 'build' || op === 'forge') {
+    // Ship the bubble to the sandbox forge loop — LIVE, in this call. No
+    // conductor, no clock, no drift: write→check→refine→review→PR, right now.
+    // (The streamed split-panel version rides /api/elle-forge; this tool path
+    // runs it un-streamed and returns the outcome so she can forge in a
+    // conversation too.)
+    const spec = ideaToForgeSpec(idea);
+    if (!spec) {
+      return `idea forge: "${idea.title}" has no forge-ready spec yet — it needs acceptance goals. ` +
+        `Have the 70B propose them (idea op=ideate) or attach a spec, then forge. A tool without goals can't converge in the sandbox.`;
+    }
+    await setIdea(env, id, { status: 'building' });
+    await logStage(env, id, 'building', `shipped to the sandbox forge loop (${spec.goals.length} goal(s))`);
+    const result = await runForge(env, spec, { userId: ctx.userId, sessionId: ctx.sessionId ?? null });
+    // Reflect the forge outcome back onto the bubble.
+    if (result.status === 'pr_open' || result.status === 'approved') {
+      await setIdea(env, id, { status: 'testing', pfar: JSON.stringify({ forge: { status: result.status, pr_number: result.pr_number ?? null, iterations: result.iterations } }) });
+      await logStage(env, id, 'testing', `forge ${result.status}${result.pr_number ? ` — PR #${result.pr_number}` : ''} after ${result.iterations} iteration(s)`);
+    } else {
+      await logStage(env, id, 'building', `forge ${result.status} after ${result.iterations} iteration(s) — did not ship`);
+    }
+    return JSON.stringify({
+      id, forge_status: result.status, iterations: result.iterations,
+      pr_number: result.pr_number ?? null, pr_url: result.pr_url ?? null,
+      review_notes: result.review_notes ?? null,
+      note: result.status === 'pr_open'
+        ? `forged and PR #${result.pr_number} opened — merge on GitHub to deploy it globally on Cloudflare`
+        : result.status === 'failed'
+          ? 'the goals did not all pass in the sandbox — refine the goals or the concept and re-forge'
+          : `forge ended ${result.status}`,
     });
-    let intentId: string | null = null;
-    try { intentId = String((JSON.parse(res) as { id?: string }).id || '') || null; } catch { /* refusal text */ }
-    if (!intentId) return `idea build: intent refused — ${res}`;
-    await setIdea(env, id, { status: 'building', intent_id: intentId });
-    await logStage(env, id, 'building', `intent ${intentId} filed active — the conductor builds on its tick`);
-    return JSON.stringify({ id, status: 'building', intent_id: intentId, note: 'the conductor will build it; watch with review_runs / the workbench column' });
   }
 
   if (op === 'extend') {
@@ -343,13 +394,10 @@ export async function ideaTool(
     const note = String(a.note || '').slice(0, 1000);
     await setIdea(env, id, { status: outcome, verdict: `${outcome}${note ? `: ${note}` : ''}` });
     await logStage(env, id, outcome, note || (outcome === 'held' ? 'survived the pressure test' : 'broke under pressure'));
-    if (idea.intent_id) {
-      await intentTool(env, { op: 'complete', id: idea.intent_id }).catch(() => {});
-    }
     return `idea "${idea.title}" ${outcome}${note ? ` — ${note}` : ''}.${outcome === 'held' ? ' It earned the write.' : ''}`;
   }
 
-  return `idea: unknown op '${op}' (add|list|get|queue|select|spec|build|extend|test|verdict|kill)`;
+  return `idea: unknown op '${op}' (add|list|get|ideate|queue|select|spec|forge|build|extend|test|verdict|kill)`;
 }
 
 // ── the workbench endpoint (/api/elle-ideas) ────────────────
@@ -370,12 +418,13 @@ export async function handleIdeas(
          updated_at DESC LIMIT 60`,
     ).all();
     const ideas = ((rows.results || []) as unknown as IdeaRow[]).map(r => {
-      let plan = null, clones = [], refs = [], pfar = null;
+      let plan = null, clones = [], refs = [], pfar = null, forge_spec = null;
       try { plan = r.plan ? JSON.parse(r.plan) : null; } catch { /* raw */ }
       try { clones = r.clones ? JSON.parse(r.clones) : []; } catch { /* raw */ }
       try { refs = r.refs ? JSON.parse(r.refs) : []; } catch { /* raw */ }
       try { pfar = r.pfar ? JSON.parse(r.pfar) : null; } catch { /* raw */ }
-      return { ...r, plan, clones, refs, pfar };
+      try { forge_spec = r.forge_spec ? JSON.parse(r.forge_spec) : null; } catch { /* raw */ }
+      return { ...r, plan, clones, refs, pfar, forge_spec };
     });
     const logs = await env.DB.prepare(
       `SELECT idea_id, stage, note, created_at FROM elle_idea_log
