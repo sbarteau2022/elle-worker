@@ -3,9 +3,11 @@
 //
 // Uploaded code snippets (the Deep-Mind code tab) are analysed for
 // vulnerabilities, exploit primitives, leaked secrets, and pentest-relevant
-// sinks BEFORE anything is run. The intended home for dynamic analysis is the
-// contained sandbox — but that container is dormant (env.SANDBOX undefined; see
-// sandbox-tools.ts), so the safe move is STATIC analysis: we never execute the
+// sinks BEFORE anything is run. The connect-back sandbox (sandbox-agent.ts /
+// connect-sandbox.ts) DOES exist now, but it executes on the operator's real
+// laptop, not an isolated container — running arbitrary UNTRUSTED uploads
+// through it would be dynamic analysis at the cost of real RCE on Stewart's
+// machine. So the safe move stays STATIC analysis: we never execute the
 // code, we read it. Not running untrusted code beats sandboxing it.
 //
 //   scanCode(code, lang)  — deterministic, pure, unit-tested. Pattern detectors
@@ -159,7 +161,7 @@ export async function analyzeCode(code: string, language: string | undefined, en
     review,
     reviewed,
     executed: false,
-    containment: 'static analysis — code was not executed (sandbox container dormant; env.SANDBOX unset)',
+    containment: 'static analysis — code was not executed (by design: the connect-back sandbox runs on the operator\'s real machine, not an isolated container, so untrusted uploads are never dispatched to it)',
     lines,
   };
 }

@@ -91,8 +91,16 @@ memories), `scratchpad_read`/`scratchpad_write` (short-TTL working memory).
 **World** — `web_search` (Gemini + grounding), `fetch_url`, `calc`, `diagnose`.
 
 **Real execution** — `run_code` (python/js/ts, real stdout/stderr/exit),
-`run_shell`. _Dormant until a Containers sandbox is reprovisioned; report "not
-configured" otherwise — see `src/sandbox-tools.ts`._
+`run_shell`, `sandbox_clone` (pull a working tree in — laptop or, for a GitHub
+repo, an always-open cloud lane that needs no laptop), `sandbox_status`,
+`sandbox_report`. These are the **connect-back sandbox**: the operator's own
+laptop (the `Elle` workbench) dials a WebSocket UP to a `SandboxAgent` Durable
+Object and holds it open; a tool call POSTs a job down that same socket,
+`child_process` runs it on the real OS, and the result flows back — no
+container image, no Cloudflare Containers entitlement. If the laptop isn't
+connected the tools report "path not open" plainly rather than hanging; run
+`sandbox_status` to check. See **"Getting the sandbox path open"** below, and
+`src/sandbox-agent.ts` + `src/connect-sandbox.ts`.
 
 **Her codebase & the forge** — `repo_read`/`repo_search` (allowlisted repos),
 `github_read_file`/`github_list_files`/`github_search_code` (ANY repo via the
@@ -216,12 +224,81 @@ edited only through the forge.
   Workers AI. A total failure still returns a clean 200 with an error field.
   `sanitizeAnswer()` guarantees no protocol JSON reaches the user.
 - **`src/conductor.ts`** — Elle working **unprompted**. `elle_intents` is a queue
-  of standing goals (Stewart's arrive active; hers arrive as proposals). Every
-  half hour a tick picks ONE piece of work — unfinished **forge tasks first**
-  (red CI → fix; green + no PR → open it), else the top active **intent** — and
-  runs the full-scope loop against it. Each intent runs under a stable session,
-  so its memory + κ series persist: an intent is a thread of her own work with
-  phase state. Every run is recorded (`elle_runs`) and surfaced as a live event.
+  of standing goals (Stewart's arrive active; hers arrive as proposals). Two
+  tick modes: the **hourly `full` tick** picks ONE piece of work — unfinished
+  **forge tasks first** (red CI → fix; green + no PR → open it), else the
+  ready-to-ship queue (finalize), else the top active intent (explore) — and
+  runs the full-scope loop against it; the **10-minute `explore` tick** is a
+  no-op unless the sandbox path is open, and when it is, spends the free
+  sovereign lane exploring active intents faster. Each intent runs under a
+  stable session, so its memory + κ series persist across ticks. Every run is
+  recorded (`elle_runs`) and surfaced as a live event.
+
+---
+
+## Hand off a project — the intent lifecycle (local-first, human-shipped)
+
+This is the workflow for giving Elle a project with goals and letting her
+work it end-to-end, on her own clock, using her real hands:
+
+1. **File the intent.** `intent(op:'create', title, goal)` — the `goal` is the
+   spec: what you want done and what DONE looks like (any goals/instructions/
+   constraints belong here; it must be ≥20 chars — say the real thing). Files
+   from a conversation (yours or hers) land `active` immediately. The
+   workbench's **conductor** panel does the same over `/api/elle-intents`.
+2. **She explores it — local-first, for free.** Every `active` intent's next
+   tick runs with `prefer:'local'`: if the sandbox path is open, the
+   *reasoning* runs on the operator's own Ollama model over the connect-back
+   socket (§ below) while every **tool call still executes exactly the same
+   way** — `sandbox_clone` pulls the project in, `run_shell`/`run_code` build
+   and test it on the real box, `repo_read`/`search_corpus` gather context.
+   Zero hosted-provider quota spent while she's just figuring it out. If the
+   laptop is closed, the exact same loop runs on a hosted model instead —
+   slower to iterate, never blocked.
+3. **She hands off when ready, not before.** Exploration keeps running
+   (one step per tick) until the plan is concrete enough to build from without
+   re-deriving it. Then: `intent(op:'ready', id, draft:'<the spec/plan,
+   concrete>')`. If she's blocked on something only you can decide, she says
+   so plainly instead of guessing — that's your cue to reply in the intent
+   thread or the **duplex channel** (below).
+4. **The heavy engines finalize and ship it up.** A `ready` intent's next tick
+   runs on the full hosted model (no budget game here — this is what they're
+   reserved for): it builds the real change from the draft, `repo_read`
+   anything it needs, `forge_open`/`forge_write`/`forge_check` against an
+   `elle/*` branch, and `forge_pr` when CI is green. That PR is the "send it
+   up." **The merge is always your click** — nothing in this loop can reach
+   `main` on its own.
+5. **Ask each other questions mid-flight.** The **duplex channel**
+   (`src/duplex.ts`, `/api/duplex`) is the standing line between the sovereign
+   (laptop) and cloud selves — an append-only ledger either side can `say` or
+   `observe` on, surfaced live in the workbench's duplex tab. A local
+   exploration run and a cloud finalize run don't have to wait for the next
+   conductor tick to compare notes; they can talk on the record right there.
+
+If a step stalls, `intent(op:'list')` and the workbench's run log
+(`elle_runs`, one row per tick with the full tool trace) show exactly which
+tick got stuck and on what — that trace is the audit trail when "getting it
+started" needs debugging.
+
+### Getting the sandbox path open
+
+The whole local-first lane above is inert until the path between the worker
+and a laptop is actually open. Both sides need the **same** secret:
+
+1. **Worker**: `wrangler secret put SANDBOX_AGENT_KEY` (a long random value —
+   never commit it; see `wrangler.toml`'s `[[durable_objects.bindings]]` for
+   `SANDBOX_AGENT` and confirm migration `v3` (`new_classes: ["SandboxAgent"]`)
+   has actually been deployed).
+2. **Workbench** (`Elle` repo): put the *same* value in a local, gitignored
+   `.env` as `ELLE_SANDBOX_KEY` (copy `.env.example` — it ships only a
+   placeholder on purpose). Launch with `npm run electron:dev`.
+3. **Verify**: the Electron main-process console logs `[sandbox-agent] path
+   open` on connect; the workbench's **sandbox** tab shows path OPEN with the
+   box's host/platform; or ask Elle to run `sandbox_status` from any
+   full-scope conversation.
+4. A closed path fails loud, not silent: every sandbox tool returns "path not
+   open" instead of hanging, and `intent` exploration transparently falls
+   back to a hosted model rather than stalling.
 
 ---
 
@@ -299,7 +376,10 @@ Engine/ops: `/api/elle-code-engine`, `/api/diagnose`, `/api/research`,
 - **R2 `DOCUMENTS`** — full paper text.
 - **KV** — `SESSIONS` (rate limits), `AUTH_TOKENS` (JWT revocation), `SCRATCHPAD`.
 - **`GITHUB_TOKEN`** — powers the forge + `github_*` tools.
-- **`SANDBOX`** — code-execution DO (currently dormant; see sandbox-tools.ts).
+- **`SANDBOX_AGENT`** — the connect-back sandbox's Durable Object (holds the
+  laptop's WebSocket; see `sandbox-agent.ts` + `connect-sandbox.ts`).
+  Gated by the `SANDBOX_AGENT_KEY` secret, which must match the workbench's
+  `ELLE_SANDBOX_KEY`.
 - **`ALPACA_*`** — paper/live trading.
 
 ## GitHub access — the worker token reaches elle-law
@@ -343,7 +423,9 @@ to Elle by construction. `main` auto-deploys via
 | `skills.ts` | self-authored skill library |
 | `mcp.ts` | generic MCP client |
 | `rapid.ts` | native hospitality tools |
-| `sandbox-tools.ts` | real code execution (dormant) |
+| `sandbox-agent.ts` | the `SandboxAgent` DO — holds the laptop's WebSocket, dispatches jobs down it |
+| `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane |
+| `duplex.ts` | the duplex channel — sovereign (laptop) ↔ cloud, append-only ledger, `/api/duplex` |
 | `github-tools.ts` | read any repo via the worker token |
 | `calc.ts` / `scratchpad.ts` | arithmetic / working memory |
 | `journal.ts` | Optimus phase-state manuscript |
