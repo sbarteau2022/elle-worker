@@ -747,7 +747,7 @@ async function handleTradingView(env: Env): Promise<Response> {
   const [account, positions, trades, theses, journal, observations] = await Promise.all([
     grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
     grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
-    grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, confidence, status, created_at, closed_at FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
+    grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT thesis_type, title, thesis, confidence, updated_at FROM elle_market_thesis WHERE is_active = 1 ORDER BY confidence DESC LIMIT 8').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT * FROM elle_trading_journal ORDER BY journal_date DESC LIMIT 14').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT observation_type, symbol, observation, created_at FROM elle_market_observations ORDER BY created_at DESC LIMIT 20').all().then(r => r.results)),
