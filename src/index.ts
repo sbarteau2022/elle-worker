@@ -36,6 +36,7 @@ import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './fo
 import { handleDuplex } from './duplex';
 import { runVolition } from './volition';
 import { runConsolidation } from './consolidate';
+import { handleWarRoom } from './war-room';
 import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
 import { CORPUS_SEEDS } from './corpus-seed';
@@ -1650,6 +1651,7 @@ export default {
     // replacement for the old Supabase `submissions` table). User-gated above.
     if (path === '/api/madmind')
       return handleMadmind(body, env, user.id, user.email);
+    if (path === '/api/elle-war-room')          return handleWarRoom(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-duel-engine')       return handleDuelEngine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-tutor')             return handleTutor(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
