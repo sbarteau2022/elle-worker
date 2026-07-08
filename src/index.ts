@@ -293,6 +293,10 @@ let usersColsReady = false;
 async function ensureUserColumns(env: Env): Promise<void> {
   if (usersColsReady) return;
   await env.DB.prepare('ALTER TABLE users ADD COLUMN must_reset INTEGER DEFAULT 0').run().catch(() => {});
+  // provision/reset/set_password all SET updated_at on a table that never had
+  // the column — an uncaught D1 "no such column" error, surfaced to the caller
+  // as Cloudflare's generic 1101 instead of a real response.
+  await env.DB.prepare('ALTER TABLE users ADD COLUMN updated_at TEXT').run().catch(() => {});
   usersColsReady = true;
 }
 
