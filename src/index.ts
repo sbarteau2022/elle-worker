@@ -46,6 +46,7 @@ import { sseDoor, memberDonePayload } from './stream';
 import { handleArrival } from './arrival';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
+import { audienceAllowed } from './google-auth';
 
 // The connect-back sandbox Durable Object must be exported from the worker
 // entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
@@ -115,6 +116,8 @@ export interface Env extends LLMEnv {
   SANDBOX_AGENT_KEY?: string;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
+  // One client ID, or a comma-separated allowlist (web + iOS client IDs from
+  // the same Google Cloud project) — see src/google-auth.ts.
   GOOGLE_CLIENT_ID?: string;
   ENVIRONMENT:      string;
   // Alpaca — paper trading
@@ -862,8 +865,11 @@ async function handleContact(body: Record<string, unknown>, env: Env): Promise<R
 // ── Fetch handler ─────────────────────────────────────────────
 
 // ── Google OAuth (Sign in with Google) ──────────────────────
-// Verifies a Google ID token (GSI credential) via the tokeninfo endpoint,
-// checks audience against GOOGLE_CLIENT_ID, upserts the user, and mints the
+// Verifies a Google ID token (GSI credential or a native-app idToken) via the
+// tokeninfo endpoint, checks audience against GOOGLE_CLIENT_ID — which may be
+// a comma-separated allowlist, because the mobile app's native sign-in
+// presents `aud` = the web client ID on Android but can present the iOS
+// client ID on iOS (see src/google-auth.ts) — upserts the user, and mints the
 // same JWT as email/password login. Inert (503) until GOOGLE_CLIENT_ID is set.
 async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Response> {
   const credential = typeof body.credential === 'string' ? body.credential : '';
@@ -872,7 +878,7 @@ async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Res
   const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
   if (!res.ok) return err('Invalid Google credential', 401);
   const info = await res.json() as { aud?: string; email?: string; email_verified?: string; sub?: string };
-  if (info.aud !== env.GOOGLE_CLIENT_ID) return err('Google credential audience mismatch', 401);
+  if (!audienceAllowed(info.aud, env.GOOGLE_CLIENT_ID)) return err('Google credential audience mismatch', 401);
   if (!info.email || info.email_verified !== 'true') return err('Google email not verified', 401);
   const emailL = info.email.toLowerCase();
   let user = await env.DB.prepare('SELECT id, email, access_tier FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; access_tier: string } | null;
