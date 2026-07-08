@@ -70,6 +70,7 @@ export async function sandboxLLM(
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   maxTokens: number,
+  timeoutMs: number = LLM_TIMEOUT_MS,
 ): Promise<LlmResult> {
   if (!sandboxConfigured(env)) return { ok: false, error: 'sandbox not configured', path_open: false };
   const st = await pathOpen(env);
@@ -77,7 +78,7 @@ export async function sandboxLLM(
   try {
     const r = await stub(env).fetch('https://sandbox/dispatch', {
       method: 'POST',
-      body: JSON.stringify({ kind: 'llm', payload: { id: newId(), system, messages, max_tokens: maxTokens, timeout_ms: LLM_TIMEOUT_MS } }),
+      body: JSON.stringify({ kind: 'llm', payload: { id: newId(), system, messages, max_tokens: maxTokens, timeout_ms: timeoutMs } }),
     });
     return (await r.json()) as LlmResult;
   } catch (e) {

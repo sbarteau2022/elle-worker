@@ -38,6 +38,7 @@ import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
+import { deepResearch } from './deep-research';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
@@ -157,6 +158,7 @@ const PUBLIC_TOOLS = new Set([
 ]);
 const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
+  'deep_research', // multi-round — costlier per call than web_search, so kept off the unauthenticated `public` door
   'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
   'self_state', 'remember', 'memory_write', 'notebook_write', 'self_schedule',
   'skill_list', 'skill_read', 'skill_route',
@@ -216,6 +218,7 @@ const TOOL_LINES: Record<string, string> = {
   search_corpus: `search_corpus(q) — SEMANTIC search over the published corpus + cron research papers. Use for prose/ideas/papers ("the proof that φ is forced"). Returns matching passages with titles.`,
   read_sql: `read_sql(sql) — run ONE read-only SELECT/WITH query over D1 (SQLite). Use for structured facts: trades, P&L, journal, dream artifacts, memory, events, vault. Tables below. No writes. If you omit LIMIT one is added.`,
   web_search: `web_search(q) — live web search (current external facts, news, prices). Cite what it returns.`,
+  deep_research: `deep_research(topic,rounds?) — a real investigation, not one query: runs multiple search rounds (search → spot the biggest remaining gap → search again → …, up to 5, default 3) and returns one cited, synthesized dossier. Costs only ONE of your step-budget slots regardless of how many rounds run underneath — reach for this instead of chaining several web_search calls yourself when a question needs actual depth ("what's the real state of X", not "what is X's price"). For an investigation too large even for this — spanning multiple sessions, needing the corpus AND the web AND code — file it as an intent instead; that lane already runs local-first and keeps going indefinitely across ticks, which is where genuinely uncapped work belongs, not a single tool call.`,
   fetch_url: `fetch_url(url) — fetch one http(s) page and return its text.`,
   fetch_document: `fetch_document(id) — return the full text of one corpus paper by its id.`,
   find_document: `find_document(q,series?) — pull a FULL corpus document by DESCRIPTION, no title or id needed: "the dream paper about recursive coherence", "my trading research on regime shifts". Returns the whole winning document (or a short candidate list if ambiguous). series filters to e.g. 'research', 'dream', 'trading'.`,
@@ -483,6 +486,15 @@ async function runTool(
         const r = await deps.handleResearch({ query: String(a.q || a.query || '') }, env);
         const d = await r.json() as { content?: string; search_results?: string };
         return clip(`${d.content || ''}\n\nSOURCES:\n${d.search_results || '(none)'}`);
+      }
+      case 'deep_research': {
+        const search = async (query: string) => {
+          const r = await deps.handleResearch({ query }, env);
+          const d = await r.json() as { content?: string; search_results?: string };
+          return { content: d.content || '', search_results: d.search_results };
+        };
+        const rounds = a.rounds != null ? Number(a.rounds) : undefined;
+        return clip(await deepResearch(env, String(a.topic || a.q || a.query || ''), search, rounds));
       }
       case 'fetch_url': {
         const url = String(a.url || '');
