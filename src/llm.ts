@@ -754,7 +754,10 @@ async function routeLLM(
 // — if the text is already prose, it is returned untouched.
 
 // Balanced extractor: the first complete top-level {...} object in `text`.
-function firstJsonObjectFrom(text: unknown): Record<string, unknown> | null {
+// Exported — rapid.ts reuses it for the exact same free-model failure mode
+// (a JSON contract wrapped in chatter or a half-closed fence) one layer down,
+// on RAPID's own {intro, blocks} contract rather than the router's envelope.
+export function firstJsonObjectFrom(text: unknown): Record<string, unknown> | null {
   const s = String(text ?? '').replace(/```json|```/g, '');
   let depth = 0, start = -1, inStr = false, esc = false;
   for (let i = 0; i < s.length; i++) {

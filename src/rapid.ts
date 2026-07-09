@@ -29,6 +29,7 @@
 // ============================================================
 
 import type { Env } from './index';
+import { sanitizeAnswer, firstJsonObjectFrom } from './llm';
 
 export interface RapidEnv extends Env {
   RAPID_DB?: D1Database;
@@ -302,13 +303,40 @@ export async function rapidReport(question: string, env: RapidEnv): Promise<Rapi
       context_used: contextParts.length > 0,
     };
   } catch {
-    return { intro: '', blocks: [{ type: 'prose', body: raw }], context_used: contextParts.length > 0 };
+    // The model didn't return valid JSON for the {intro, blocks} contract —
+    // could be prose it wrote despite the instruction, or JSON it broke (a
+    // stray comma, chatter wrapped around it, a fence it half-closed — the
+    // exact free-model behavior llm.ts's own sanitizeAnswer exists for, one
+    // layer down: RAPID's contract instead of the router's). Try to recover
+    // a real object before falling back to relaying raw, possibly-broken
+    // JSON syntax into the reasoning model's context labeled "prose".
+    const recovered = firstJsonObjectFrom(raw) as { intro?: string; blocks?: RapidBlock[] } | null;
+    if (recovered && Array.isArray(recovered.blocks)) {
+      return { intro: recovered.intro ?? '', blocks: recovered.blocks, context_used: contextParts.length > 0 };
+    }
+    const body = sanitizeAnswer(raw) || 'RAPID could not format an answer for this question — try rephrasing.';
+    return { intro: '', blocks: [{ type: 'prose', body }], context_used: contextParts.length > 0 };
   }
+}
+
+function fmtCell(v: unknown, format?: string): string {
+  if (v == null) return '';
+  if (format === 'currency' && typeof v === 'number') return `$${v.toFixed(2)}`;
+  if (format === 'percent' && typeof v === 'number') return `${v.toFixed(1)}%`;
+  return String(v);
 }
 
 // Flatten {intro, blocks} into plain text — router tool observations are fed
 // back to Elle's OWN reasoning model as a string, not rendered as UI, so the
-// block structure needs to read as prose rather than be handed back as raw JSON.
+// block structure needs to read as prose/markdown rather than be handed back
+// as raw JSON. This used to JSON.stringify() table rows and any unrecognized
+// block wholesale into that text — which means a JSON fragment sat in the
+// reasoning model's own context, one echo away from landing in the chat
+// answer it composes (sanitizeAnswer only catches a WHOLE JSON envelope, not
+// a fragment embedded mid-prose). Render tables as real markdown tables
+// instead — both chat renderers (Elle/src/lib/md.tsx and the mobile Md)
+// render pipe tables now — and never dump an object as JSON for a shape the
+// model drifted from the schema on.
 export function flattenRapidReport(r: RapidReportResult): string {
   const parts: string[] = [];
   if (r.intro) parts.push(r.intro);
@@ -318,10 +346,22 @@ export function flattenRapidReport(r: RapidReportResult): string {
       parts.push((b.items as Array<{ label: string; value: string; delta?: { text: string } }>)
         .map(i => `${i.label}: ${i.value}${i.delta ? ` (${i.delta.text})` : ''}`).join(' · '));
     } else if (b.type === 'table' && Array.isArray(b.rows)) {
-      const title = typeof b.title === 'string' ? b.title + ':\n' : '';
-      parts.push(title + JSON.stringify(b.rows).slice(0, 2000));
+      const rows = b.rows as Array<Record<string, unknown>>;
+      type Col = { key: string; label?: string; format?: string };
+      const cols: Col[] = Array.isArray(b.columns)
+        ? (b.columns as Col[])
+        : (rows[0] ? Object.keys(rows[0]).map(key => ({ key, label: key })) : []);
+      if (cols.length && rows.length) {
+        const title = typeof b.title === 'string' ? `**${b.title}**\n\n` : '';
+        const header = `| ${cols.map(c => c.label ?? c.key).join(' | ')} |`;
+        const sep = `|${cols.map(() => ' --- ').join('|')}|`;
+        const body = rows.map(row => `| ${cols.map(c => fmtCell(row[c.key], c.format)).join(' | ')} |`).join('\n');
+        parts.push(`${title}${header}\n${sep}\n${body}`);
+      }
     } else {
-      parts.push(JSON.stringify(b).slice(0, 1000));
+      const guess = (b as Record<string, unknown>).body ?? (b as Record<string, unknown>).text
+        ?? (b as Record<string, unknown>).summary ?? (b as Record<string, unknown>).content;
+      parts.push(typeof guess === 'string' && guess.trim() ? guess : `(unrecognized "${String(b.type)}" block, dropped)`);
     }
   }
   return parts.join('\n\n') || '(no data)';
