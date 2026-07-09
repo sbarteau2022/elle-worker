@@ -1,0 +1,29 @@
+{
+  "phi": 1.618033988749895,
+  "phi_mod1": 0.6180339887498949,
+  "inf_functional_max": 0.38196601125010515,
+  "hurwitz_liminf_constant": 0.4472135954999579,
+  "predictions": {
+    "P1_unique_maximiser_inf_functional": true,
+    "P2_fibonacci_discrepancy_law": true,
+    "P3_three_gap_phi_ratios": true,
+    "P4_phi_minimises_discrepancy": true
+  },
+  "confirmed": 4,
+  "p1_argmax_folded": 0.3819666666666667,
+  "p1_max_value": 0.3819666666666667,
+  "stern_brocot_error": 4.427680444507587e-12,
+  "p2_mean_N_times_Dstar": 0.9991084827282746,
+  "p2_mean_consecutive_ratio": 1.6174204356631936,
+  "p3_three_gap_ratios": [
+    1.6180345556151168,
+    1.6180325046788375
+  ],
+  "p4_scores": {
+    "phi-1  (noble)": 0.9995468961462665,
+    "sqrt2-1 (irr)": 1.3076320704084696,
+    "e-2    (irr)": 1.5734598990396642,
+    "pi-3   (irr)": 11.414009449533976,
+    "3/5    (rat)": 197.79999999997753
+  }
+}
