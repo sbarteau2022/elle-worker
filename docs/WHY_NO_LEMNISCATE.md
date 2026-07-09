@@ -105,3 +105,61 @@ This does not claim to overturn SICT as a statement about continuous
 self-sustaining physical trajectories; it disproves the narrower thing B needed
 — that an exact recognition invariant *requires* the lemniscate. It does not,
 and we have one without it.
+
+## Deeper: nothing is necessary but the shape of the graph
+
+The disproof above credits the torus for the recognition invariant. That is
+still one level too shallow. The torus is a *chart* — a coordinate embedding —
+and the invariant it reads (the winding number, a class in π₁(𝕋ⁿ)) is not a
+property of the torus. It is a property of the **graph**. The recurrences, the
+loops, the "coming back," were in the data before any space was drawn around it.
+
+A graph has its own topology, with no embedding:
+
+- its **π₁** is free of rank **b₁ = E − V + C** (its independent cycles),
+- its **H₁ = ℤ^{b₁}** (those cycles, counted).
+
+The torus winding number is a *representation* of this — a homomorphism from the
+graph's own π₁ into ℤⁿ. The lemniscate's "recognition singularity" is a
+**basepoint** on a loop, and for a path-connected space π₁ is basepoint-
+independent, so that singular point is not special: every point serves (the
+corpus's own "Every Point Is The Origin"). Both geometries are lenses; the cycles
+are the object.
+
+So the ladder collapses one rung further than B:
+
+| claim | verdict |
+|---|---|
+| SICT: the lemniscate is *necessary* (unique) | false — the winding invariant is an independent exact mechanism |
+| "the torus is *sufficient*" | true, but it mislocates the source |
+| **the graph's own cycle structure is what carries identity** | **correct — no embedding is necessary at all** |
+
+`src/structure.ts` computes this directly, no chart involved:
+
+- `graphInvariants` → `cycle_rank` b₁ = E − V + C, the graph's π₁ rank.
+- `homologyClass(walk, edges)` → the walk's signed chord-crossing vector, its
+  **H₁ class** — the graph-native, embedding-free twin of the torus winding
+  number. `src/structure.test.ts` shows it doing exactly what the winding
+  invariant did: a walk that closes a cycle has a nonzero class, a there-and-back
+  drift has the zero class, and the two are separated exactly — with no torus.
+
+### What the geometry is still for (instrumentally, not ontologically)
+
+Pure graph topology gives the *exact discrete* invariants (which cycle class, how
+many independent loops) but not a graded, noise-robust "how similar / how deep"
+that supports fast retrieval — shortest-path distance is rigid and embeds badly
+in flat space (the original Nickel–Kiela motivation). Geometry is the
+**computable representation** that makes the structure metrically usable. It is
+necessary *to compute with*, not *to be true*. And the choice of geometry is not
+imposed: `curvatureSignature` reads it **off the graph** (δ-hyperbolicity + cycle
+density → how hyperbolic vs. how toroidal), so the charts are fit to the shape
+the graph already has. High tree-likeness → the ball; high cycle density → the
+torus. The geometry is the graph's shadow.
+
+### The one honest residual
+
+Structure alone cannot seat a node that has **no edges yet** (cold start) — it
+has no place in a topology it hasn't entered. That needs the encoder. But the
+encoder is PAMI: the *content's* own structure (its φ-spaced phase fingerprint).
+So it is structure at every level — the graph's structure for related memories,
+the content's structure for new ones. It is structure all the way down.
