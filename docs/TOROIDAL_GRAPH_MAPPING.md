@@ -225,17 +225,28 @@ invariance).
 | Torus alone carries identity-continuity | FALSE per *SICT* §III.3 — needs the lemniscate (Option B) |
 | Self-reinforcing `graph.ts` edges are captured-resonance-prone | ASSESSED — structurally matches the three features; hygiene proposed |
 
-## 10. Build order (when you say go)
+## 10. Build order (status)
 
-1. **Torus pure core** (`wrap`, `torusDist`, `goldenAdvance`, `windingNumbers`,
-   `translationAlign`, `starDiscrepancy`) + tests against `docs/tit/` numbers.
-2. **PAMI-phase encoder** — wire `pami.ts` output into torus coordinates.
-3. **`graph.ts` hygiene** — φ⁻ⁿ edge decay + captured-resonance diagnostic
-   (independently valuable; ships without the rest).
-4. **`torusMap` + `torusRoute`** — atlas, R2 storage, router tool line.
+Scope **A** (periodic structure only) is the chosen scope; the torus factor ships
+as `src/torus.ts` + `src/torus.test.ts`, wired into the router (`torus` tool,
+full/cofounder scope).
+
+1. **Torus pure core** — `wrap`, `norm2pi`, `torusDist`, `phiScaleWeights`,
+   `goldenSequence` (Roberts R_d), `windingNumbers`, `translationAlign`,
+   `axisDiscrepancy`/`atlasDiscrepancy`, `nobility`. ✅ **built**, validated
+   against `docs/tit/` (1-D golden orbit `N·D* → 1`, `nobility(φ−1) ≈ φ⁻²`).
+2. **PAMI-phase encoder** — `pamiPhasesToTorus` seats the 8 PAMI phases on 𝕋⁸.
+   ✅ **built**.
+3. **`graph.ts` hygiene** — φ⁻ⁿ edge decay + captured-resonance diagnostic.
+   ⏳ **next** (independently valuable; ships without the rest).
+4. **`torusMap` + `torusRoute`** — atlas, R2 storage under `torus/`, router tool
+   line, modes map/neighbors/dist/align/winding/nobility. ✅ **built**.
 5. **Product-space glue** — combine with `hyper.ts` for the (depth, phase) pair
-   and the two disagreement readouts.
-6. **(Option B, deferred)** lemniscate identity layer, only if we take that scope.
+   and the two disagreement readouts (same rhythm/different lineage; same
+   lineage/drifted phase). ⏳ **follow-on**.
+6. **(Option B, deferred)** lemniscate identity layer — held for a separate
+   decision; not built.
 
-Steps 1–4 are self-contained and low-risk; step 5 is where the two charts become
-one instrument; step 6 is the metaphysical commitment held for a separate decision.
+Steps 1, 2, 4 are shipped and self-contained. Step 3 (`graph.ts` hygiene) is the
+recommended next push; step 5 is where the two charts become one instrument;
+step 6 is the metaphysical commitment held back by the Scope-A decision.
