@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rapidCosts, rapidVariance, type RapidEnv } from './rapid';
+import { rapidCosts, rapidVariance, flattenRapidReport, type RapidEnv, type RapidReportResult } from './rapid';
 
 // rapid.ts had zero test coverage before this file — which is exactly how
 // three real defects in rapidVariance() shipped silently and stayed live in
@@ -72,5 +72,53 @@ describe('rapidCosts SQL', () => {
     await rapidCosts(env);
     expect(sqlSeen[0]).not.toMatch(/ORDER BY vd\.document_date DESC/);
     expect(sqlSeen[0]).toMatch(/ORDER BY \(substr\(vd\.document_date,\s*7,\s*4\)[\s\S]*DESC/);
+  });
+});
+
+// flattenRapidReport() used to JSON.stringify() table rows and any
+// unrecognized block wholesale into the text handed back to Elle's own
+// reasoning model — a JSON fragment sitting in that model's context is one
+// echo away from landing in the chat answer it composes, and sanitizeAnswer()
+// (llm.ts) only catches a WHOLE JSON envelope, not a fragment embedded
+// mid-prose. These pin that the flattened text is never raw JSON.
+describe('flattenRapidReport', () => {
+  it('renders a table block as a markdown table, not JSON.stringify(rows)', () => {
+    const result: RapidReportResult = {
+      intro: 'Two SKUs moved.',
+      blocks: [{
+        type: 'table',
+        title: 'Price movers',
+        columns: [{ key: 'product', label: 'Product' }, { key: 'current', label: 'Current', format: 'currency' }],
+        rows: [{ product: 'Chicken Breast 40lb', current: 71.2 }, { product: 'Romaine Heart CS', current: 60.06 }],
+      }],
+      context_used: true,
+    };
+    const text = flattenRapidReport(result);
+    expect(text).not.toContain('{"product"');
+    expect(text).not.toContain('[{');
+    expect(text).toContain('| Product | Current |');
+    expect(text).toContain('| Chicken Breast 40lb | $71.20 |');
+  });
+
+  it('never dumps an unrecognized block as raw JSON', () => {
+    const result: RapidReportResult = {
+      intro: '',
+      blocks: [{ type: 'chart', weird: { nested: true }, values: [1, 2, 3] }],
+      context_used: true,
+    };
+    const text = flattenRapidReport(result);
+    expect(text).not.toContain('{"type"');
+    expect(text).not.toContain('"nested"');
+    expect(text).toContain('unrecognized');
+  });
+
+  it('pulls a readable field out of an unrecognized block instead of dumping it', () => {
+    const result: RapidReportResult = {
+      intro: '',
+      blocks: [{ type: 'note', text: 'vendor pricing looks stale, re-pull the feed' }],
+      context_used: true,
+    };
+    const text = flattenRapidReport(result);
+    expect(text).toBe('vendor pricing looks stale, re-pull the feed');
   });
 });
