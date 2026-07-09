@@ -80,6 +80,19 @@ describe('curvatureSignature (charts read off the graph, not imposed)', () => {
     expect(sT.suggested.hyperbolic).toBeGreaterThan(sT.suggested.toroidal);
     expect(sC.suggested.toroidal).toBeGreaterThan(sT.suggested.toroidal);
   });
+  it('disambiguates a clique from a tree — both are δ=0, only the clique is cyclic', () => {
+    // K4 is 0-hyperbolic (δ=0) like a tree, but maximally cyclic (b₁=3). The
+    // signature must not read it as hierarchical just because δ=0.
+    const k4 = [E('0', '1'), E('0', '2'), E('0', '3'), E('1', '2'), E('1', '3'), E('2', '3')];
+    const sig = curvatureSignature(k4);
+    expect(sig.delta).toBe(0);
+    expect(sig.cycle_rank).toBe(3);
+    expect(sig.suggested.toroidal).toBeGreaterThan(sig.suggested.hyperbolic);
+  });
+  it('a forest can never read cyclic (toroidal pull is exactly 0)', () => {
+    const forest = [E('a', 'b'), E('b', 'c'), E('x', 'y')];
+    expect(curvatureSignature(forest).suggested.toroidal).toBe(0);
+  });
 });
 
 describe('asEdges', () => {

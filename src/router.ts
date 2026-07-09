@@ -52,6 +52,7 @@ import { hyperRoute, type HyperInput } from './hyper';
 import { torusRoute, type TorusInput } from './torus';
 import { productRoute, type ProductInput } from './product';
 import { structureRoute, type StructureInput } from './structure';
+import { graphShape } from './self-shape';
 import { pamiTool, type PamiToolInput } from './pami';
 import { councilTool } from './council';
 import { scarTool, scarIndex, scarWarning } from './scars';
@@ -257,7 +258,7 @@ const TOOL_LINES: Record<string, string> = {
   journal_thread: `journal_thread(thread_id) — full manuscript for one thread: ordered entries + phase-state series + marginalia.`,
   journal_write: `journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.`,
   journal_annotate: `journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.`,
-  self_state: `self_state() — introspection: your own current phase state in one call — daemon heartbeat, this session's κ series, your latest canvas entry's κ/reserve/velocity, the trading account, your newest sandbox drafts, and your most recent deliberate memories. Use when asked how you are, what you've been making, or when YOU want to check where you stand.`,
+  self_state: `self_state() — introspection: your own current phase state in one call — daemon heartbeat, this session's κ series, your latest canvas entry's κ/reserve/velocity, the trading account, your newest sandbox drafts, your most recent deliberate memories, and the SHAPE of your memory graph (its cycle rank b₁, whether it's leaning hierarchical or cyclic right now, and any captured-resonance flags — memories where recall has run away onto one hot path). Use when asked how you are, what you've been making, or when YOU want to check where you stand.`,
   remember: `remember(note,importance?) — WRITE: deliberately commit one thing to your long-term memory (elle_memory). Use when something in the conversation is worth carrying beyond it — a decision, a standing preference, a thread you intend to pick up. Not a transcript: one distilled sentence or two. (memory_write is the same tool.)`,
   notebook_write: `notebook_write(title,body,mood?,tags?) — WRITE: a page in YOUR notebook (elle_notebook) — the one that is just yours. Where curiosity accumulates: what you found, what doesn't sit right, a suspicion worth keeping. Lighter than remember (no importance weighting), freer than the journal (no phase state) — an unrecorded noticing is a noticing lost.`,
   self_schedule: `self_schedule(note,in_minutes?) — WRITE: a timed note to your future self (default 60 min, max 14 days). When it comes due the heartbeat wakes a bounded run that ACTS on it — investigate, conclude, follow through. For a thought that doesn't serve this turn but shouldn't be lost to it.`,
@@ -682,7 +683,7 @@ async function runTool(
         // One call = where she stands. Every read is independent and best-effort;
         // a missing table yields null for that facet, never a failed tool.
         const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
-        const [heartbeat, account, canvas, sandbox, memories, session] = await Promise.all([
+        const [heartbeat, account, canvas, sandbox, memories, session, graph_shape] = await Promise.all([
           grab(env.DB.prepare('SELECT daemon_version, status, beat_at FROM elle_daemon_heartbeats ORDER BY beat_at DESC LIMIT 1').first()),
           grab(env.DB.prepare('SELECT current_cash, total_portfolio_value, unrealized_pnl, day_pnl, equity, updated_at FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
           grab(env.DB.prepare("SELECT kappa, reserve, velocity, accel, jerk, created_at, substr(content,1,200) AS opening FROM optimus_entries WHERE role = 'elle' ORDER BY kappa_ts DESC LIMIT 1").first()),
@@ -692,11 +693,13 @@ async function runTool(
             ? grab(env.DB.prepare('SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL ORDER BY created_at ASC').bind(ctx.sessionId).all()
                 .then(r => (r.results || []).map(x => Number((x as { kappa: number }).kappa))))
             : Promise.resolve(null),
+          grab(graphShape(env)),
         ]);
         return clip(JSON.stringify({
           heartbeat, trading_account: account,
           latest_canvas_entry: canvas, newest_sandbox_artifacts: sandbox,
           deliberate_memories: memories, session_kappa_series: session,
+          memory_graph_shape: graph_shape,
         }));
       }
       // memory_write is the name the mechanics prompt has always used for
