@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  productPairs, productDist, disagreements,
+  productPairs, productDist, disagreements, resolveMix,
   recognitionInvariant, sameRecurrenceClass, metricReturn,
 } from './product';
 
@@ -18,6 +18,37 @@ describe('productPairs / productDist', () => {
     const both = productDist(a, b, 1);
     const ballOnly = productDist(a, { ball: [0.5, 0], torus: [0, 0] }, 1);
     expect(both).toBeGreaterThan(ballOnly);
+  });
+  it('the curvature mix routes weight to the right factor', () => {
+    const a = { ball: [0, 0], torus: [0, 0] }, b = { ball: [0.6, 0], torus: [2.5, 1] };
+    // hyperbolic-only mix ⇒ pure ball distance; toroidal-only ⇒ pure torus distance
+    const ballOnly = productDist(a, b, { hyperbolic: 1, toroidal: 0 });
+    const torusOnly = productDist(a, b, { hyperbolic: 0, toroidal: 1 });
+    expect(ballOnly).toBeCloseTo(productDist(a, { ball: b.ball, torus: a.torus }, { hyperbolic: 1, toroidal: 0 }), 9);
+    expect(torusOnly).toBeCloseTo(productDist({ ball: a.ball, torus: a.torus }, { ball: a.ball, torus: b.torus }, { hyperbolic: 0, toroidal: 1 }), 9);
+    expect(ballOnly).toBeGreaterThan(0);
+    expect(torusOnly).toBeGreaterThan(0);
+  });
+});
+
+describe('resolveMix (the mix is read off the graph)', () => {
+  it('reads a hierarchy-leaning mix from a tree and a cycle-leaning mix from a dense graph', () => {
+    const tree = [
+      { src: 'r', dst: 'a' }, { src: 'r', dst: 'b' }, { src: 'a', dst: 'c' },
+      { src: 'a', dst: 'd' }, { src: 'b', dst: 'e' }, { src: 'b', dst: 'f' },
+    ];
+    const cyclic = [
+      { src: '0', dst: '1' }, { src: '1', dst: '2' }, { src: '2', dst: '3' },
+      { src: '3', dst: '0' }, { src: '0', dst: '2' }, { src: '1', dst: '3' },
+    ];
+    const mT = resolveMix({ edges: tree }).mix;
+    const mC = resolveMix({ edges: cyclic }).mix;
+    expect(mT.hyperbolic).toBeGreaterThan(mT.toroidal);
+    expect(mC.toroidal).toBeGreaterThan(mT.toroidal);
+  });
+  it('an explicit signature wins, and no input is equal weighting', () => {
+    expect(resolveMix({ signature: { hyperbolic: 0.9, toroidal: 0.1 } }).mix).toEqual({ hyperbolic: 0.9, toroidal: 0.1 });
+    expect(resolveMix({}).mix).toEqual({ hyperbolic: 1, toroidal: 1 });
   });
 });
 

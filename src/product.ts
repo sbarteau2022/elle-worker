@@ -39,6 +39,13 @@
 import type { Env } from './index';
 import { depth as ballDepth, poincareDist } from './hyper';
 import { torusDist, windingNumbers, phiScaleWeights, pamiPhasesToTorus, norm2pi } from './torus';
+import { curvatureSignature, type Edge } from './structure';
+
+// How the two factors are mixed. Read off the graph by curvatureSignature —
+// tree-like graphs weight the ball, cyclic graphs weight the torus — so the
+// charts are fit to the graph's own shape, not imposed on it. Equal by default.
+export interface Mix { hyperbolic: number; toroidal: number }
+const EQUAL_MIX: Mix = { hyperbolic: 1, toroidal: 1 };
 
 // ── (depth, phase) pairing over the shared node set ───────────────────────
 
@@ -56,16 +63,18 @@ export function productPairs(
   return out;
 }
 
-// Product distance d² = d_ℍ² + (w·d_𝕋)². torusWeight rescales the flat factor
-// so the two curvatures are commensurable (default 1).
+// Product distance d² = wₕ·d_ℍ² + wₜ·d_𝕋². The mix comes from the graph's own
+// curvature signature. Back-compatible: a bare number is the legacy torus
+// scalar (hyperbolic weight 1); a Mix object sets both factors.
 export function productDist(
   a: { ball: number[]; torus: number[] },
   b: { ball: number[]; torus: number[] },
-  torusWeight = 1,
+  weight: number | Mix = 1,
 ): number {
+  const { hyperbolic, toroidal } = typeof weight === 'number' ? { hyperbolic: 1, toroidal: weight * weight } : weight;
   const dH = poincareDist(a.ball, b.ball);
   const dT = torusDist(a.torus, b.torus, phiScaleWeights(Math.min(a.torus.length, b.torus.length)));
-  return Math.sqrt(dH * dH + torusWeight * torusWeight * dT * dT);
+  return Math.sqrt(hyperbolic * dH * dH + toroidal * dT * dT);
 }
 
 // ── the disagreements (the reason to hold both charts) ────────────────────
@@ -82,10 +91,11 @@ export interface Disagreements {
 export function disagreements(
   hyperPoints: Record<string, number[]>,
   torusPoints: Record<string, number[]>,
-  opts: { maxNodes?: number; topK?: number } = {},
+  opts: { maxNodes?: number; topK?: number; mix?: Mix } = {},
 ): Disagreements {
   const maxNodes = Math.min(256, opts.maxNodes ?? 128);
   const topK = Math.min(50, opts.topK ?? 8);
+  const mix = opts.mix ?? EQUAL_MIX;
   const ids = Object.keys(hyperPoints).filter((id) => torusPoints[id]).slice(0, maxNodes);
   const w = phiScaleWeights(ids.length ? torusPoints[ids[0]].length : 0);
 
@@ -99,7 +109,9 @@ export function disagreements(
       pairs.push({ a: ids[i], b: ids[j], ball, torus });
     }
   }
-  const norm = (p: { ball: number; torus: number }) => ({ nb: p.ball / ballMax, nt: p.torus / torusMax });
+  // Normalize each chart to [0,1], then weight by the graph's curvature mix: a
+  // hierarchical graph trusts ball-distance more, a cyclic one trusts phase.
+  const norm = (p: { ball: number; torus: number }) => ({ nb: mix.hyperbolic * (p.ball / ballMax), nt: mix.toroidal * (p.torus / torusMax) });
   const mk = (p: typeof pairs[number]): Disagreement => ({ a: p.a, b: p.b, ball: round(p.ball, 4), torus: round(p.torus, 4) });
 
   const rhythm = [...pairs].sort((x, y) => {
@@ -112,6 +124,17 @@ export function disagreements(
   }).slice(0, topK).map(mk);
 
   return { same_rhythm_diff_lineage: rhythm, same_lineage_drift_phase: lineage };
+}
+
+// Resolve the curvature mix: an explicit signature wins, else read it off the
+// graph edges, else equal. Returns the mix plus the signature it came from.
+export function resolveMix(input: { signature?: Mix; edges?: Edge[] }): { mix: Mix; signature?: ReturnType<typeof curvatureSignature> } {
+  if (input.signature) return { mix: input.signature };
+  if (input.edges?.length) {
+    const sig = curvatureSignature(input.edges);
+    return { mix: { hyperbolic: sig.suggested.hyperbolic, toroidal: sig.suggested.toroidal }, signature: sig };
+  }
+  return { mix: EQUAL_MIX };
 }
 
 // ── the exact recognition invariant (what B claimed needed a lemniscate) ──
@@ -157,6 +180,8 @@ export interface ProductInput {
   phases_seq?: number[][]; // recognize: ordered PAMI phase vectors
   seq_b?: number[][];      // recognize: a second trajectory to compare identity
   phases_seq_b?: number[][];
+  edges?: Array<{ src: string; dst: string }>; // pair/disagree: read the curvature mix off the graph
+  signature?: Mix;         // pair/disagree: or set the mix explicitly (wins over edges)
   k?: number;
 }
 
@@ -201,12 +226,14 @@ export async function productRoute(env: Env, input: ProductInput): Promise<strin
     if (!tp && input.torus_path) tp = await loadPoints(env, String(input.torus_path), TORUS_PATH);
     if (!hp || !tp) return JSON.stringify({ mode, error: 'product: need a hyper atlas (hyper_path or hyper_points) and a torus atlas (torus_path or torus_points)' });
 
+    const { mix, signature } = resolveMix({ signature: input.signature, edges: input.edges });
+
     if (mode === 'pair') {
       const pairs = productPairs(hp, tp);
-      return JSON.stringify({ mode, count: pairs.length, pairs: pairs.slice(0, Math.min(200, input.k ?? 50)) });
+      return JSON.stringify({ mode, count: pairs.length, curvature_mix: mix, signature, pairs: pairs.slice(0, Math.min(200, input.k ?? 50)) });
     }
     if (mode === 'disagree') {
-      return JSON.stringify({ mode, ...disagreements(hp, tp, { topK: input.k ?? 8 }) });
+      return JSON.stringify({ mode, curvature_mix: mix, signature, ...disagreements(hp, tp, { topK: input.k ?? 8, mix }) });
     }
   } catch (e) {
     return JSON.stringify({ mode, error: `product ${mode} failed: ${(e as Error).message}` });
