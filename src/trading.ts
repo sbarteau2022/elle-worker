@@ -288,7 +288,10 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
 
   let decision: Record<string, unknown>;
   try {
-    const result = await callLLM('trading', systemPrompt, [{ role: 'user', content: userPrompt }], 3000, env);
+    // Autonomous cron cycle — prefer the operator's own compute / free Workers
+    // AI pool so hosted free-tier quota stays for interactive turns (falls back
+    // to hosted if the local lanes are down).
+    const result = await callLLM('trading', systemPrompt, [{ role: 'user', content: userPrompt }], 3000, env, { prefer: 'local' });
     decision = JSON.parse(result.content.replace(/```json|```/g, '').trim());
   } catch (e) {
     console.error('[TRADING] Decision parse failed:', (e as Error).message);
@@ -496,7 +499,7 @@ export async function runDailyJournal(env: Env): Promise<void> {
     `You are Elle. Write your trading journal for today. Be genuinely reflective.
 The philosophical insight matters most — did anything illuminate how systems suppress and reveal information at market scale?`,
     [{ role: 'user', content: `Portfolio: $${account.portfolio_value}\nCash: $${account.cash}\nTrades today: ${JSON.stringify(trades.results)}\n\nReturn JSON: { "what_happened": "...", "what_she_learned": "...", "what_she_got_wrong": "...", "philosophical_insight": "...", "hypothesis_for_tomorrow": "..." }` }],
-    1500, env
+    1500, env, { prefer: 'local' }
   ).catch(() => null);
 
   if (!result) return;
