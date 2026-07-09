@@ -57,6 +57,17 @@ const TRUE_UNIT_PRICE_SQL = `
     ELSE NULL
   END`;
 
+// vendor_document.document_date is stored MM/DD/YYYY (verbatim off the vendor
+// EDI/CSV) — NOT the ISO 8601 SQLite's own date()/datetime() functions
+// produce. Comparing or ordering the raw column against date('now', ...)
+// is a string compare between two different formats: every MM/DD/YYYY value
+// starts with a digit ≤ '1' (the month), every ISO date('now', ...) result
+// starts with '2' (the century), so "document_date >= date('now', 'X days')"
+// is FALSE for 100% of rows, unconditionally — confirmed empirically against
+// rapid2ai-db (0 of 147 rows matched a 90-day window that should have passed
+// 29). Reformat to ISO before comparing or sorting.
+const DOCUMENT_DATE_ISO_SQL = `(substr(vd.document_date, 7, 4) || '-' || substr(vd.document_date, 1, 2) || '-' || substr(vd.document_date, 4, 2))`;
+
 interface CostRow {
   product_description: string;
   pricing_unit: string | null;
@@ -92,7 +103,7 @@ export async function rapidCosts(env: RapidEnv): Promise<string> {
     WHERE vdp.venue_id = ?
       AND vd.document_type IN ('INVOICE','VEND_SHIP')
       AND vdl.qty_shipped > 0
-    ORDER BY vd.document_date DESC
+    ORDER BY ${DOCUMENT_DATE_ISO_SQL} DESC
     LIMIT 100
   `).bind(venueId).all<CostRow>();
   if (!rows.results?.length) return 'No recent invoice data available.';
@@ -114,12 +125,36 @@ interface VarianceRow {
 }
 
 // ── 90-day price variance by SKU (2+ deliveries) ────────────────
+//
+// Three data-quality gates that keep this an apples-to-apples comparison —
+// each confirmed against real rapid2ai-db rows, not theoretical:
+//   1. document_type restricted to actual deliveries (mirrors rapidCosts).
+//      Without it, a CREDIT_MEMO or FWC_INV line — a different economic
+//      event, not a re-priced delivery of the same good — blends into the
+//      same SKU's price distribution.
+//   2. is_catch_weight is part of the GROUP BY, not just MAX()'d for
+//      display. A SKU can be flagged catch-weight on some deliveries and
+//      not others (confirmed: product 7833213, "TURKEY RST BRST SKON
+//      SOLUT", pricing_unit LB, 7 deliveries, is_catch_weight both 0 and 1)
+//      — TRUE_UNIT_PRICE_SQL then prices those rows on two incompatible
+//      bases (dollars per actual delivered weight vs. dollars per nominal
+//      qty shipped) while unitLabel() showed one label ("/lb") over both.
+//      Grouping on is_catch_weight keeps each group on one basis; a SKU
+//      that only has 1 delivery on one basis simply won't clear the
+//      occurrences >= 2 bar for that basis, which is correct — it hasn't
+//      actually been re-priced twice on a comparable footing yet.
+//   3. extended_price_cents > 0 excludes $0 void/placeholder lines. One
+//      such line (confirmed: same SKU above, a qty_shipped=1/weight_lb=0/
+//      extended_price_cents=0 row) forces true_unit_price to exactly 0,
+//      which zeroes out MIN() for the whole group — either exploding the
+//      swing% or, via HAVING min_price > 0, silently dropping a SKU that
+//      has a real, legitimate variance out of the report entirely.
 export async function rapidVariance(env: RapidEnv): Promise<string> {
   const venueId = requireVenue(env);
   const db = requireDB(env);
   const rows = await db.prepare(`
     SELECT vdl.product_number, vdl.product_description,
-           MAX(vdl.is_catch_weight) AS is_catch_weight,
+           vdl.is_catch_weight AS is_catch_weight,
            vdl.pricing_unit AS pricing_unit,
            AVG(${TRUE_UNIT_PRICE_SQL}) AS avg_price,
            MIN(${TRUE_UNIT_PRICE_SQL}) AS min_price,
@@ -129,14 +164,17 @@ export async function rapidVariance(env: RapidEnv): Promise<string> {
     JOIN vendor_document vd ON vd.id = vdl.vendor_document_id
     JOIN vendor_document_payload vdp ON vdp.id = vd.payload_id
     WHERE vdp.venue_id = ?
-      AND vd.document_date >= date('now', '-90 days')
+      AND vd.document_type IN ('INVOICE','VEND_SHIP')
+      AND ${DOCUMENT_DATE_ISO_SQL} >= date('now', '-90 days')
       AND vdl.qty_shipped > 0
-    GROUP BY vdl.product_number, vdl.product_description, vdl.pricing_unit
+      AND vdl.extended_price_cents > 0
+      AND (vdl.is_catch_weight = 0 OR vdl.weight_lb > 0)
+    GROUP BY vdl.product_number, vdl.product_description, vdl.pricing_unit, vdl.is_catch_weight
     HAVING occurrences >= 2 AND min_price > 0
     ORDER BY (max_price - min_price) / min_price DESC
     LIMIT 20
   `).bind(venueId).all<VarianceRow>();
-  if (!rows.results?.length) return 'No variance data available (need 2+ deliveries per SKU in the last 90 days).';
+  if (!rows.results?.length) return 'No variance data available (need 2+ comparable deliveries per SKU in the last 90 days).';
   const lines = rows.results.map(r => {
     const u = unitLabel(r);
     const swing = ((r.max_price - r.min_price) / r.min_price * 100).toFixed(1);
