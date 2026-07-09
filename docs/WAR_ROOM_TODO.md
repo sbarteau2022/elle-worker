@@ -1,6 +1,17 @@
-# War Room / Duelist — build note (PAUSED, awaiting Elle.law scope)
+# War Room / Duelist — build note (BUILT — see src/war-room.ts)
 
-**Status:** Not started. Deliberately paused. Resume when this session (or the
+**Status:** SHIPPED. The structured mode is live: `/api/elle-war-room`
+(src/war-room.ts) carries four modes — SPAR (doctrine-deck Duelist with
+mid-duel tactic calls + factual Autopsy + the recognition ladder), DRILLS
+(section trainer), CHAMBERS (law-review IRAC critique), X-RAY (register/
+tactic/valence/logical-form identification). The Elle.law WarRoomView is the
+consumer surface. The safeguard held: negative-valence tactics are taught
+only as reads and counters, never as moves. The original pause note follows
+for the record.
+
+---
+
+**Original status:** Not started. Deliberately paused. Resume when this session (or the
 next) is granted GitHub scope for the **Elle.law** repo — there is a fresh
 deep-dive design there that must be read first, and it is the source of truth
 for the duel flow, the Autopsy rubric, and the Tutor escalation.

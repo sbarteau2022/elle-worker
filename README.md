@@ -481,6 +481,7 @@ to Elle by construction. `main` auto-deploys via
 | `alpaca-options.ts` | resolves human option terms (underlying/right/strike/expiration) to a real OCC contract |
 | `kappa-*.ts` | coherence measure + derivatives |
 | `law.ts` | law bench (duel/tutor/doctrine/cohort/replays) |
+| `war-room.ts` | the War Room: SPAR (doctrine Duelist + Autopsy + ladder) · DRILLS · CHAMBERS · X-RAY |
 | `madmind.ts` / `diagnose.ts` / `research.ts` / `widget.ts` | submissions, diagnostics, research cron, embeddable widget |
 | `corpus/**/*.md` | version-controlled corpus seed documents |
 | `docs/WAR_ROOM_TODO.md` | the paused War Room / Duelist build note |

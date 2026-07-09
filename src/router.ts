@@ -21,6 +21,7 @@
 import { callLLM, sanitizeAnswer, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
+import { computeKappa } from './journal';
 import type { KappaPoint } from './kappa-dynamics';
 import { ELLE_VOICE, resolveVoice, phaseBlock } from './mind';
 import { ensureOnce, orderKey, ingestKey } from './router-idempotency';
@@ -85,6 +86,7 @@ export interface RouterStep {
   result: string; // truncated, human/LLM-readable
   thought?: string;   // her stated reason for this step ({"thought":...} in the protocol)
   thinking?: string;  // the model's native reasoning tokens for this step, when the provider returns them
+  kappa?: number;     // κ over the step's thought — her coherence, step by step
 }
 
 // One frame of the loop, as it happens — the live counterpart of the trace.
@@ -101,6 +103,7 @@ export interface RouterLiveEvent {
   args?: Record<string, unknown>;
   result?: string;
   duration_ms?: number;
+  kappa?: number;
 }
 
 export interface RouterResult {
@@ -1093,6 +1096,9 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     // parsed and dropped. This is what the workbench renders as her thinking.
     const stepThought = typeof parsed.thought === 'string' ? parsed.thought.slice(0, 1200) : undefined;
     const stepThinking = result.thinking ? clip(result.thinking, 4000) : undefined;
+    // κ per step: the same deterministic coherence measure the journal uses,
+    // over the only prose she produced this step — her thought. Cheap, no I/O.
+    const stepKappa = stepThought ? computeKappa(stepThought) : undefined;
     if (typeof parsed.answer === 'string') {
       return finish(parsed.answer, step, { thought: stepThought, thinking: stepThinking });
     }
@@ -1100,7 +1106,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
       // The step frame goes out BEFORE execution — the watcher sees what she
       // reached for and why while the tool is still running.
-      ping({ kind: 'step', step, thought: stepThought, thinking: stepThinking, tool: parsed.tool, args });
+      ping({ kind: 'step', step, thought: stepThought, thinking: stepThinking, tool: parsed.tool, args, kappa: stepKappa });
       let obs: string;
       const t0 = Date.now();
       // Flinch check — a scar matching this call shape fires its warning into
@@ -1116,7 +1122,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       const isErr = obs.startsWith(`tool error (${parsed.tool})`);
       if (flinch) obs = flinch + obs;
       ping({ kind: 'obs', step, tool: parsed.tool, result: clip(obs, 800), duration_ms: Date.now() - t0 });
-      trace.push({ tool: parsed.tool, args, result: clip(obs, 800), thought: stepThought, thinking: stepThinking });
+      trace.push({ tool: parsed.tool, args, result: clip(obs, 800), thought: stepThought, thinking: stepThinking, kappa: stepKappa });
       // One emit per tool step — the whole event bus rides on this line.
       void emitEvent(env, {
         run_id: runId, session_id: sessionId, source, scope, step_index: step,
