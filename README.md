@@ -399,7 +399,9 @@ Corpus: `/api/corpus-papers`, `/api/corpus-paper`, `/api/corpus-resolve`,
 Autonomy/desk: `/api/elle-intents`, `/api/elle-trading`, `/api/admin-feed`.
 Journal/law: `/api/optimus-journal`, `/api/notebook`, `/api/madmind`,
 `/api/elle-duel-engine`, `/api/elle-tutor`, `/api/elle-doctrine`,
-`/api/elle-cohort`, `/api/elle-replays`.
+`/api/elle-cohort`, `/api/elle-replays`, `/api/elle-war-room`.
+`/api/falcon` — the Millennium Falcon: 16-axis, 3-tier product intelligence
+engine (`action: run|list|get|outcome`; `run` takes a `direction` string).
 Engine/ops: `/api/elle-code-engine`, `/api/diagnose`, `/api/research`,
 `/api/cron`, `/api/elle-auth`, `/api/elle-oauth`, `/health`.
 
@@ -482,6 +484,7 @@ to Elle by construction. `main` auto-deploys via
 | `kappa-*.ts` | coherence measure + derivatives |
 | `law.ts` | law bench (duel/tutor/doctrine/cohort/replays) |
 | `war-room.ts` | the War Room: SPAR (doctrine Duelist + Autopsy + ladder) · DRILLS · CHAMBERS · X-RAY |
+| `falcon.ts` | the Millennium Falcon: 16-axis, 3-tier product intelligence engine — Material Ground + Observer Reading fire in parallel, Validation + the Rupture (axis 16) fire last, sequentially |
 | `madmind.ts` / `diagnose.ts` / `research.ts` / `widget.ts` | submissions, diagnostics, research cron, embeddable widget |
 | `corpus/**/*.md` | version-controlled corpus seed documents |
 | `docs/WAR_ROOM_TODO.md` | the paused War Room / Duelist build note |

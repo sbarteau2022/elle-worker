@@ -19,6 +19,7 @@ import {
   type LawEnv,
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
+import { handleFalcon, type FalconEnv } from './falcon';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
@@ -1655,6 +1656,10 @@ export default {
     if (path === '/api/madmind')
       return handleMadmind(body, env, user.id, user.email);
     if (path === '/api/elle-war-room')          return handleWarRoom(body, env as unknown as LawEnv, user.id);
+    // The Millennium Falcon — 16-axis, 3-tier product intelligence engine.
+    // Member-gated like the other engines above it; a Falcon run spends
+    // ~17 model calls, so it rides the same auth door, not a public one.
+    if (path === '/api/falcon')                 return handleFalcon(body, env as unknown as FalconEnv, user.id);
     if (path === '/api/elle-duel-engine')       return handleDuelEngine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-tutor')             return handleTutor(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
