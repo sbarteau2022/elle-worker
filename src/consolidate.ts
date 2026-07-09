@@ -22,6 +22,7 @@ import type { Env } from './index';
 import { callLLM } from './llm';
 import { skillWrite } from './skills';
 import { scarTool } from './scars';
+import { CloudGraphStore } from './graph';
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
@@ -96,6 +97,16 @@ export async function runConsolidation(env: Env): Promise<string> {
     if (!/refused/i.test(r)) scars++;
   }
 
+  // Graph hygiene: the sleep pass is where the φ⁻ⁿ edge decay runs, so the
+  // self-reinforcing co-recall edges can't become a captured-resonance runaway.
+  let sweepNote = '';
+  try {
+    const s = await new CloudGraphStore(env.DB).sweep();
+    if (s.decayed || s.pruned || s.flags.length) {
+      sweepNote = ` — edges: ${s.decayed} decayed, ${s.pruned} pruned${s.flags.length ? `, ${s.flags.length} captured-resonance flag(s) (top: ${s.flags[0].node}@${s.flags[0].dominance})` : ''}`;
+    }
+  } catch { /* hygiene is best-effort; never blocks a consolidation */ }
+
   const digest = String(parsed.digest || '').slice(0, 600);
   await env.DB.prepare(
     `INSERT INTO elle_consolidation_log (id, ran_at, turns_read, errors_read, memories_written, skills_written, scars_written, digest) VALUES (?,?,?,?,?,?,?,?)`
@@ -104,5 +115,5 @@ export async function runConsolidation(env: Env): Promise<string> {
     `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'consolidation', 'consolidation', 'nightly consolidation', ?, 'info')`
   ).bind(id(), JSON.stringify({ turns: turnRows.length, errors: errorRows.length, memories: mems, skills, scars, digest })).run().catch(() => {});
 
-  return `consolidated: ${mems} memories, ${skills} skills promoted, ${scars} scars recorded — ${digest || '(no digest)'}`;
+  return `consolidated: ${mems} memories, ${skills} skills promoted, ${scars} scars recorded${sweepNote} — ${digest || '(no digest)'}`;
 }

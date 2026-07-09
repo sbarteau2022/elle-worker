@@ -182,7 +182,102 @@ export class CloudGraphStore implements GraphStore {
     });
     await this.db.batch(stmts);
   }
+
+  // The hygiene sweep — run once per consolidation cycle (nightly). Every edge
+  // idle for ≥1 cycle loses one φ⁻¹ of weight; anything under `floor` is pruned.
+  // A re-seen edge (link resets last_seen_at) is fresh and untouched — so an
+  // edge must keep being recalled to keep its weight. Also returns the current
+  // captured-resonance flags so the sleep pass can surface runaway hot paths.
+  async sweep(opts: { cycleMs?: number; floor?: number; nowMs?: number; cap?: number } = {}): Promise<{ decayed: number; pruned: number; flags: ResonanceFlag[] }> {
+    await this.ensureSchema();
+    const cycleMs = opts.cycleMs ?? 86_400_000;      // 1 day = 1 cycle
+    const floor = opts.floor ?? 0.05;
+    const now = opts.nowMs ?? Date.now();
+    const cap = Math.min(2000, opts.cap ?? 1000);
+    const r = await this.db.prepare(
+      `SELECT src, dst, kind, weight, last_seen_at FROM elle_memory_edges LIMIT 5000`
+    ).all().catch(() => ({ results: [] as any[] }));
+    const rows = (r.results as Array<{ src: string; dst: string; kind: EdgeKind; weight: number; last_seen_at: string | null }>) || [];
+    if (!rows.length) return { decayed: 0, pruned: 0, flags: [] };
+
+    const flags = capturedResonanceScan(rows.map((x) => ({ src: x.src, dst: x.dst, kind: x.kind, weight: x.weight })));
+    const staleCutoff = now - cycleMs;
+    const updates: Array<{ src: string; dst: string; kind: EdgeKind; w: number }> = [];
+    const prunes: Array<{ src: string; dst: string; kind: EdgeKind }> = [];
+    for (const row of rows) {
+      const seen = row.last_seen_at ? Date.parse(row.last_seen_at) : now;
+      if (Number.isFinite(seen) && seen >= staleCutoff) continue; // fresh this cycle
+      const nw = decayedWeight(row.weight, 1, floor);             // one cycle of φ⁻¹ decay
+      if (nw <= 0) prunes.push({ src: row.src, dst: row.dst, kind: row.kind });
+      else updates.push({ src: row.src, dst: row.dst, kind: row.kind, w: nw });
+      if (updates.length + prunes.length >= cap) break;
+    }
+
+    const stmts = [
+      ...updates.map((u) => this.db.prepare(`UPDATE elle_memory_edges SET weight = ? WHERE src = ? AND dst = ? AND kind = ?`).bind(u.w, u.src, u.dst, u.kind)),
+      ...prunes.map((p) => this.db.prepare(`DELETE FROM elle_memory_edges WHERE src = ? AND dst = ? AND kind = ?`).bind(p.src, p.dst, p.kind)),
+    ];
+    if (stmts.length) await this.db.batch(stmts).catch(() => {});
+    return { decayed: updates.length, pruned: prunes.length, flags: flags.slice(0, 10) };
+  }
 }
+
+// ── edge hygiene: φ⁻ⁿ retention decay + captured-resonance diagnostic ──
+// The association mechanism above (recordAssociations → weight bump on every
+// co-recall, capped but never decayed) is a MONOTONE strengthener: hot edges
+// get hotter by being recalled, the recall operation is recruited into its own
+// reinforcement, and strong edges crowd out alternatives. That is exactly the
+// three-feature "captured resonance" pathology of the corpus (a stable attractor
+// against substrate maintenance, the integrative faculty recruited into it,
+// alternatives suppressed). The corrective is the framework's own φ⁻ⁿ retention
+// law: an edge must keep earning its weight or fade.
+
+export const RETENTION_BASE = (1 + Math.sqrt(5)) / 2; // φ
+
+// Total retained fraction after `ageCycles` idle consolidation cycles: φ⁻ⁿ.
+export function retention(ageCycles: number): number {
+  return Math.pow(RETENTION_BASE, -Math.max(0, ageCycles));
+}
+
+// Apply `cycles` of decay to a weight; below `floor` it is gone (prune).
+export function decayedWeight(weight: number, cycles: number, floor = 0): number {
+  const w = Math.max(0, weight) * retention(cycles);
+  return w < floor ? 0 : round(w, 4);
+}
+
+export interface ResonanceFlag { node: string; dominance: number; degree: number; top: string; total_weight: number }
+
+// A captured-resonance candidate is a well-connected node whose incident
+// edge-weight mass concentrates on ONE neighbor past `threshold` — the recall
+// loop has run away into a single hot path. Pure, O(edges).
+export function capturedResonanceScan(
+  edges: MemEdge[],
+  opts: { threshold?: number; minDegree?: number } = {},
+): ResonanceFlag[] {
+  const threshold = opts.threshold ?? 0.6;
+  const minDegree = opts.minDegree ?? 3;
+  const inc = new Map<string, { total: number; max: number; top: string; deg: number }>();
+  const add = (node: string, other: string, w: number) => {
+    const e = inc.get(node) || { total: 0, max: 0, top: '', deg: 0 };
+    e.total += w; e.deg += 1;
+    if (w > e.max) { e.max = w; e.top = other; }
+    inc.set(node, e);
+  };
+  for (const e of edges) {
+    if (!e || !e.src || !e.dst || e.src === e.dst) continue;
+    const w = Math.max(0, e.weight);
+    add(e.src, e.dst, w); add(e.dst, e.src, w);
+  }
+  const flags: ResonanceFlag[] = [];
+  for (const [node, s] of inc) {
+    if (s.deg < minDegree || s.total <= 0) continue;
+    const dominance = s.max / s.total;
+    if (dominance >= threshold) flags.push({ node, dominance: round(dominance, 4), degree: s.deg, top: s.top, total_weight: round(s.total, 4) });
+  }
+  return flags.sort((a, b) => b.dominance - a.dominance);
+}
+
+function round(x: number, p: number): number { const f = 10 ** p; return Math.round(x * f) / f; }
 
 // ── traversal driver: seed → spread over fetched frontiers ───
 // Bounded BFS: fetch the seed frontier's edges, spread one hop, fetch the newly

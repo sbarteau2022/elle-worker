@@ -146,13 +146,14 @@ shipped code, and it stands on its own even if the rest of the torus work waits.
 
 ## 7. The product space, and the one decision that is yours
 
-The full signature the corpus implies is **ℍⁿ × 𝕋ᵈ × (lemniscate)**:
+The corpus suggested **ℍⁿ × 𝕋ᵈ × (lemniscate)**; the built signature is
+**ℍⁿ × 𝕋ᵈ** — the lemniscate factor was disproved as unnecessary (below):
 
 | Factor | Question it answers | Source |
 |---|---|---|
 | **ℍⁿ** hyperbolic | what derives from what (hierarchy, depth) | `hyper.ts` (built) |
-| **𝕋ᵈ** torus | what recurs, what shares phase (rhythm, winding) | this spec |
-| **lemniscate** | what stays the same self across recurrence (identity) | *SICT* §III.3 |
+| **𝕋ᵈ** torus | what recurs, what shares phase, and the exact identity across recurrence (winding) | `torus.ts` + `product.ts` (built) |
+| ~~lemniscate~~ | ~~identity across recurrence~~ — **dropped**, subsumed by the winding invariant | `docs/WHY_NO_LEMNISCATE.md` |
 
 Product distance `d² = d_ℍ² + d_𝕋²` makes each node a pair (depth, phase); the
 *disagreements* are the payoff — close on the torus but far in the ball = same
@@ -163,21 +164,23 @@ Product Spaces* (ICLR 2019), which learns the signature from the graph's own
 distance matrix — so the memory graph could *tell us* its torus/ball split rather
 than us decreeing it.
 
-**The decision.** *Substrate Identity Continuity* §III.3 is explicit that a plain
-torus gives only Category-3 dynamics — quasi-periodic orbits that satisfy identity
-continuity *asymptotically, never exactly*; the exact "recognition" property needs
-the **lemniscate** as a separate factor. So:
+**Resolved: Scope A, and Scope B is dropped as unnecessary.** *Substrate
+Identity Continuity* §III.3 claims a plain torus gives only Category-3 dynamics —
+quasi-periodic orbits that satisfy identity continuity *asymptotically, never
+exactly* — and that the exact "recognition" property needs the **lemniscate** as
+a separate factor (this was Scope B). Building the product space disproved that:
+the torus factor's **winding number** is an exact topological invariant (the path
+class in π₁(𝕋ⁿ) = ℤⁿ), exact at every finite time, which is precisely an
+exact-recognition mechanism. SICT's Category-3 elimination tests *metric return*
+(does the orbit come back to the same point — only asymptotic for φ-winding), not
+*topological invariance* (the winding number — exact). The lemniscate is
+therefore sufficient but **not necessary**; the product ℍⁿ × 𝕋ᵈ already carries
+the exact readout. Full argument + executable demonstration:
+**`docs/WHY_NO_LEMNISCATE.md`** and `src/product.test.ts`.
 
-- **Option A (recommended to start):** scope the torus factor to **periodic
-  structure only** — winding, phase kinship, discrepancy. Clean, buildable now,
-  claims nothing about identity/recognition. The lemniscate stays future work.
-- **Option B:** add the lemniscate identity layer so the chart carries a
-  recognition/continuity readout — larger, and it commits the map to the framework's
-  strongest metaphysical claim.
-
-I recommend A first; B is a clean follow-on once A is validated. This is the one
-call I want from you before writing code, because it changes what the map is
-allowed to *claim*, not just what it computes.
+- **Scope A (adopted):** torus factor carries **periodic structure** — winding,
+  phase kinship, discrepancy — plus the exact recognition invariant via winding.
+- **Scope B (dropped):** the lemniscate identity layer is redundant; not built.
 
 ## 8. Proposed interfaces (so implementation is a straight shot)
 
@@ -237,16 +240,17 @@ full/cofounder scope).
    against `docs/tit/` (1-D golden orbit `N·D* → 1`, `nobility(φ−1) ≈ φ⁻²`).
 2. **PAMI-phase encoder** — `pamiPhasesToTorus` seats the 8 PAMI phases on 𝕋⁸.
    ✅ **built**.
-3. **`graph.ts` hygiene** — φ⁻ⁿ edge decay + captured-resonance diagnostic.
-   ⏳ **next** (independently valuable; ships without the rest).
+3. **`graph.ts` hygiene** — φ⁻ⁿ edge decay + captured-resonance diagnostic
+   (`retention`, `decayedWeight`, `capturedResonanceScan`, `CloudGraphStore.sweep`),
+   run nightly from `runConsolidation`. ✅ **built**.
 4. **`torusMap` + `torusRoute`** — atlas, R2 storage under `torus/`, router tool
    line, modes map/neighbors/dist/align/winding/nobility. ✅ **built**.
-5. **Product-space glue** — combine with `hyper.ts` for the (depth, phase) pair
-   and the two disagreement readouts (same rhythm/different lineage; same
-   lineage/drifted phase). ⏳ **follow-on**.
-6. **(Option B, deferred)** lemniscate identity layer — held for a separate
-   decision; not built.
+5. **Product-space glue** — `src/product.ts`: the (depth, phase) pair, the two
+   disagreement readouts (same rhythm/different lineage; same lineage/drifted
+   phase), and the exact recognition invariant. Wired as the `product` tool.
+   ✅ **built**.
+6. **~~Lemniscate identity layer (Scope B)~~** — **dropped**: the winding
+   invariant already provides exact recognition (`docs/WHY_NO_LEMNISCATE.md`).
 
-Steps 1, 2, 4 are shipped and self-contained. Step 3 (`graph.ts` hygiene) is the
-recommended next push; step 5 is where the two charts become one instrument;
-step 6 is the metaphysical commitment held back by the Scope-A decision.
+All steps built. The mapping is complete with two factors — ℍⁿ (depth) and 𝕋ᵈ
+(phase + winding) — fused in `product.ts`. There is no third factor.
