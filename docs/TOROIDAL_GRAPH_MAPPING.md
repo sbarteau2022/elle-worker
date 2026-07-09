@@ -248,6 +248,9 @@ full/cofounder scope).
 5. **Product-space glue** — `src/product.ts`: the (depth, phase) pair, the two
    disagreement readouts (same rhythm/different lineage; same lineage/drifted
    phase), and the exact recognition invariant. Wired as the `product` tool.
+   The ℍ-vs-𝕋 **mix is read off the graph** via `structure.ts`'s
+   `curvatureSignature` (`resolveMix`) — tree-like graphs weight the ball, cyclic
+   graphs weight the torus, so the charts are fit to the graph, not imposed.
    ✅ **built**.
 6. **~~Lemniscate identity layer (Scope B)~~** — **dropped**: the winding
    invariant already provides exact recognition (`docs/WHY_NO_LEMNISCATE.md`).
