@@ -23,7 +23,7 @@ import type { RouterDeps, RouterResult, Scope } from './router';
 
 type RunRouterFn = (
   question: string, env: Env, deps: RouterDeps,
-  opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string },
+  opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; prefer?: 'local' },
 ) => Promise<RouterResult>;
 
 export const VOLITION_SESSION = 'volition';
@@ -59,8 +59,11 @@ export function volitionPrompt(hourUTC: number): string {
 export async function runVolition(env: Env, runRouterFn: RunRouterFn, deps: RouterDeps): Promise<{ ran: string }> {
   const hour = new Date().getUTCHours();
   const started = Date.now();
+  // Autonomous free tick — prefer the sovereign local lane (her own hardware
+  // over the sandbox socket) so this hourly moment doesn't spend hosted quota;
+  // demotes to hosted transparently when the laptop path is closed.
   const out = await runRouterFn(volitionPrompt(hour), env, deps, {
-    maxSteps: MAX_STEPS, userId: 'elle', scope: 'full', sessionId: VOLITION_SESSION, source: 'volition',
+    maxSteps: MAX_STEPS, userId: 'elle', scope: 'full', sessionId: VOLITION_SESSION, source: 'volition', prefer: 'local',
   });
   const rested = /^\s*resting\b/i.test(out.answer || '');
   await env.DB.prepare(

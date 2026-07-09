@@ -17,6 +17,16 @@
 //   LLM_MODEL_CODE         = qwen/qwen3-coder:free
 //   LLM_MODEL_REASONING    = gemini-2.5-flash
 //
+// Extra free tiers — OPTIONAL, tried as additional fallback lanes only when set,
+// to rotate around each other's daily caps (see callExtraFreeTiers):
+//   LLM_GROQ_KEY           = gsk_...             (console.groq.com — free, fast)
+//   LLM_GITHUB_MODELS_KEY  = github_pat_...      (github.com/marketplace/models)
+//
+// Autonomous/daemon callers pass callLLM(..., { prefer:'local' }) so their loops
+// spend self-hosted Ollama + the free Workers AI pool FIRST and leave the hosted
+// free-tier quota for interactive user turns. Never used for the 'research' tier
+// (its value is the hosted provider's live web search).
+//
 // Self-hosted last resort — used ONLY when every hosted free tier above is
 // rate-limited/exhausted at once (see callLLM):
 //   LLM_OLLAMA_URL         = https://<your-ollama-host>   (e.g. a CF Tunnel)
@@ -52,6 +62,17 @@ export interface LLMEnv {
   // free tier is exhausted (every :free model draws on ONE daily quota) and
   // Gemini/Grok/Ollama are unavailable, this keeps Elle answerable with no key.
   AI?: { run(model: string, inputs: Record<string, unknown>): Promise<unknown> };
+  // Extra OpenAI-compatible free tiers — tried as ADDITIONAL fallback lanes when
+  // their key is set (see callExtraFreeTiers). Each provider has its own daily
+  // cap, so rotating across them multiplies the free ceiling before any paid or
+  // self-hosted tier is touched. Both speak the OpenAI /chat/completions schema.
+  //   Groq          — api.groq.com; free tier, very fast Llama-3.3-70B / Qwen
+  //   GitHub Models — models.inference.ai.azure.com; free tier, GPT-4o-class
+  LLM_GROQ_KEY?:           string;
+  LLM_MODEL_GROQ?:         string;
+  LLM_GITHUB_MODELS_KEY?:  string;
+  LLM_MODEL_GITHUB?:       string;
+  LLM_GITHUB_MODELS_URL?:  string; // override the GitHub Models endpoint if it moves
   // Legacy fallback
   ANTHROPIC_API_KEY?:  string;
   LLM_BASE_URL?:       string;
@@ -82,6 +103,12 @@ const DEFAULT_OLLAMA    = 'llama3.3:70b'; // 70B instruct; override per host wit
 // the cheap 8B if the larger model is over its neuron budget.
 const DEFAULT_WORKERS_AI = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const WORKERS_AI_SMALL   = '@cf/meta/llama-3.1-8b-instruct';
+// Extra free-tier defaults (overridable per-secret). Groq's llama-3.3-70b is a
+// strong, fast free model; GitHub Models' gpt-4o-mini has the highest free
+// request allowance of its family (gpt-4o is available via LLM_MODEL_GITHUB).
+const DEFAULT_GROQ       = 'llama-3.3-70b-versatile';
+const DEFAULT_GITHUB     = 'gpt-4o-mini';
+const GITHUB_MODELS_URL  = 'https://models.inference.ai.azure.com/chat/completions';
 
 // Known-dead / legacy model ids that a stale Worker secret may still carry.
 // They are remapped to the live id at call time so a bad secret can never take
@@ -110,6 +137,8 @@ export const MODEL = {
   code:      (e: LLMEnv) => normalizeModel(e.LLM_MODEL_CODE,      DEFAULT_CODE),
   reasoning: (e: LLMEnv) => normalizeModel(e.LLM_MODEL_REASONING, DEFAULT_REASONING),
   ollama:    (e: LLMEnv) => normalizeModel(e.LLM_MODEL_OLLAMA,    DEFAULT_OLLAMA),
+  groq:      (e: LLMEnv) => normalizeModel(e.LLM_MODEL_GROQ,      DEFAULT_GROQ),
+  github:    (e: LLMEnv) => normalizeModel(e.LLM_MODEL_GITHUB,    DEFAULT_GITHUB),
 };
 
 // Coerce any provider's "content" into a plain string. Models may return a
@@ -339,6 +368,65 @@ export async function callGrok(
   };
 }
 
+// ── Groq + GitHub Models (extra OpenAI-compatible free tiers) ─
+// Both speak the OpenAI /chat/completions schema, so one caller covers them.
+// They are pure free HEADROOM: each has an independent daily quota, so rotating
+// across them (callExtraFreeTiers) raises the free ceiling before any paid or
+// self-hosted tier is reached.
+async function callOpenAICompatible(
+  label: string,
+  url: string,
+  key: string,
+  model: string,
+  system: string,
+  messages: LLMMessage[],
+  maxTokens: number,
+  temperature = 0.7,
+): Promise<LLMResponse> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      messages: [{ role: 'system', content: system }, ...messages],
+      temperature,
+    }),
+  });
+  if (!res.ok) throw new Error(`${label} ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json() as {
+    choices?: Array<{ message?: { content?: unknown; reasoning_content?: string } }>;
+    error?: { message: string };
+  };
+  if (data.error) throw new Error(`${label} error: ${data.error.message}`);
+  const msg = data.choices?.[0]?.message;
+  let content = toText(msg?.content);
+  let thinking = msg?.reasoning_content;
+  // Some Groq reasoning models wrap CoT in <think>…</think>, same as OpenRouter.
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+  if (thinkMatch) {
+    thinking = thinkMatch[1].trim();
+    content = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
+  }
+  return { content, thinking, model, provider: label };
+}
+
+export async function callGroq(
+  model: string, system: string, messages: LLMMessage[], maxTokens: number, env: LLMEnv, temperature = 0.7,
+): Promise<LLMResponse> {
+  const key = env.LLM_GROQ_KEY || '';
+  if (!key) throw new Error('LLM_GROQ_KEY not set');
+  return callOpenAICompatible('groq', 'https://api.groq.com/openai/v1/chat/completions', key, model, system, messages, maxTokens, temperature);
+}
+
+export async function callGitHubModels(
+  model: string, system: string, messages: LLMMessage[], maxTokens: number, env: LLMEnv, temperature = 0.7,
+): Promise<LLMResponse> {
+  const key = env.LLM_GITHUB_MODELS_KEY || '';
+  if (!key) throw new Error('LLM_GITHUB_MODELS_KEY not set');
+  return callOpenAICompatible('github-models', env.LLM_GITHUB_MODELS_URL || GITHUB_MODELS_URL, key, model, system, messages, maxTokens, temperature);
+}
+
 // ── Ollama (self-hosted last resort) ──────────────────────────
 // Native Ollama chat API. Reached only when every hosted free tier is
 // rate-limited/exhausted (see callLLM). Requires LLM_OLLAMA_URL to point at a
@@ -430,7 +518,7 @@ export async function callLLM(
   messages: LLMMessage[],
   maxTokens: number,
   env: LLMEnv,
-  opts: { temperature?: number } = {}
+  opts: { temperature?: number; prefer?: 'local' } = {}
 ): Promise<LLMResponse> {
   const temperature = opts.temperature;
   // Metabolism: every call is timed and recorded (in-memory ring + best-effort
@@ -439,6 +527,29 @@ export async function callLLM(
   const t0 = Date.now();
   const record = (r: LLMResponse | null, ok: boolean, provider = r?.provider || 'none', model = r?.model || 'none') =>
     recordLLMCall(env, { task, provider, model, ms: Date.now() - t0, ok, at: t0 });
+  // Autonomous callers (daemons — nobody is waiting on the answer) pass
+  // prefer:'local' to spend the operator's OWN compute (self-hosted Ollama) and
+  // the free Workers AI pool FIRST, so the hosted free-tier daily quota stays
+  // reserved for interactive user turns. Falls through to the hosted chain if
+  // neither local lane is available/healthy — an autonomous run still completes,
+  // just on shared quota. NEVER pass this for the search-grounded 'research'
+  // tier: its whole value is the hosted provider's live web search, which the
+  // local lanes cannot do.
+  if (opts.prefer === 'local') {
+    if (env.LLM_OLLAMA_URL) {
+      try {
+        const r = await callOllama(MODEL.ollama(env), system, messages, maxTokens, env, temperature ?? 0.7);
+        record(r, true); return r;
+      } catch (e) { console.error(`[LLM] local-first Ollama failed for ${task}, trying Workers AI:`, (e as Error).message); }
+    }
+    if (env.AI) {
+      try {
+        const r = await withTimeout(callWorkersAI(system, messages, maxTokens, env, DEFAULT_WORKERS_AI, temperature ?? 0.7), 22000);
+        record(r, true); return r;
+      } catch (e) { console.error(`[LLM] local-first Workers AI failed for ${task}, falling back to hosted:`, (e as Error).message); }
+    }
+    // Neither local lane worked — fall through to the hosted chain below.
+  }
   try {
     const r = await routeLLM(task, system, messages, maxTokens, env, temperature);
     record(r, true);
@@ -486,6 +597,27 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+// Extra OpenAI-compatible free tiers, tried in order and only when configured.
+// Each has its own daily quota, so this is pure free headroom on top of
+// OpenRouter/Gemini — reached as one more fallback tier inside the hosted chains
+// below. Throws if none is set or all fail, so callers treat it like any other
+// tier: try, log, fall through. NOT used for search-grounded tiers (research) —
+// neither provider does live web search.
+async function callExtraFreeTiers(
+  system: string, messages: LLMMessage[], maxTokens: number, env: LLMEnv, temperature?: number,
+): Promise<LLMResponse> {
+  const errs: string[] = [];
+  if (env.LLM_GROQ_KEY) {
+    try { return await callGroq(MODEL.groq(env), system, messages, maxTokens, env, temperature ?? 0.7); }
+    catch (e) { errs.push(`groq: ${(e as Error).message}`); }
+  }
+  if (env.LLM_GITHUB_MODELS_KEY) {
+    try { return await callGitHubModels(MODEL.github(env), system, messages, maxTokens, env, temperature ?? 0.7); }
+    catch (e) { errs.push(`github-models: ${(e as Error).message}`); }
+  }
+  throw new Error(`no extra free tier available${errs.length ? ` (${errs.join('; ')})` : ''}`);
+}
+
 async function routeLLM(
   task: LLMTask,
   system: string,
@@ -525,6 +657,8 @@ async function routeLLM(
           console.error('Gemini reasoning failed, falling back:', (e as Error).message);
         }
       }
+      try { return await callExtraFreeTiers(system, messages, maxTokens, env, temperature); }
+      catch (e) { console.error('Extra free tiers (reasoning) unavailable:', (e as Error).message); }
       return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
@@ -551,12 +685,19 @@ async function routeLLM(
           console.error('Grok code fallback failed, falling back to OpenRouter primary:', (e as Error).message);
         }
       }
+      try { return await callExtraFreeTiers(system, messages, maxTokens, env, temperature); }
+      catch (e) { console.error('Extra free tiers (code) unavailable:', (e as Error).message); }
       return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
     // Fast: Llama 3.3 70B — tutor, thread summaries
     case 'fast': {
-      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
+      try {
+        return await callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
+      } catch (e) {
+        console.error('OpenRouter fast failed, trying extra free tiers:', (e as Error).message);
+      }
+      return callExtraFreeTiers(system, messages, maxTokens, env, temperature);
     }
 
     // Trading: Gemini thinking (no search — uses Alpaca data directly)
@@ -595,6 +736,8 @@ async function routeLLM(
           console.error('Grok conversation fallback failed, falling back to Llama:', (e as Error).message);
         }
       }
+      try { return await callExtraFreeTiers(system, messages, maxTokens, env, temperature); }
+      catch (e) { console.error('Extra free tiers (conversation) unavailable:', (e as Error).message); }
       // Last resort: Llama 3.3 70B — a separate free pool from Nemotron, so Elle
       // stays queryable even when the primary, Gemini, and Grok are all unavailable.
       return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);

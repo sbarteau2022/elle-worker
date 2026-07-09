@@ -934,7 +934,10 @@ async function drainSelfIntents(env: Env): Promise<void> {
           journalWrite, journalRead, journalThread, journalAnnotate,
           loadSessionHistory, persistExchange,
         },
-        { maxSteps: 4, userId: 'self', scope: 'full', sessionId: intent.session || null, source: 'self-intent' },
+        // Autonomous follow-through (nobody waiting) — prefer the sovereign
+        // local lane so due self-notes don't spend hosted quota; demotes to
+        // hosted transparently if the laptop path is closed.
+        { maxSteps: 4, userId: 'self', scope: 'full', sessionId: intent.session || null, source: 'self-intent', prefer: 'local' },
       );
       await env.DB.prepare(
         `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'self_intent', 'daemon', ?, ?, 'info')`
