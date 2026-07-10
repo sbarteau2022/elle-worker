@@ -129,6 +129,35 @@ describe('graphExpand', () => {
     store.edges = [{ src: 'a', dst: 'b', kind: 'assoc', weight: 1 }];
     expect((await graphExpand(store, [])).size).toBe(0);
   });
+
+  describe('cycleBoost (structure-weighted expansion)', () => {
+    // A triangle A-B-C (all edges on the cycle) plus a bridge tail A-D.
+    const triangleWithTail = (): MemoryStore => {
+      const s = new MemoryStore();
+      s.edges = [
+        { src: 'A', dst: 'B', kind: 'assoc', weight: 1 },
+        { src: 'A', dst: 'C', kind: 'assoc', weight: 1 },
+        { src: 'B', dst: 'C', kind: 'assoc', weight: 1 },
+        { src: 'A', dst: 'D', kind: 'assoc', weight: 1 }, // bridge
+      ];
+      return s;
+    };
+
+    it('boosts a node reached through recurrence, leaves a bridge-only node untouched', async () => {
+      const seeds = [{ id: 'A', activation: 1 }];
+      const base = await graphExpand(triangleWithTail(), seeds, { hops: 2 });
+      const boosted = await graphExpand(triangleWithTail(), seeds, { hops: 2, cycleBoost: 2 });
+      expect(boosted.get('B')!).toBeGreaterThan(base.get('B')!);  // B is on the cycle
+      expect(boosted.get('D')!).toBeCloseTo(base.get('D')!, 9);   // D hangs off a bridge — unchanged
+    });
+
+    it('cycleBoost of 1 (or absent) is exactly the baseline (no behavior change)', async () => {
+      const seeds = [{ id: 'A', activation: 1 }];
+      const base = await graphExpand(triangleWithTail(), seeds, { hops: 2 });
+      const one = await graphExpand(triangleWithTail(), seeds, { hops: 2, cycleBoost: 1 });
+      expect([...one.entries()].sort()).toEqual([...base.entries()].sort());
+    });
+  });
 });
 
 describe('recordAssociations', () => {

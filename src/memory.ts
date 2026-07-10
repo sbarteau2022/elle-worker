@@ -39,6 +39,9 @@ type EmbedFn = (text: string, env: any) => Promise<number[]>;
 const PAGE_TTL_S = 86400;      // pages are working memory — 24h then gone
 const PAGE_SLICE = 2800;       // chars returned per page_read
 export const PAGE_THRESHOLD = 3400; // observations larger than this get paged
+// Experiment: on-cycle (recurrent) edges pull this much harder than bridges in
+// graph expansion. 1 = off (no behavior change). Bounded to the graph tier.
+const GRAPH_CYCLE_BOOST = 1.3;
 
 function rid(): string {
   const b = new Uint8Array(12);
@@ -170,7 +173,11 @@ export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 
   try {
     const store = new CloudGraphStore(env.DB);
     const seeds = scored.map(s => ({ id: s.id, activation: Math.max(0.05, s.score) }));
-    const activation = await graphExpand(store, seeds, { hops: 2 });
+    // Structure-weighted expansion (experiment): memories on a CYCLE with the
+    // seed — recurrent structure, the signal that survived the retrieval
+    // benchmark — pull ~30% harder than those on a linear derivation bridge.
+    // Bounded to this secondary tier; one constant to revert (set to 1).
+    const activation = await graphExpand(store, seeds, { hops: 2, cycleBoost: GRAPH_CYCLE_BOOST });
     const extraIds = [...activation.keys()].filter(id => !scored.some(s => s.id === id)).slice(0, k);
     if (extraIds.length) {
       const er = await env.DB.prepare(
