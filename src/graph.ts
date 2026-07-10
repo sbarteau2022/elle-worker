@@ -25,6 +25,10 @@
 // below. The spreading-activation core is store-agnostic and unit-tested.
 // ============================================================
 
+// Runtime dependency is one-way (graph → structure); structure imports only the
+// MemEdge *type* back, which is erased, so there is no import cycle.
+import { nonBridgeEdges, edgeKey } from './structure';
+
 export type EdgeKind =
   | 'assoc'        // co-recall association (symmetric, self-bootstrapping)
   | 'causal'       // A led to B (directed)
@@ -54,6 +58,10 @@ export interface SpreadOpts {
   decay?: number;        // per-hop damping (default 0.5)
   minActivation?: number; // prune below this (default 0.04)
   conductance?: Partial<Record<EdgeKind, number>>;
+  // Multiply the weight of edges that lie on a CYCLE (recurrent structure) by
+  // this factor before spreading — so activation flows harder along recurrence
+  // than along linear derivation. 1 (or absent) = off, no behavior change.
+  cycleBoost?: number;
 }
 
 // ── the pure core: spreading activation (store-agnostic, testable) ──
@@ -307,7 +315,18 @@ export async function graphExpand(
     if (!nextIds.length) break;
     frontier = nextIds.slice(0, 60); // cap frontier fan-out per hop
   }
-  return spreadActivation(seeds, collected, opts);
+  const edges = opts.cycleBoost && opts.cycleBoost !== 1
+    ? applyCycleBoost(collected, opts.cycleBoost)
+    : collected;
+  return spreadActivation(seeds, edges, opts);
+}
+
+// Boost edges on a cycle (recurrence) over bridges (linear derivation). The
+// cycle test runs over the traversed subgraph only — cheap, and it is the local
+// recurrence that matters for this seed's neighborhood.
+function applyCycleBoost(edges: MemEdge[], boost: number): MemEdge[] {
+  const onCycle = nonBridgeEdges(edges);
+  return edges.map((e) => (onCycle.has(edgeKey(e.src, e.dst)) ? { ...e, weight: Math.max(0, e.weight) * boost } : e));
 }
 
 // ── association recording (self-bootstrapping edge formation) ─

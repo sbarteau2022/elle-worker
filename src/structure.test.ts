@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   graphInvariants, cycleBasis, homologyClass, sameRecurrenceClass,
-  deltaHyperbolicity, curvatureSignature, asEdges, type Edge,
+  deltaHyperbolicity, curvatureSignature, nonBridgeEdges, edgeKey, asEdges, type Edge,
 } from './structure';
 import type { MemEdge } from './graph';
 
@@ -61,6 +61,37 @@ describe('homologyClass (recognition without embedding)', () => {
     const once = homologyClass(['0', '1', '2', '3', '0'], square);
     const twice = homologyClass(['0', '1', '2', '3', '0', '1', '2', '3', '0'], square);
     expect(Math.abs(twice[0])).toBe(2 * Math.abs(once[0]));
+  });
+});
+
+describe('nonBridgeEdges (which edges lie on a cycle)', () => {
+  const k = edgeKey;
+
+  it('a triangle: every edge is on the cycle', () => {
+    const s = nonBridgeEdges([E('a', 'b'), E('b', 'c'), E('c', 'a')]);
+    expect(s.size).toBe(3);
+    expect(s.has(k('a', 'b'))).toBe(true);
+  });
+  it('a path: no edge is on a cycle (all bridges)', () => {
+    expect(nonBridgeEdges([E('a', 'b'), E('b', 'c'), E('c', 'd')]).size).toBe(0);
+  });
+  it('a lollipop: triangle edges on the cycle, the tail is a bridge', () => {
+    const s = nonBridgeEdges([E('a', 'b'), E('b', 'c'), E('c', 'a'), E('a', 'tail')]);
+    expect(s.size).toBe(3);
+    expect(s.has(k('a', 'tail'))).toBe(false);
+  });
+  it('two triangles joined by an edge: the joining edge is the only bridge', () => {
+    const edges = [
+      E('a', 'b'), E('b', 'c'), E('c', 'a'),   // triangle 1
+      E('x', 'y'), E('y', 'z'), E('z', 'x'),   // triangle 2
+      E('a', 'x'),                              // bridge
+    ];
+    const s = nonBridgeEdges(edges);
+    expect(s.size).toBe(6);
+    expect(s.has(k('a', 'x'))).toBe(false);
+  });
+  it('is empty for a graph with no edges', () => {
+    expect(nonBridgeEdges([]).size).toBe(0);
   });
 });
 
