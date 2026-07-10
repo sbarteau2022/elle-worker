@@ -266,8 +266,24 @@ async function getUser(request: Request, env: Env): Promise<{ id: string; email:
   return { id: pl.sub, email: pl.email as string, tier: (pl.tier as string) || 'standard' };
 }
 
+// The service key grants FULL scope — it is the god credential. Compare it in
+// constant time so the header can't be recovered a byte at a time through
+// response-timing, and never match when the key is unset (an empty/undefined
+// secret must not turn `Bearer ` into a valid credential).
 function isServiceRequest(request: Request, env: Env): boolean {
-  return request.headers.get('Authorization') === `Bearer ${env.ELLE_SERVICE_KEY}`;
+  if (!env.ELLE_SERVICE_KEY) return false;
+  const presented = request.headers.get('Authorization') || '';
+  return timingSafeEqualStr(presented, `Bearer ${env.ELLE_SERVICE_KEY}`);
+}
+
+// Length-independent constant-time string comparison.
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a), bb = enc.encode(b);
+  let diff = ab.length ^ bb.length;
+  const n = Math.max(ab.length, bb.length);
+  for (let i = 0; i < n; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
 }
 
 // Privileged caller: the master service key (break-glass) OR a valid, unrevoked

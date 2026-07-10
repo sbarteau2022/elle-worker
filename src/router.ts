@@ -47,6 +47,7 @@ import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESH
 import { predictTool } from './oracle';
 import { devilTool } from './adversary';
 import { reachOutTool } from './push';
+import { ssrfGuard } from './ssrf';
 import { vfarRoute, type VfarInput } from './vfar';
 import { hyperRoute, type HyperInput } from './hyper';
 import { torusRoute, type TorusInput } from './torus';
@@ -546,9 +547,25 @@ async function runTool(
       }
       case 'fetch_url': {
         const url = String(a.url || '');
-        if (!/^https?:\/\//i.test(url)) return 'fetch_url: only http(s) URLs are allowed';
-        const r = await fetch(url, { headers: { 'User-Agent': 'elle-router/1.0' } });
-        return clip(`HTTP ${r.status}\n` + (await r.text()));
+        const guard = ssrfGuard(url);
+        if (!guard.ok) return `fetch_url: ${guard.error}`;
+        // Bound the fetch itself: a slow or endless response from an
+        // attacker-chosen host must not tie up the isolate. 10s ceiling.
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 10_000);
+        try {
+          const r = await fetch(guard.url, { headers: { 'User-Agent': 'elle-router/1.0' }, redirect: 'manual', signal: ctl.signal });
+          // A redirect could point at a blocked host (SSRF via 30x); we don't
+          // follow it — report the destination instead of chasing it.
+          if (r.status >= 300 && r.status < 400) {
+            return `fetch_url: ${r.status} redirect to ${r.headers.get('location') || '(unknown)'} — not followed`;
+          }
+          return clip(`HTTP ${r.status}\n` + (await r.text()));
+        } catch (e) {
+          return `fetch_url: request failed (${(e as Error).name === 'AbortError' ? 'timed out' : 'unreachable'})`;
+        } finally {
+          clearTimeout(timer);
+        }
       }
       case 'fetch_document': {
         const id = String(a.id || '');
