@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   spreadActivation,
   graphExpand,
+  graphExpandAB,
   recordAssociations,
   canonicalEndpoints,
   CONDUCTANCE,
@@ -156,6 +157,22 @@ describe('graphExpand', () => {
       const base = await graphExpand(triangleWithTail(), seeds, { hops: 2 });
       const one = await graphExpand(triangleWithTail(), seeds, { hops: 2, cycleBoost: 1 });
       expect([...one.entries()].sort()).toEqual([...base.entries()].sort());
+    });
+
+    it('graphExpandAB returns both arms from one traversal, matching graphExpand', async () => {
+      const seeds = [{ id: 'A', activation: 1 }];
+      const ab = await graphExpandAB(triangleWithTail(), seeds, { hops: 2 }, 2);
+      const base = await graphExpand(triangleWithTail(), seeds, { hops: 2 });
+      const boosted = await graphExpand(triangleWithTail(), seeds, { hops: 2, cycleBoost: 2 });
+      expect([...ab.base.entries()].sort()).toEqual([...base.entries()].sort());
+      expect([...ab.boosted.entries()].sort()).toEqual([...boosted.entries()].sort());
+      // the boosted arm diverges from base on the cycle node
+      expect(ab.boosted.get('B')!).toBeGreaterThan(ab.base.get('B')!);
+    });
+
+    it('graphExpandAB with boost 1 returns identical arms', async () => {
+      const ab = await graphExpandAB(triangleWithTail(), [{ id: 'A', activation: 1 }], { hops: 2 }, 1);
+      expect(ab.base).toBe(ab.boosted);
     });
   });
 });
