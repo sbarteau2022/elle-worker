@@ -40,6 +40,7 @@ import { runConsolidation } from './consolidate';
 import { handleWarRoom } from './war-room';
 import { selfMirror } from './mirror';
 import { runIngestGate } from './ingest-gate';
+import { runCorpusLineageBackfill } from './corpus-lineage';
 import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
 import { armOnboarding, disarmOnboarding } from './onboarding';
@@ -990,6 +991,15 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       // fixing the old wall-clock derivatives and filling in the new higher orders.
       const r = await backfillPhaseState(env);
       return { ran: `optimus_backfill (${r.entries} entries / ${r.threads} threads)` };
+    }
+    case 'corpus_lineage_backfill': {
+      // One-shot (idempotent, safe to re-run): link version-chained corpus
+      // papers (e.g. "..._v2" / "..._v3" / "..._v4") with `supersedes` edges
+      // in the graph memory kernel, so draft duplicates from bulk/trusted
+      // ingests resolve to "follow to the newest" instead of sitting as
+      // unlinked clones. See corpus-lineage.ts.
+      const r = await runCorpusLineageBackfill(env);
+      return { ran: `corpus_lineage_backfill (${r.edges} edges / ${r.families} families / ${r.papers} papers)` };
     }
     case 'dream':
       await runLibreMode(env as unknown as LibreEnv).catch(e => console.error('[LIBRE] run failed:', (e as Error).message));
