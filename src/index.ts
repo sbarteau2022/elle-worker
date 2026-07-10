@@ -48,6 +48,7 @@ import { pfarRoute } from './pfar';
 import { pathOpen as sandboxPathOpen, sandboxRunsRecent, sandboxBroughtIn, sandboxThoughts, sandboxReportsRecent, unseenReportCount, markReportsSeen } from './connect-sandbox';
 import { sseDoor, memberDonePayload } from './stream';
 import { handleArrival } from './arrival';
+import { memWrite, memRecall, assembleContext, type MemEnv } from './memory';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
@@ -293,6 +294,23 @@ async function isAdmin(request: Request, env: Env): Promise<boolean> {
   if (isServiceRequest(request, env)) return true;
   const u = await getUser(request, env);
   return !!u && ADMIN_TIERS.has(u.tier);
+}
+
+// Kernel HTTP door (see the /mem/* routes). A benchmark harness or offline
+// client has no login flow, so it authenticates with a token it SIGNS itself
+// using JWT_SECRET — the same shared secret the worker signs sessions with.
+// We verify that signature (+ exp) but deliberately skip the AUTH_TOKENS
+// revocation check that user sessions require: there is no session to revoke,
+// and possession of JWT_SECRET (needed to mint the token at all) is itself the
+// authorization. The break-glass service key also opens this door. This is why
+// the client only needs "the same JWT_SECRET" and nothing else.
+async function isKernelRequest(request: Request, env: Env): Promise<boolean> {
+  if (isServiceRequest(request, env)) return true;
+  if (!env.JWT_SECRET) return false;
+  const auth = request.headers.get('Authorization') || '';
+  if (!auth.startsWith('Bearer ')) return false;
+  const pl = await verifyJWT(auth.slice(7), env.JWT_SECRET);
+  return !!pl; // any correctly-signed, unexpired JWT_SECRET token is the kernel
 }
 // Tiers that may open the admin surface (the workbench) and see everything.
 // 'cofounder' is a trusted second admin: full visibility, but the router runs
@@ -1541,6 +1559,82 @@ export default {
       const privScope = routerScope(privUser?.tier);
       if (path === '/api/elle-conversation')     return handleMindConversation(body, env, privUser?.id || 'svc', privScope, ctx);
       if (path === '/api/elle-reasoning-engine') return handleConversation(body, env, privUser?.id || 'svc', 'reasoning');
+    }
+
+    // ── Kernel HTTP door: /mem/write · /mem/recall · /mem/assemble ──────────
+    // A thin, direct HTTP surface over the memory kernel (src/memory.ts) so an
+    // external harness — the benchmark package, an eval, another service — can
+    // exercise write→recall→assemble without going through the conversational
+    // router or a user login. Authenticated by isKernelRequest (a JWT the caller
+    // signs with JWT_SECRET, or the service key). These sit BEFORE the member
+    // `getUser` wall on purpose; that is why a missing route here previously
+    // fell through to a misleading 401 instead of reaching the kernel.
+    if (path === '/mem/write' || path === '/mem/recall' || path === '/mem/assemble') {
+      if (!await isKernelRequest(request, env)) {
+        return err('Unauthorized — sign a Bearer token with JWT_SECRET (or use the service key)', 401);
+      }
+      if (request.method !== 'POST') return err('POST only', 405);
+      const memEnv = env as unknown as MemEnv;
+
+      if (path === '/mem/write') {
+        const b = body as {
+          content?: string; text?: string; type?: string; importance?: number;
+          tags?: string[]; session_id?: string; sessionId?: string;
+          metadata?: Record<string, unknown>; compress_invariants?: boolean;
+        };
+        const content = String(b.content ?? b.text ?? '').trim();
+        if (!content) return err('content is required');
+        const md = b.metadata || {};
+        // Fold metadata (session id, role, arbitrary keys) into the kernel's
+        // typed write. compress_invariants is accepted and recorded as a tag so
+        // the benchmark's flag round-trips even though the kernel stores full
+        // content in every tier.
+        const tags = [
+          ...(Array.isArray(b.tags) ? b.tags.map(String) : []),
+          ...(md.role ? [`role:${String(md.role)}`] : []),
+          ...(b.compress_invariants ? ['compress_invariants'] : []),
+        ].slice(0, 12);
+        const sessionId = String(b.session_id ?? b.sessionId ?? (md.session_id as string) ?? '') || null;
+        const res = await memWrite(memEnv, embed, {
+          content,
+          type: b.type || (md.type ? String(md.type) : 'observation'),
+          importance: typeof b.importance === 'number' ? b.importance : undefined,
+          tags,
+          sessionId,
+        });
+        return json({ ok: true, id: res.id });
+      }
+
+      if (path === '/mem/recall') {
+        const b = body as { query?: string; q?: string; top_k?: number; k?: number };
+        const query = String(b.query ?? b.q ?? '').trim();
+        if (!query) return err('query is required');
+        const k = Math.max(1, Math.min(Number(b.top_k ?? b.k ?? 10) || 10, 50));
+        const recalled = await memRecall(memEnv, embed, query, k);
+        // Return a stable, self-describing shape. Each result carries both
+        // `content` and `text` (aliases) so either client convention works.
+        const results = recalled.map((m) => ({
+          id: m.id,
+          content: m.content ?? m.summary ?? '',
+          text: m.content ?? m.summary ?? '',
+          summary: m.summary,
+          score: m.score,
+          via: m.via,
+          memory_type: m.memory_type,
+          created_at: m.created_at,
+        }));
+        return json({ results, count: results.length });
+      }
+
+      // /mem/assemble — pack top memories into a char budget (context assembler).
+      {
+        const b = body as { query?: string; q?: string; budget?: number; budget_chars?: number };
+        const query = String(b.query ?? b.q ?? '').trim();
+        if (!query) return err('query is required');
+        const budget = Math.max(200, Math.min(Number(b.budget ?? b.budget_chars ?? 1600) || 1600, 12000));
+        const context = await assembleContext(memEnv, embed, query, budget);
+        return json({ context, budget });
+      }
     }
 
     // Bootstrap schema (idempotent — safe to call anytime)
