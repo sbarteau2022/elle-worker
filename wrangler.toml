@@ -1,11 +1,17 @@
 name = "elle-worker"
 main = "src/index.ts"
-# Must be <= the latest compatibility date the Cloudflare runtime has released
-# (the bundled workerd is 1.20260625 → max supported date is 2026-06-25). A date
-# set to "today" (2026-06-26) is newer than the released runtime, so `wrangler
-# deploy` is rejected by the API even though `--dry-run` (no API validation)
-# passes — that was the Workers Builds "Deployment failed" on this project.
-compatibility_date = "2026-06-25"
+# Must be <= the oldest workerd bundled by any wrangler version this project
+# runs with. `wrangler deploy` validates against the latest released runtime
+# (fine up to 2026-06-25), but `wrangler dev` runs 100% locally against
+# whatever workerd shipped with the installed wrangler binary — which lags
+# behind if that install is stale (e.g. wrangler 4.95.0 only bundles workerd
+# up to 2026-06-02), and local dev then fails hard with "This Worker requires
+# compatibility date ... but the newest date supported by this server binary
+# is ...". Pinning to 2026-06-02 keeps both `deploy` and `dev` working
+# regardless of which supported wrangler version is installed locally; bump
+# it only after confirming `npx wrangler --version` is current everywhere
+# `wrangler dev` gets run.
+compatibility_date = "2026-06-02"
 compatibility_flags = ["nodejs_compat"]
 
 # Bundle the corpus seed documents (corpus/**/*.md) as Text modules, so
