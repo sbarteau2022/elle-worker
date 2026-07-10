@@ -295,10 +295,33 @@ export async function graphExpand(
   seeds: SeedActivation[],
   opts: SpreadOpts = {},
 ): Promise<Map<string, number>> {
-  const hops = Math.max(1, opts.hops ?? 2);
   const seedIds = seeds.map(s => s.id);
   if (!seedIds.length) return new Map();
+  const collected = await collectFrontierEdges(store, seedIds, Math.max(1, opts.hops ?? 2));
+  const edges = opts.cycleBoost && opts.cycleBoost !== 1 ? applyCycleBoost(collected, opts.cycleBoost) : collected;
+  return spreadActivation(seeds, edges, opts);
+}
 
+// The A/B variant: ONE traversal (one set of DB reads), then spread twice —
+// without and with the cycle boost. Lets the live recall path serve one arm and
+// log both for the experiment, at the cost of a second pure spread pass (cheap).
+export async function graphExpandAB(
+  store: GraphStore,
+  seeds: SeedActivation[],
+  opts: SpreadOpts = {},
+  boost = 1.3,
+): Promise<{ base: Map<string, number>; boosted: Map<string, number> }> {
+  const seedIds = seeds.map(s => s.id);
+  if (!seedIds.length) return { base: new Map(), boosted: new Map() };
+  const collected = await collectFrontierEdges(store, seedIds, Math.max(1, opts.hops ?? 2));
+  const base = spreadActivation(seeds, collected, opts);
+  const boosted = boost === 1 ? base : spreadActivation(seeds, applyCycleBoost(collected, boost), opts);
+  return { base, boosted };
+}
+
+// Bounded BFS: fetch the seed frontier's edges, note the newly reached nodes,
+// fetch their edges, repeat up to `hops`. Shared by graphExpand + graphExpandAB.
+async function collectFrontierEdges(store: GraphStore, seedIds: string[], hops: number): Promise<MemEdge[]> {
   const collected: MemEdge[] = [];
   let frontier = seedIds;
   const seen = new Set(seedIds);
@@ -315,10 +338,7 @@ export async function graphExpand(
     if (!nextIds.length) break;
     frontier = nextIds.slice(0, 60); // cap frontier fan-out per hop
   }
-  const edges = opts.cycleBoost && opts.cycleBoost !== 1
-    ? applyCycleBoost(collected, opts.cycleBoost)
-    : collected;
-  return spreadActivation(seeds, edges, opts);
+  return collected;
 }
 
 // Boost edges on a cycle (recurrence) over bridges (linear derivation). The

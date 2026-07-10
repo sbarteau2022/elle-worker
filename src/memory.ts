@@ -26,7 +26,8 @@
 //                            memories into a fixed char budget for a turn.
 // ============================================================
 
-import { CloudGraphStore, graphExpand, recordAssociations } from './graph';
+import { CloudGraphStore, graphExpandAB, recordAssociations } from './graph';
+import { jaccardDistance, orderedDivergence } from './recall-ab';
 
 export interface MemEnv {
   DB: D1Database;
@@ -176,8 +177,10 @@ export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 
     // Structure-weighted expansion (experiment): memories on a CYCLE with the
     // seed — recurrent structure, the signal that survived the retrieval
     // benchmark — pull ~30% harder than those on a linear derivation bridge.
-    // Bounded to this secondary tier; one constant to revert (set to 1).
-    const activation = await graphExpand(store, seeds, { hops: 2, cycleBoost: GRAPH_CYCLE_BOOST });
+    // We compute BOTH arms in one traversal: serve the boosted arm (current
+    // behavior), log both for the live A/B. One constant reverts it (set to 1).
+    const { base, boosted } = await graphExpandAB(store, seeds, { hops: 2 }, GRAPH_CYCLE_BOOST);
+    const activation = boosted;
     const extraIds = [...activation.keys()].filter(id => !scored.some(s => s.id === id)).slice(0, k);
     if (extraIds.length) {
       const er = await env.DB.prepare(
@@ -193,6 +196,10 @@ export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 
       result = [...scored, ...extra].sort((a, b) => b.score - a.score).slice(0, k);
     }
     void recordAssociations(store, result.map(r => r.id)).catch(() => {});
+    // Live A/B log: the top-k graph-tier ids each arm surfaces (by activation,
+    // excluding the semantic hits) + their divergence. Best-effort, off the hot
+    // path's success criteria — a failed log never touches the returned recall.
+    void logRecallAB(env, query, scored, base, boosted).catch(() => {});
   } catch { /* the graph is an enhancement, never a dependency */ }
 
   return result;
@@ -216,4 +223,49 @@ export async function assembleContext(env: MemEnv, embed: EmbedFn, query: string
     }
     return lines.length ? lines.join('\n') : '';
   } catch { return ''; }
+}
+
+// ── live A/B logging for the cycle-boost experiment ───────────────────────
+// Records the graph-tier ids each arm (boost off vs on) surfaces per real
+// recall, plus their Jaccard divergence. Best-effort and off the hot path's
+// success criteria — a failed log never affects the returned recall. Read back
+// via the `recall_ab` tool (summarizeRecallAB).
+
+let recallTracesReady = false;
+async function ensureRecallTraces(env: MemEnv): Promise<void> {
+  if (recallTracesReady) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_recall_traces (
+    id TEXT PRIMARY KEY,
+    created_at INTEGER,
+    session_id TEXT,
+    query_preview TEXT,
+    semantic_count INTEGER,
+    base_top TEXT,
+    boost_top TEXT,
+    divergence REAL,
+    set_divergence REAL,
+    boost REAL
+  )`).run();
+  recallTracesReady = true;
+}
+
+async function logRecallAB(
+  env: MemEnv, query: string, scored: RecalledMem[],
+  base: Map<string, number>, boosted: Map<string, number>,
+): Promise<void> {
+  const semantic = new Set(scored.map(s => s.id));
+  const topExtra = (m: Map<string, number>): string[] =>
+    [...m.entries()].filter(([id]) => !semantic.has(id)).sort((a, b) => b[1] - a[1]).map(([id]) => id).slice(0, 8);
+  const baseTop = topExtra(base), boostTop = topExtra(boosted);
+  if (!baseTop.length && !boostTop.length) return;      // no graph tier — nothing to compare
+  const divergence = orderedDivergence(baseTop, boostTop);   // primary: order-aware
+  const setDivergence = jaccardDistance(baseTop, boostTop);  // secondary: membership
+  await ensureRecallTraces(env);
+  await env.DB.prepare(
+    `INSERT INTO elle_recall_traces (id, created_at, session_id, query_preview, semantic_count, base_top, boost_top, divergence, set_divergence, boost)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    crypto.randomUUID().replace(/-/g, ''), Date.now(), null,
+    query.slice(0, 200), scored.length, JSON.stringify(baseTop), JSON.stringify(boostTop), divergence, setDivergence, GRAPH_CYCLE_BOOST,
+  ).run();
 }

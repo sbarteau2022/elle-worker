@@ -76,8 +76,40 @@ one-off chain — recurrence is the structural signal that survived.
   the pairwise co-recall runaway the hygiene sweep suppresses.
 - **Honest caveat:** there is no offline recall eval for the memory graph yet, so
   this is a *live experiment*, not a proven win. It is deliberately mild and
-  trivially reversible. The next validation step is an A/B on real recall traces
-  (boost on vs off, win-rate per query).
+  trivially reversible.
+
+### The live A/B harness (shipped — so we can actually run the test)
+
+Every real recall now computes **both arms in one traversal** (`graphExpandAB`:
+one set of DB reads, two pure spread passes — boost off vs on), serves the
+boosted arm, and logs what each arm surfaced to `elle_recall_traces`
+(best-effort, off the hot path's success criteria — a failed log never touches
+the returned recall). Per trace we store the top-k graph-tier ids each arm
+surfaced (by activation, excluding the semantic hits) and two divergences:
+
+- **`divergence`** — *ordered positional* divergence (primary): fraction of
+  positions where the two ordered top-k differ. 0 iff the served graph tier is
+  unchanged. This catches a **pure reorder** (same members, boost lifts a
+  recurrence memory above a bridge one) — verified end-to-end: a bridge memory
+  outranking a cycle member at baseline `[farHi, B, C]` becomes `[B, C, farHi]`
+  under the boost → ordered divergence 1, set divergence 0.
+- **`set_divergence`** — Jaccard set distance (secondary): did *membership*
+  change, not just order.
+
+**Read it with the `recall_ab` tool** (full/cofounder scope). It aggregates the
+recent traces: `changed_fraction` (how often the boost changed the tier at all),
+`reorder_only_fraction` (changed order but not membership — the boost's subtle
+effect), `mean_divergence` / `mean_set_divergence`, and the most-divergent
+queries with both id sets for inspection.
+
+**What it measures and what it doesn't:** IMPACT (how much / how often the boost
+changes recall), not quality — there is no ground-truth recall label here.
+Quality is judged by eyeballing the divergent cases in `recall_ab`, or by
+correlating with a downstream usage signal once one exists. The honest live test
+is: is the boost changing recall at all, in which cases, and do those changes
+look better on inspection. If `changed_fraction` is ~0 over real traffic, the
+boost is inert and `GRAPH_CYCLE_BOOST` should go back to 1; if it changes recall
+and the divergent cases look right, it stays and we raise it.
 
 ## One-line summary
 
