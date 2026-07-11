@@ -19,6 +19,7 @@ function fakeDb(kappaRows: number[] = [], traceCount = 0): any {
         async all() { return { results: kappaRows.slice().reverse().map(k => ({ kappa: k })) }; },
       };
     },
+    async batch(stmts: Array<{ run(): Promise<unknown> }>) { return Promise.all(stmts.map(s => s.run())); },
   };
 }
 const fakeVectorize: any = { query: async () => ({ matches: [] }) };

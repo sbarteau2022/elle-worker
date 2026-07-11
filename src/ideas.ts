@@ -32,6 +32,7 @@
 // lookup failing never fails the operation that triggered it.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { pfarRoute } from './pfar';
 import { ideateTools } from './forge-ideate';
@@ -100,30 +101,7 @@ function newId(): string { return crypto.randomUUID().replace(/-/g, '').slice(0,
 let schemaReady = false;
 export async function ensureIdeasSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_ideas (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL, summary TEXT, details TEXT,
-      status TEXT DEFAULT 'pondering',
-      plan TEXT,            -- JSON: the mindmap bullets {plan:[...],improvements:[...]}
-      clones TEXT DEFAULT '[]',   -- JSON: [{clone_key,target,title,created_at}] surfaced at scoping
-      refs TEXT DEFAULT '[]',     -- JSON: [{repo,path,note}] new reference code
-      spec_paper_id TEXT,   -- corpus paper once the spec is ingested
-      intent_id TEXT,       -- the conductor intent driving the build
-      extend_count INTEGER DEFAULT 0,
-      verdict TEXT,         -- held|killed note
-      pfar TEXT,            -- JSON pressure-test fingerprint (the visual claims)
-      source TEXT DEFAULT 'elle',
-      created_at INTEGER, updated_at INTEGER)`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_ideas_status ON elle_ideas(status, updated_at DESC)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_idea_log (
-      id TEXT PRIMARY KEY, idea_id TEXT, stage TEXT, note TEXT, created_at INTEGER)`),
-    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_idea_log ON elle_idea_log(idea_id, created_at DESC)`),
-  ]);
-  // forge_spec (JSON ForgeSpec) rides the row when the 70B proposes a bubble
-  // that's already forge-ready — name, language, and acceptance goals — so
-  // "ship to the sandbox" needs no further authoring. Idempotent add.
-  await env.DB.prepare(`ALTER TABLE elle_ideas ADD COLUMN forge_spec TEXT`).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

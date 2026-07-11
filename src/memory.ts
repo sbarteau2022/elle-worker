@@ -26,6 +26,7 @@
 //                            memories into a fixed char budget for a turn.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import { CloudGraphStore, graphExpandAB, recordAssociations } from './graph';
 import { jaccardDistance, orderedDivergence } from './recall-ab';
 
@@ -293,18 +294,7 @@ export async function assembleContext(env: MemEnv, embed: EmbedFn, query: string
 let recallTracesReady = false;
 async function ensureRecallTraces(env: MemEnv): Promise<void> {
   if (recallTracesReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_recall_traces (
-    id TEXT PRIMARY KEY,
-    created_at INTEGER,
-    session_id TEXT,
-    query_preview TEXT,
-    semantic_count INTEGER,
-    base_top TEXT,
-    boost_top TEXT,
-    divergence REAL,
-    set_divergence REAL,
-    boost REAL
-  )`).run();
+  await ensureAllSchemas(env.DB);
   recallTracesReady = true;
 }
 

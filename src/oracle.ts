@@ -20,24 +20,14 @@
 // memory ("I was wrong about …") so the lesson enters her recall.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_predictions (
-    id TEXT PRIMARY KEY,
-    claim TEXT NOT NULL,
-    confidence REAL NOT NULL,
-    resolve_by INTEGER NOT NULL,
-    status TEXT DEFAULT 'open',        -- open | true | false | void
-    resolution_note TEXT,
-    resolved_at INTEGER,
-    source TEXT DEFAULT 'router',
-    created_at INTEGER
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_predictions_due ON elle_predictions(status, resolve_by)`).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

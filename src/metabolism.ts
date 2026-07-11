@@ -1,3 +1,4 @@
+import { ensureAllSchemas } from './db/schema';
 // ============================================================
 // METABOLISM — src/metabolism.ts
 //
@@ -37,10 +38,7 @@ export function recordLLMCall(env: unknown, rec: LLMCallRecord): void {
   void (async () => {
     try {
       if (!schemaReady) {
-        await db.prepare(`CREATE TABLE IF NOT EXISTS elle_llm_calls (
-          id TEXT PRIMARY KEY, task TEXT, provider TEXT, model TEXT,
-          ms INTEGER, ok INTEGER, created_at INTEGER
-        )`).bind().run();
+        await ensureAllSchemas(db as unknown as D1Database);
         schemaReady = true;
       }
       await db.prepare(

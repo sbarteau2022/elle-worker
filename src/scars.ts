@@ -16,20 +16,13 @@
 // (repeated failures in the event bus get promoted to scars automatically).
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 let schemaReady = false;
 export async function ensureScarSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_scars (
-    id TEXT PRIMARY KEY,
-    tool TEXT,                       -- null = applies to any tool
-    pattern TEXT NOT NULL,           -- substring matched against the args JSON (case-insensitive)
-    wound TEXT NOT NULL,             -- what went wrong, in one or two sentences
-    hits INTEGER DEFAULT 0,          -- times the flinch has fired
-    source TEXT DEFAULT 'router',
-    created_at INTEGER
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

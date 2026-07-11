@@ -18,6 +18,7 @@
 // passed here must match what that caller proved.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import { callLLM, sanitizeAnswer, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
@@ -499,13 +500,7 @@ async function alpacaOrder(
 let notebookReady = false;
 export async function ensureNotebook(env: Env): Promise<void> {
   if (notebookReady) return;
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS elle_notebook (
-       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-       title TEXT NOT NULL, body TEXT NOT NULL, mood TEXT,
-       tags TEXT DEFAULT '[]', source TEXT DEFAULT 'router',
-       created_at TEXT DEFAULT (datetime('now')))`
-  ).run();
+  await ensureAllSchemas(env.DB);
   notebookReady = true;
 }
 

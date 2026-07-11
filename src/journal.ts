@@ -21,6 +21,7 @@
 //      and nothing downstream ranks on it.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 import { ELLE_VOICE } from './mind';
@@ -36,28 +37,7 @@ function id(): string {
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS optimus_threads (
-      id TEXT PRIMARY KEY, user_id TEXT, session_id TEXT, title TEXT,
-      anchor_topic TEXT, created_at INTEGER, updated_at INTEGER)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS optimus_entries (
-      id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, content TEXT,
-      off_record INTEGER DEFAULT 0, kappa REAL, kappa_ts INTEGER,
-      reserve REAL, velocity REAL, accel REAL, jerk REAL, anchor_distance REAL,
-      vectorize_id TEXT, threads_json TEXT, created_at INTEGER)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS optimus_marginalia (
-      id TEXT PRIMARY KEY, entry_id TEXT, anchor_para INTEGER, note TEXT,
-      off_record INTEGER DEFAULT 0, created_at INTEGER)`),
-  ]);
-  // Backfill new columns on tables created before they shipped — CREATE TABLE IF
-  // NOT EXISTS never alters an existing table. Best-effort: each ALTER throws
-  // "duplicate column" once the column exists, which we swallow.
-  await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN threads_json TEXT').run().catch(() => {});
-  await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN jerk REAL').run().catch(() => {});
-  // Which κ formula produced this row's kappa. NULL = legacy v1 (the formula
-  // with the 0.5 fixed point) — series reads filter to tagged rows so finite
-  // differences never straddle a definition change.
-  await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN kappa_def TEXT').run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

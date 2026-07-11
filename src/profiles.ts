@@ -12,6 +12,7 @@
 // meeting someone new, never an error.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 export interface UserProfile {
@@ -25,14 +26,7 @@ export interface UserProfile {
 let schemaReady = false;
 export async function ensureProfileSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_profiles (
-    user_id TEXT PRIMARY KEY,
-    email TEXT,
-    display_name TEXT,
-    profile TEXT,
-    updated_at INTEGER
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_profiles_email ON user_profiles(email)`).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

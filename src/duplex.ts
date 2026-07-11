@@ -26,6 +26,7 @@
 // saw) — the ledger itself never carries read-state, it is the record.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 export type DuplexSpeaker = 'sovereign' | 'cloud';
@@ -49,20 +50,7 @@ export function validateDuplexMsg(speaker: unknown, content: unknown): string | 
 let schemaReady = false;
 export async function ensureDuplexSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_duplex_ledger (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    id TEXT UNIQUE,
-    speaker TEXT NOT NULL CHECK (speaker IN ('sovereign','cloud')),
-    kind TEXT NOT NULL DEFAULT 'say' CHECK (kind IN ('say','observe')),
-    content TEXT NOT NULL,
-    created_at INTEGER NOT NULL)`).run();
-  // The master copy is immutable and append-only BY SUBSTRATE, not by promise.
-  await env.DB.prepare(`CREATE TRIGGER IF NOT EXISTS duplex_no_update
-    BEFORE UPDATE ON elle_duplex_ledger
-    BEGIN SELECT RAISE(ABORT, 'the duplex master copy is append-only'); END`).run().catch(() => {});
-  await env.DB.prepare(`CREATE TRIGGER IF NOT EXISTS duplex_no_delete
-    BEFORE DELETE ON elle_duplex_ledger
-    BEGIN SELECT RAISE(ABORT, 'the duplex master copy is append-only'); END`).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

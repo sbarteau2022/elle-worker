@@ -15,6 +15,7 @@
 // binding constraint is instead of thrashing.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 
@@ -65,9 +66,7 @@ export function parseConstraint(text: unknown): ConstraintResult | null {
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_constraint_log (
-    id TEXT PRIMARY KEY, objective TEXT, bottleneck TEXT, confidence REAL,
-    missing_information TEXT, suggested_next_action TEXT, created_at INTEGER)`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

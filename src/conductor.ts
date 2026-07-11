@@ -28,6 +28,7 @@
 // base is still a human click on GitHub, every time.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import type { RouterDeps, RouterResult, Scope } from './router';
 import { evaluateWatches } from './watches';
@@ -90,22 +91,7 @@ export function pickWork(
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_intents (
-      id TEXT PRIMARY KEY, title TEXT, goal TEXT,
-      status TEXT DEFAULT 'proposed', priority INTEGER DEFAULT 5,
-      source TEXT DEFAULT 'stewart', created_at INTEGER, updated_at INTEGER,
-      last_run_at INTEGER, runs INTEGER DEFAULT 0, last_outcome TEXT)`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_runs (
-      id TEXT PRIMARY KEY, intent_id TEXT, kind TEXT,
-      started_at INTEGER, finished_at INTEGER, steps INTEGER,
-      outcome TEXT, trace_json TEXT)`),
-    env.DB.prepare('CREATE INDEX IF NOT EXISTS elle_runs_started ON elle_runs (started_at DESC)'),
-  ]);
-  // `draft` was added with the ready-to-ship lane — the sovereign's handoff
-  // (spec/plan/findings) the cloud finalize run conditions on. ADD COLUMN
-  // throws if it already exists; swallow so this stays idempotent live.
-  await env.DB.prepare('ALTER TABLE elle_intents ADD COLUMN draft TEXT').run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

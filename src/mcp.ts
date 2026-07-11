@@ -23,6 +23,7 @@
 // SCOPE: full (admin) only — these tools reach arbitrary external services.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 const CALL_TIMEOUT_MS = 20000;
@@ -68,9 +69,7 @@ export function renderContent(result: any): string {
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_mcp_servers (
-    name TEXT PRIMARY KEY, url TEXT NOT NULL, auth_token TEXT,
-    enabled INTEGER DEFAULT 1, added_at INTEGER)`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
   // Seed: Hugging Face's official MCP server. Anonymous works for public
   // search; add a token later via mcp_add to raise limits.

@@ -11,6 +11,7 @@
 // resolved { userId, email }.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 function id(): string {
@@ -20,14 +21,7 @@ function id(): string {
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS madmind_submissions (
-      id TEXT PRIMARY KEY, author_id TEXT, author_email TEXT, byline TEXT,
-      title TEXT, abstract TEXT, body TEXT, keywords TEXT,
-      status TEXT DEFAULT 'submitted', created_at INTEGER)`),
-    env.DB.prepare('CREATE INDEX IF NOT EXISTS madmind_sub_created ON madmind_submissions (created_at DESC)'),
-    env.DB.prepare('CREATE INDEX IF NOT EXISTS madmind_sub_author ON madmind_submissions (author_id)'),
-  ]);
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

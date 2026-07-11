@@ -14,6 +14,7 @@
 // exact stack — so day one is not a blank shelf.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 export const MAX_SKILL_BODY = 8000;
@@ -36,14 +37,7 @@ export function validateSkill(name: string, description: string, body: string): 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_skills (
-    name TEXT PRIMARY KEY, description TEXT, body TEXT,
-    source TEXT DEFAULT 'elle', uses INTEGER DEFAULT 0,
-    created_at INTEGER, updated_at INTEGER)`).run();
-  // The skill ROUTER's cache: each skill's embedding (JSON float[]), computed on
-  // write and lazily backfilled, so routing a task to its method is one task
-  // embed + in-worker cosine — no per-request re-embedding of the library.
-  await env.DB.prepare(`ALTER TABLE elle_skills ADD COLUMN embedding TEXT`).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
   await seed(env);
 }

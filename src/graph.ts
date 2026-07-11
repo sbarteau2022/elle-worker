@@ -27,6 +27,7 @@
 
 // Runtime dependency is one-way (graph → structure); structure imports only the
 // MemEdge *type* back, which is erased, so there is no import cycle.
+import { ensureAllSchemas } from './db/schema';
 import { nonBridgeEdges, edgeKey } from './structure';
 
 export type EdgeKind =
@@ -144,19 +145,7 @@ export class CloudGraphStore implements GraphStore {
 
   async ensureSchema(): Promise<void> {
     if (this.ready) return;
-    await this.db.prepare(`CREATE TABLE IF NOT EXISTS elle_memory_edges (
-      id TEXT PRIMARY KEY,
-      src TEXT NOT NULL,
-      dst TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      weight REAL DEFAULT 1.0,
-      run_id TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      last_seen_at TEXT,
-      UNIQUE(src, dst, kind)
-    )`).run();
-    await this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_edges_src ON elle_memory_edges(src, kind)`).run().catch(() => {});
-    await this.db.prepare(`CREATE INDEX IF NOT EXISTS idx_edges_dst ON elle_memory_edges(dst, kind)`).run().catch(() => {});
+    await ensureAllSchemas(this.db);
     this.ready = true;
   }
 
