@@ -54,6 +54,10 @@ async function ensureSchema(env: Env): Promise<void> {
   // "duplicate column" once the column exists, which we swallow.
   await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN threads_json TEXT').run().catch(() => {});
   await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN jerk REAL').run().catch(() => {});
+  // Which κ formula produced this row's kappa. NULL = legacy v1 (the formula
+  // with the 0.5 fixed point) — series reads filter to tagged rows so finite
+  // differences never straddle a definition change.
+  await env.DB.prepare('ALTER TABLE optimus_entries ADD COLUMN kappa_def TEXT').run().catch(() => {});
   schemaReady = true;
 }
 
@@ -62,14 +66,90 @@ async function ensureSchema(env: Env): Promise<void> {
 // the derivation can be exercised end-to-end. The validated estimator drops
 // in HERE, behind this exact seam, only after the kill-or-build gate passes.
 // Replacing this function must not require touching anything below it.
-export function computeKappa(content: string): number {
+//
+// lex2 — the fixed-point repair. The v1 formula was 0.5 + (grounded−hedge)/N
+// over two ~10-word lexicons, so EVERY text containing none of those words
+// (84% of production turns) landed on exactly 0.5000: not a measurement, a
+// resting value, and downstream it read as a fabricated flat κ trajectory.
+// lex2 keeps the same intent (grounded assertion ↑, hedging ↓) but mixes in
+// continuous features every text has — connective density and lexical
+// diversity — so the output varies over ALL input and the point-mass at 0.5
+// disappears. Rows are tagged kappa_def='lex2' so series never mix regimes.
+// STILL PROVISIONAL: continuous ≠ validated. Gate 0 (which κ definition) and
+// Gate 2 (ground truth) remain open; this only makes the series informative
+// enough to be worth validating.
+export const KAPPA_DEF = 'lex2';
+
+const HEDGE_RE = /\b(maybe|perhaps|might|possibly|unclear|not sure|i think|seems|arguably|i guess|sort of|kind of|probably|somewhat|apparently|presumably)\b/g;
+const GROUNDED_RE = /\b(clearly|certainly|definitely|necessarily|proven|forced|therefore|because|follows that|must|precisely|exactly|always|never|in fact)\b/g;
+// Discourse connectives — the joints of an argument. Overlaps GROUNDED_RE on
+// therefore/because by design: those words carry both assertion and structure.
+const CONNECTIVE_RE = /\b(because|therefore|so|but|however|although|though|since|thus|hence|while|whereas|instead|unless|if|then|and yet|still|moreover|meanwhile)\b/g;
+
+export interface KappaDetail {
+  kappa: number;
+  def: typeof KAPPA_DEF;
+  grounded: number; hedge: number;
+  words: number; sentences: number;
+  connective_density: number;  // connectives per sentence
+  ttr: number;                 // type-token ratio over a 300-token window (observability)
+  trigram_repetition: number;  // 1 − unique/total token trigrams (circling signal)
+  avg_word_len: number;        // chars per word
+  words_per_sentence: number;
+}
+
+export function computeKappaDetail(content: string): KappaDetail {
   const text = String(content || '').toLowerCase();
-  const words = text.split(/\s+/).filter(Boolean).length || 1;
-  const hedge = (text.match(/\b(maybe|perhaps|might|possibly|unclear|not sure|i think|seems|arguably|i guess|sort of)\b/g) || []).length;
-  const grounded = (text.match(/\b(clearly|certainly|definitely|necessarily|proven|forced|therefore|because|follows that|must)\b/g) || []).length;
-  // crude balance of grounded assertion vs hedging, length-normalized → [0,1]
-  const raw = 0.5 + (grounded - hedge) / Math.max(20, words / 5);
-  return Math.max(0, Math.min(1, Number(raw.toFixed(4))));
+  const tokens = text.split(/\s+/).filter(Boolean);
+  const words = tokens.length;
+  if (!words) return { kappa: 0.5, def: KAPPA_DEF, grounded: 0, hedge: 0, words: 0, sentences: 0, connective_density: 0, ttr: 0, trigram_repetition: 0, avg_word_len: 0, words_per_sentence: 0 };
+
+  const sentences = Math.max(1, (text.match(/[.!?]+(?:\s|$)/g) || []).length);
+  const hedge = (text.match(HEDGE_RE) || []).length;
+  const grounded = (text.match(GROUNDED_RE) || []).length;
+  const connectives = (text.match(CONNECTIVE_RE) || []).length;
+  // TTR over a fixed window — kept for observability; the circling penalty
+  // below uses trigram repetition, which stays 0 for ordinary short prose.
+  const win = tokens.slice(0, 300);
+  const ttr = new Set(win).size / win.length;
+  // Repeated token trigrams: 0 for prose that keeps moving, high for verbatim
+  // circling (the manuscript's known failure mode — same signal family as the
+  // journal's overlap gate, applied within one text).
+  let triTotal = 0; const triSeen = new Set<string>();
+  for (let i = 0; i + 2 < tokens.length; i++) { triSeen.add(`${tokens[i]} ${tokens[i + 1]} ${tokens[i + 2]}`); triTotal++; }
+  const trigramRep = triTotal > 0 ? 1 - triSeen.size / triTotal : 0;
+  const awl = text.replace(/\s+/g, '').length / words;      // chars per word
+  const wps = words / sentences;
+
+  // balance: assertion direction (the v1 core), √-normalized so a couple of
+  // markers in a short text still register but long text needs proportionality.
+  const balance = (grounded - hedge) / Math.max(6, Math.sqrt(words));
+  // structure: argumentative linkage vs disconnected/listy prose. ~0.35
+  // connectives/sentence is treated as neutral conversational prose.
+  const structure = 0.3 * Math.tanh(connectives / sentences - 0.35);
+  // texture: two weak continuous signals every real text has, so distinct texts
+  // essentially never share an exact κ (killing v1's point-mass for good) —
+  // denser vocabulary (avg word length) and sentence development (words per
+  // sentence), both centered on ordinary prose and tanh-bounded to stay weak.
+  const texture = 0.15 * Math.tanh((awl - 4.6) / 1.2) + 0.1 * Math.tanh((wps - 16) / 10);
+  // redundancy: verbatim circling. Ordinary prose pays ~nothing.
+  const redundancy = 1.2 * trigramRep;
+
+  const z = balance + structure + texture - redundancy;
+  const kappa = Number((0.5 + 0.5 * Math.tanh(z)).toFixed(4));
+  return {
+    kappa: Math.max(0, Math.min(1, kappa)), def: KAPPA_DEF,
+    grounded, hedge, words, sentences,
+    connective_density: Number((connectives / sentences).toFixed(4)),
+    ttr: Number(ttr.toFixed(4)),
+    trigram_repetition: Number(trigramRep.toFixed(4)),
+    avg_word_len: Number(awl.toFixed(4)),
+    words_per_sentence: Number(wps.toFixed(4)),
+  };
+}
+
+export function computeKappa(content: string): number {
+  return computeKappaDetail(content).kappa;
 }
 
 // ── phase-state derivation — per-step finite differences, dt = 1 ─────────────
@@ -343,10 +423,13 @@ export async function journalWrite(
 
   // prior entries → finite-difference base. The whole thread's κ series,
   // oldest→newest (reserve sums all of it; the differences read the last 3).
+  // ONLY same-definition (lex2) rows: differencing across the v1→lex2 boundary
+  // would fabricate a velocity out of the definition change itself — the exact
+  // contamination the unit-bug fix already taught us about.
   const priorRows = await env.DB.prepare(
-    'SELECT kappa FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
-  ).bind(threadId).all().catch(() => ({ results: [] as any[] }));
-  const priorKappas = (priorRows.results || []).map((r: any) => Number(r.kappa));
+    "SELECT kappa FROM optimus_entries WHERE thread_id = ? AND kappa_def = ? ORDER BY kappa_ts ASC"
+  ).bind(threadId, KAPPA_DEF).all().catch(() => ({ results: [] as any[] }));
+  const priorKappas = (priorRows.results || []).map((r: any) => Number(r.kappa)).filter(Number.isFinite);
 
   const kappa = computeKappa(content);
   const phase = derivePhaseState(priorKappas, kappa);
@@ -364,9 +447,9 @@ export async function journalWrite(
   }
 
   await env.DB.prepare(
-    `INSERT INTO optimus_entries (id, thread_id, role, content, off_record, kappa, kappa_ts, reserve, velocity, accel, jerk, anchor_distance, vectorize_id, threads_json, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).bind(entryId, threadId, role, content, offRecord, kappa, now, phase.reserve, phase.velocity, phase.accel, phase.jerk,
+    `INSERT INTO optimus_entries (id, thread_id, role, content, off_record, kappa, kappa_def, kappa_ts, reserve, velocity, accel, jerk, anchor_distance, vectorize_id, threads_json, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(entryId, threadId, role, content, offRecord, kappa, KAPPA_DEF, now, phase.reserve, phase.velocity, phase.accel, phase.jerk,
          typeof args.anchor_distance === 'number' ? args.anchor_distance : null, vectorizeId, null, now).run();
 
   // FIX 2: extract this entry's unresolved threads and store them per entry, so
@@ -631,17 +714,29 @@ export async function backfillPhaseState(env: Env): Promise<{ threads: number; e
   let threads = 0, entries = 0;
   for (const t of (threadRows.results || []) as Array<{ id: string }>) {
     const rows = await env.DB.prepare(
-      'SELECT id, kappa FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
+      'SELECT id, kappa, kappa_def FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
     ).bind(t.id).all().catch(() => ({ results: [] as any[] }));
-    const es = (rows.results || []) as Array<{ id: string; kappa: number }>;
+    const es = (rows.results || []) as Array<{ id: string; kappa: number; kappa_def: string | null }>;
     if (!es.length) continue;
-    const kappas = es.map(e => Number(e.kappa) || 0);
-    let reserve = 0;
-    const stmts = es.map((e, i) => {
-      reserve = Number((reserve + kappas[i]).toFixed(6)); // Σκ, dt=1
-      return env.DB.prepare('UPDATE optimus_entries SET reserve = ?, velocity = ?, accel = ?, jerk = ? WHERE id = ?')
-        .bind(reserve, velocityAt(kappas, i), accelerationAt(kappas, i), jerkAt(kappas, i), e.id);
-    });
+    // Difference WITHIN a definition regime only (same rule as the live write
+    // path): each entry's derivatives come from the series of entries sharing
+    // its kappa_def, so a v1→lex2 seam never fabricates a velocity.
+    const byDef = new Map<string, { ids: string[]; kappas: number[] }>();
+    for (const e of es) {
+      const d = e.kappa_def || 'v1';
+      if (!byDef.has(d)) byDef.set(d, { ids: [], kappas: [] });
+      const g = byDef.get(d)!;
+      g.ids.push(e.id); g.kappas.push(Number(e.kappa) || 0);
+    }
+    const stmts: D1PreparedStatement[] = [];
+    for (const { ids, kappas } of byDef.values()) {
+      let reserve = 0;
+      ids.forEach((eid, i) => {
+        reserve = Number((reserve + kappas[i]).toFixed(6)); // Σκ, dt=1, per regime
+        stmts.push(env.DB.prepare('UPDATE optimus_entries SET reserve = ?, velocity = ?, accel = ?, jerk = ? WHERE id = ?')
+          .bind(reserve, velocityAt(kappas, i), accelerationAt(kappas, i), jerkAt(kappas, i), eid));
+      });
+    }
     // Chunk the UPDATEs to stay within D1 batch limits.
     for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
     threads++; entries += es.length;

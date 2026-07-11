@@ -63,6 +63,7 @@ import { watchTool } from './watches';
 import { metabolismTool, recordLLMCall } from './metabolism';
 import { toolForgeTool, customToolIndex } from './tool-forge';
 import { runConsolidation } from './consolidate';
+import { recordChatTrade } from './trading';
 import { assembleWorkingSet, invalidateWorkingSet } from './kv-cache';
 import { recordTurnTrace } from './kappa-memory/integration';
 
@@ -255,7 +256,7 @@ const TOOL_LINES: Record<string, string> = {
   github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
   ingest_paper: `ingest_paper(title,text,series,tag,abstract?,source_url?) — WRITE: add a paper to the corpus. It passes a 2-check gate first (integrity: structure + no duplicate; verification: coherent, real writing) and is embedded/indexed live only if both pass; a rejection comes back with the reason.`,
   trigger_dream: `trigger_dream() — WRITE: run one libre/dream cycle now.`,
-  trade_execute: `trade_execute(action,symbol,qty?,asset_class?,option_right?,strike?,expiration?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). buy/sell need qty (a sell on a symbol with no long position opens a SHORT — Alpaca's own semantics, not a separate action here); close exits the whole position, long or short, correctly either way. For an OPTION instead of the equity itself: asset_class:"option", option_right:"call"|"put", strike (a target — nearest real listed contract is resolved for you), expiration:"YYYY-MM-DD" — action buy/sell then means go long/write that contract, same vocabulary as equities. Say explicitly whether a sold option leg is covered or naked; naked-sold risk is not capped at the premium.`,
+  trade_execute: `trade_execute(action,symbol,qty?,reasoning?,testing?,catalyst?,timeframe?,asset_class?,option_right?,strike?,expiration?) — WRITE/SENSITIVE: action=buy|sell|close on the Alpaca account (paper unless configured live). ALWAYS pass reasoning (why this trade) — it is recorded to the trades ledger and surfaced on the desk; testing/catalyst/timeframe enrich the record. buy/sell need qty (a sell on a symbol with no long position opens a SHORT — Alpaca's own semantics, not a separate action here); close exits the whole position, long or short, correctly either way. For an OPTION instead of the equity itself: asset_class:"option", option_right:"call"|"put", strike (a target — nearest real listed contract is resolved for you), expiration:"YYYY-MM-DD" — action buy/sell then means go long/write that contract, same vocabulary as equities. Say explicitly whether a sold option leg is covered or naked; naked-sold risk is not capped at the premium.`,
   journal_read: `journal_read(q) — semantic search over the Optimus journal/manuscript (ON-RECORD entries only; off-record is never surfaced). Returns entries with their phase state (κ, reserve, velocity, accel).`,
   journal_thread: `journal_thread(thread_id) — full manuscript for one thread: ordered entries + phase-state series + marginalia.`,
   journal_write: `journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.`,
@@ -696,6 +697,20 @@ async function runTool(
           () => alpacaOrder(env, action, symbol, qty, optOpts),
           { windowSec: 90 },
         );
+        // Ledger: a chat-placed order used to go to the broker and leave NO
+        // trade row — position without provenance. Record it (first execution
+        // only; an idempotent replay already has its row). Best-effort — the
+        // order stands either way, but the failure is logged, never eaten.
+        if (!replayed) {
+          await recordChatTrade(env, {
+            action, symbol, qty,
+            reasoning: a.reasoning ? String(a.reasoning) : undefined,
+            testing: a.testing ? String(a.testing) : undefined,
+            catalyst: a.catalyst ? String(a.catalyst) : undefined,
+            timeframe: a.timeframe ? String(a.timeframe) : undefined,
+            result,
+          }).catch(e => console.error('[TRADE] ledger record failed:', (e as Error).message));
+        }
         return clip(JSON.stringify(replayed ? { ...(result as object), idempotent_replay: true } : result));
       }
       case 'self_state': {
@@ -709,7 +724,7 @@ async function runTool(
           grab(env.DB.prepare('SELECT type, title, status, surface_priority, created_at FROM elle_sandbox ORDER BY created_at DESC LIMIT 3').all().then(r => r.results)),
           grab(env.DB.prepare("SELECT summary, memory_type, created_at FROM elle_memory WHERE memory_type = 'deliberate' ORDER BY created_at DESC LIMIT 5").all().then(r => r.results)),
           ctx.sessionId
-            ? grab(env.DB.prepare('SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL ORDER BY created_at ASC').bind(ctx.sessionId).all()
+            ? grab(env.DB.prepare('SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL AND kappa_def IS NOT NULL ORDER BY created_at ASC').bind(ctx.sessionId).all()
                 .then(r => (r.results || []).map(x => Number((x as { kappa: number }).kappa))))
             : Promise.resolve(null),
           grab(graphShape(env)),
@@ -729,10 +744,13 @@ async function runTool(
         const note = String(a.note || a.summary || a.content || '').trim();
         if (!note) return 'remember: note required';
         const importance = Math.max(0, Math.min(1, Number(a.importance) || 0.6));
-        const mid = crypto.randomUUID().replace(/-/g, '');
-        await env.DB.prepare(
-          `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'deliberate', 'router', ?, ?, ?)`
-        ).bind(mid, note.slice(0, 1000), importance, importance).run();
+        // Through the kernel's own write path (memWrite), NOT a raw INSERT —
+        // the raw insert wrote rows with no mem- vector, which the semantic
+        // recall tier can never see. One write path, one contract.
+        await memWrite(env as unknown as MemEnv, deps.embed, {
+          content: note.slice(0, 1000), type: 'deliberate',
+          importance, sessionId: ctx.sessionId || null,
+        });
         // Drop this session's working-set cache so the next turn rebuilds
         // against the memory we just wrote instead of serving a set that
         // predates it. Best-effort; the write already stands.
@@ -882,7 +900,7 @@ async function runTool(
       case 'tool_forge':
         return clip(await toolForgeTool(env, a));
       case 'consolidate':
-        return await runConsolidation(env);
+        return await runConsolidation(env, deps.embed);
       case 'fork_replay': {
         // Counterfactual replay off the event bus. Honest limits, stated in the
         // output: prior observations replay as their clipped previews, and the
@@ -1005,8 +1023,12 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   let phase = '';
   if (sessionId && scope !== 'hospitality') {
     try {
+      // Tagged (current-definition) values ONLY. Untagged legacy rows are the
+      // v1 fixed-point artifact — 84% sat on exactly 0.5 — and injecting those
+      // told the model a fabricated flat "coherence trajectory" every turn.
+      // Better no phase block than a false one.
       const rows = await env.DB.prepare(
-        'SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL ORDER BY created_at ASC'
+        'SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL AND kappa_def IS NOT NULL ORDER BY created_at ASC'
       ).bind(sessionId).all();
       phase = phaseBlock((rows.results || []).map(r => Number((r as { kappa: number }).kappa)).filter(Number.isFinite));
     } catch { /* phase is a luxury, never a dependency */ }

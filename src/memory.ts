@@ -75,30 +75,77 @@ export async function pageFetch(env: MemEnv, pageId: string, seek = 0): Promise<
 
 export interface MemWriteOpts {
   content: string;
-  type?: string;        // observation | insight | preference | identity | fact | task
+  type?: string;        // observation | insight | preference | identity | fact | task | deliberate
   importance?: number;  // 0..1
   tags?: string[];
   sessionId?: string | null;
+  sourceEngine?: string; // which writer this came through (default 'router')
+}
+
+// elle_memory predates the vector tier — track which rows have a mem- vector so
+// the backfill is idempotent and cheap to resume. Best-effort ALTER, same
+// pattern as the other late columns.
+let memVecColumnReady = false;
+async function ensureMemVecColumn(env: MemEnv): Promise<void> {
+  if (memVecColumnReady) return;
+  await env.DB.prepare('ALTER TABLE elle_memory ADD COLUMN vectorize_id TEXT').run().catch(() => {});
+  memVecColumnReady = true;
 }
 
 export async function memWrite(env: MemEnv, embed: EmbedFn, o: MemWriteOpts): Promise<{ id: string }> {
+  await ensureMemVecColumn(env);
   const id = rid();
   const imp = Math.max(0, Math.min(1, Number(o.importance ?? 0.6)));
   const summary = o.content.slice(0, 500);
   await env.DB.prepare(
     `INSERT INTO elle_memory (id, memory_type, source_engine, source_session_id, summary, content, philosophical_tags, importance, importance_score)
-     VALUES (?, ?, 'router', ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
-    id, o.type || 'observation', o.sessionId || null,
+    id, o.type || 'observation', o.sourceEngine || 'router', o.sessionId || null,
     summary, o.content.slice(0, 4000),
     JSON.stringify((o.tags || []).slice(0, 12)), imp, imp,
   ).run();
-  // Cold-tier index. Best-effort: a memory that failed to embed is still in D1.
+  // Cold-tier index. Best-effort: a memory that failed to embed is still in D1
+  // and the nightly backfill retries it (vectorize_id stays NULL). LOG the
+  // failure — a silently dead vector tier is how the whole kernel starved once.
   try {
     const vec = await embed(o.content.slice(0, 1200), env);
-    await env.VECTORIZE.upsert([{ id: `mem-${id}`, values: vec, metadata: { type: 'memory', memory_type: o.type || 'observation' } }]);
-  } catch { /* D1 row survives; recall falls back to importance scan */ }
+    const vecId = `mem-${id}`;
+    await env.VECTORIZE.upsert([{ id: vecId, values: vec, metadata: { type: 'memory', memory_type: o.type || 'observation' } }]);
+    await env.DB.prepare('UPDATE elle_memory SET vectorize_id = ? WHERE id = ?').bind(vecId, id).run();
+  } catch (e) { console.error('[MEMORY] memWrite vector upsert failed (row kept, backfill will retry):', (e as Error).message); }
   return { id };
+}
+
+// ── vector backfill (cold-tier repair) ───────────────────────
+// 3,000+ memories were written by pipelines that never touched the vector tier,
+// which left memRecall's semantic tier permanently empty. Walk rows without a
+// vectorize_id, embed, upsert, mark. Idempotent, bounded per call — run from the
+// nightly consolidation and/or the /mem/backfill door until it reports 0 left.
+export async function memVectorBackfill(env: MemEnv, embed: EmbedFn, batch = 120): Promise<{ embedded: number; failed: number; remaining: number }> {
+  await ensureMemVecColumn(env);
+  const cap = Math.max(1, Math.min(200, batch));
+  const rows = await env.DB.prepare(
+    `SELECT id, memory_type, summary, content FROM elle_memory
+     WHERE vectorize_id IS NULL ORDER BY created_at DESC LIMIT ?`
+  ).bind(cap).all();
+  let embedded = 0, failed = 0;
+  for (const r of (rows.results as Array<{ id: string; memory_type: string; summary: string; content: string | null }>) || []) {
+    const text = (r.content || r.summary || '').slice(0, 1200);
+    if (!text.trim()) { failed++; continue; }
+    try {
+      const vec = await embed(text, env);
+      const vecId = `mem-${r.id}`;
+      await env.VECTORIZE.upsert([{ id: vecId, values: vec, metadata: { type: 'memory', memory_type: r.memory_type } }]);
+      await env.DB.prepare('UPDATE elle_memory SET vectorize_id = ? WHERE id = ?').bind(vecId, r.id).run();
+      embedded++;
+    } catch (e) {
+      failed++;
+      console.error('[MEMORY] backfill embed failed for', r.id, (e as Error).message);
+    }
+  }
+  const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM elle_memory WHERE vectorize_id IS NULL').first() as { n: number } | null;
+  return { embedded, failed, remaining: left?.n ?? -1 };
 }
 
 interface MemRow {
@@ -131,10 +178,16 @@ export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 
   }
   // Warm-tier backstop: the highest-importance recent records, so recall
   // works even before anything matches semantically (or if Vectorize is down).
+  // NO source_engine filter — the old `= 'router'` filter made recall
+  // structurally blind to every memory the ingest/research/consolidation
+  // pipelines wrote (which was ALL of them), so memRecall returned [] forever
+  // and starved the graph tier. Deliberate/consolidated memories rank first;
+  // bulk readings fill in behind them.
   const back = await env.DB.prepare(
     `SELECT id, memory_type, summary, content, importance_score, created_at
-     FROM elle_memory WHERE source_engine = 'router'
-     ORDER BY importance_score DESC, created_at DESC LIMIT 8`
+     FROM elle_memory
+     ORDER BY (memory_type IN ('deliberate','consolidated')) DESC,
+              importance_score DESC, created_at DESC LIMIT 8`
   ).all().catch(() => ({ results: [] as unknown[] }));
   for (const b of back.results as unknown as MemRow[]) {
     if (!rows.find(r => r.id === b.id)) rows.push(b);
@@ -195,12 +248,18 @@ export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 
       });
       result = [...scored, ...extra].sort((a, b) => b.score - a.score).slice(0, k);
     }
-    void recordAssociations(store, result.map(r => r.id)).catch(() => {});
+    void recordAssociations(store, result.map(r => r.id))
+      .catch((e) => console.error('[GRAPH] recordAssociations failed:', (e as Error).message));
     // Live A/B log: the top-k graph-tier ids each arm surfaces (by activation,
     // excluding the semantic hits) + their divergence. Best-effort, off the hot
     // path's success criteria — a failed log never touches the returned recall.
-    void logRecallAB(env, query, scored, base, boosted).catch(() => {});
-  } catch { /* the graph is an enhancement, never a dependency */ }
+    void logRecallAB(env, query, scored, base, boosted)
+      .catch((e) => console.error('[GRAPH] recall A/B log failed:', (e as Error).message));
+  } catch (e) {
+    // Still an enhancement, never a dependency — but a SILENT catch here is how
+    // the whole graph tier sat dead for weeks with nobody noticing. Log it.
+    console.error('[GRAPH] expansion failed (recall served without graph tier):', (e as Error).message);
+  }
 
   return result;
 }

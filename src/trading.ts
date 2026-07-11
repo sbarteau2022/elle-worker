@@ -13,10 +13,15 @@ import { callLLM } from './llm';
 import type { Env } from './index';
 import { resolveOptionContract } from './alpaca-options';
 
-// Options + short-selling columns, added on top of the schema already live
-// in production (see the note above syncPositions). Idempotent — ADD COLUMN
-// on an existing column throws, which is swallowed, same pattern as
-// connect-sandbox.ts's ensureSandboxSchema.
+// Schema reconciliation for the whole trading surface. The production
+// elle_trades table predates this module's queries: it has qty/order_id and
+// LACKED quantity, confidence, status, closed_at, expected_timeframe and
+// broker_order_id — so every trade INSERT below failed ("no such column"),
+// was swallowed by its .catch, and the ledger sat at 0 rows while real
+// positions accumulated at the broker. Same disease as the memory kernel:
+// writer and reader each drifted from the actual table, and every failure
+// was silent. Everything the module's SQL names is ensured here, idempotently
+// (ADD COLUMN on an existing column throws; swallowed).
 let extSchemaReady = false;
 export async function ensureTradingExtSchema(env: Env): Promise<void> {
   if (extSchemaReady) return;
@@ -27,10 +32,34 @@ export async function ensureTradingExtSchema(env: Env): Promise<void> {
     ['expiration_date', 'TEXT'],   // YYYY-MM-DD
     ['underlying_symbol', 'TEXT'], // options only — the equity the contract is written on
     ['attribution', 'TEXT'],       // post-close: what actually happened vs. what she expected
+    // Columns the INSERT/SELECT paths have always named but production never
+    // had — the reason the ledger stayed empty while positions were real:
+    ['quantity', 'REAL'],
+    ['expected_timeframe', 'TEXT'],
+    ['confidence', 'REAL'],
+    ['status', 'TEXT'],            // 'open' | 'closed'
+    ['closed_at', 'TEXT'],
+    ['broker_order_id', 'TEXT'],
+    ['source', 'TEXT'],            // 'cron' (autonomous cycle) | 'chat' (trade_execute)
   ];
   for (const [name, type] of columns) {
     await env.DB.prepare(`ALTER TABLE elle_trades ADD COLUMN ${name} ${type}`).run().catch(() => {});
   }
+  // Fresh environments: the observations/journal tables are created out-of-band
+  // in production; give other envs the SAME shape (observed_at / signal_type)
+  // so reader aliases work everywhere.
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_market_observations (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    symbol TEXT, observation TEXT NOT NULL, what_is_suppressed TEXT,
+    signal_type TEXT, confidence REAL, acted_on INTEGER DEFAULT 0,
+    observed_at TEXT DEFAULT (datetime('now')))`).run().catch(() => {});
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_trading_journal (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    journal_date TEXT UNIQUE NOT NULL, starting_value REAL, ending_value REAL,
+    daily_pnl REAL, daily_return_pct REAL, trades_today INTEGER DEFAULT 0,
+    observations_today INTEGER DEFAULT 0, what_happened TEXT, what_she_learned TEXT,
+    what_she_got_wrong TEXT, what_surprised_her TEXT, philosophical_insight TEXT,
+    hypothesis_for_tomorrow TEXT, created_at TEXT DEFAULT (datetime('now')))`).run().catch(() => {});
   extSchemaReady = true;
 }
 
@@ -69,6 +98,69 @@ function generateId(): string {
   const b = new Uint8Array(16);
   crypto.getRandomValues(b);
   return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// ── chat-trade ledger ────────────────────────────────────────
+// trade_execute (the router tool) used to place real Alpaca orders and record
+// NOTHING — the order went out, the position synced back on the next cycle,
+// and the trades ledger stayed empty: three live positions, zero trade rows,
+// no reasoning to surface. Every chat-placed order now lands here.
+export async function recordChatTrade(env: Env, o: {
+  action: string; symbol: string; qty?: number;
+  reasoning?: string; testing?: string; catalyst?: string; timeframe?: string;
+  result: unknown;
+}): Promise<void> {
+  const res = o.result as Record<string, any> | null;
+  if (!res || res.error) return; // no order actually placed
+  await ensureTradingExtSchema(env);
+  const order = res.order || {};
+  const sym = String(o.symbol || '').toUpperCase().trim();
+  if (!sym) return;
+  const fill = order.filled_avg_price != null ? parseFloat(order.filled_avg_price) : null;
+
+  if (o.action === 'close') {
+    // Close every open ledger row for the symbol. P&L only when both prices
+    // are known — never guessed.
+    const open = await env.DB.prepare(
+      `SELECT id, entry_price, quantity, action FROM elle_trades WHERE (symbol = ? OR underlying_symbol = ?) AND status = 'open'`
+    ).bind(sym, sym).all().catch(() => ({ results: [] as any[] }));
+    for (const row of (open.results as Array<Record<string, any>>) || []) {
+      const entry = row.entry_price != null ? Number(row.entry_price) : null;
+      const short = row.action === 'short' || row.action === 'sell';
+      const dir = short ? -1 : 1;
+      const pnl = entry != null && fill != null ? Number(((fill - entry) * dir * Math.abs(Number(row.quantity) || 0)).toFixed(2)) : null;
+      const pnlPct = entry ? (fill != null ? Number((((fill - entry) / entry) * dir * 100).toFixed(2)) : null) : null;
+      await env.DB.prepare(
+        `UPDATE elle_trades SET status = 'closed', closed_at = datetime('now'), exit_price = ?, pnl = ?, pnl_pct = ? WHERE id = ?`
+      ).bind(fill, pnl, pnlPct, row.id).run()
+        .catch(e => console.error('[TRADE] chat-close ledger update failed:', (e as Error).message));
+    }
+    return;
+  }
+
+  const contract = res.contract as Record<string, any> | undefined;
+  const isOption = !!contract;
+  await env.DB.prepare(
+    `INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, broker_order_id, status, asset_class, option_right, strike_price, expiration_date, underlying_symbol, source)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'chat')`
+  ).bind(
+    generateId(),
+    isOption ? String(contract!.symbol || sym) : sym,
+    String(o.action),
+    Math.abs(Number(o.qty) || 0) || null,
+    fill,
+    o.reasoning ? String(o.reasoning).slice(0, 2000) : null,
+    o.testing ? String(o.testing).slice(0, 1000) : null,
+    o.catalyst ? String(o.catalyst).slice(0, 500) : null,
+    o.timeframe ? String(o.timeframe).slice(0, 200) : null,
+    order.id ? String(order.id) : null,
+    'open',
+    isOption ? 'option' : 'us_equity',
+    isOption ? String(contract!.type || contract!.right || '') || null : null,
+    isOption && contract!.strike_price != null ? Number(contract!.strike_price) : null,
+    isOption ? String(contract!.expiration_date || '') || null : null,
+    isOption ? sym : null,
+  ).run().catch(e => console.error('[TRADE] chat-trade ledger insert failed:', (e as Error).message));
 }
 
 function alpacaHeaders(env: Env): Record<string, string> {
@@ -298,11 +390,14 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
     return;
   }
 
-  // Log observations
+  // Log observations. Production's column is signal_type (there has never been
+  // an observation_type column) — the old INSERT named observation_type, failed
+  // on every cycle, and the .catch ate it: zero observations ever recorded.
   for (const obs of (decision.observations as Array<Record<string, string>>) || []) {
     await env.DB.prepare(
-      `INSERT INTO elle_market_observations (id, observation_type, symbol, observation) VALUES (?, ?, ?, ?)`
-    ).bind(generateId(), obs.observation_type, obs.symbol || null, obs.observation).run().catch(() => {});
+      `INSERT INTO elle_market_observations (id, signal_type, symbol, observation) VALUES (?, ?, ?, ?)`
+    ).bind(generateId(), obs.observation_type || obs.signal_type || null, obs.symbol || null, obs.observation)
+      .run().catch(e => console.error('[TRADING] observation insert failed:', (e as Error).message));
   }
 
   // Upsert theses
@@ -510,8 +605,11 @@ The philosophical insight matters most — did anything illuminate how systems s
       `INSERT INTO elle_trading_journal (id, journal_date, ending_value, trades_today, what_happened, what_she_learned, what_she_got_wrong, philosophical_insight, hypothesis_for_tomorrow)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(journal_date) DO UPDATE SET
+         ending_value=excluded.ending_value,
+         trades_today=excluded.trades_today,
          what_happened=excluded.what_happened,
          what_she_learned=excluded.what_she_learned,
+         what_she_got_wrong=excluded.what_she_got_wrong,
          philosophical_insight=excluded.philosophical_insight,
          hypothesis_for_tomorrow=excluded.hypothesis_for_tomorrow`
     ).bind(

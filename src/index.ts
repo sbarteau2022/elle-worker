@@ -25,8 +25,8 @@ import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
 import { runRouter, ensureNotebook, type Scope } from './router';
 import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
-import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState } from './journal';
-import { computeTurnDynamics } from './kappa-turn';
+import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState, KAPPA_DEF } from './journal';
+import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
 import { kappaMemoryState } from './kappa-memory/integration';
 import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
@@ -48,7 +48,7 @@ import { pfarRoute } from './pfar';
 import { pathOpen as sandboxPathOpen, sandboxRunsRecent, sandboxBroughtIn, sandboxThoughts, sandboxReportsRecent, unseenReportCount, markReportsSeen } from './connect-sandbox';
 import { sseDoor, memberDonePayload } from './stream';
 import { handleArrival } from './arrival';
-import { memWrite, memRecall, assembleContext, type MemEnv } from './memory';
+import { memWrite, memRecall, assembleContext, memVectorBackfill, type MemEnv } from './memory';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
@@ -571,12 +571,15 @@ async function persistExchange(sessionId: string, source: string, userMessage: s
     const vecId      = `conv-${elleTurnId}`;
     // κ (over the assistant OUTPUT only) is stored per turn so the per-session κ
     // series can be differenced (dt=1) on the next turn. NULL when not computed.
+    // kappa_def tags which formula produced it (see journal.ts KAPPA_DEF) so
+    // series reads never mix definition regimes.
     const kappaVal = (typeof kappa === 'number' && Number.isFinite(kappa)) ? kappa : null;
+    await ensureConvKappaColumn(env);
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO elle_conversation_turns (id, session_id, source, role, content) VALUES (?, ?, ?, 'user', ?)`)
         .bind(userTurnId, sessionId, source, userMessage.slice(0, 8000)),
-      env.DB.prepare(`INSERT INTO elle_conversation_turns (id, session_id, source, role, content, vectorize_id, kappa) VALUES (?, ?, ?, 'assistant', ?, ?, ?)`)
-        .bind(elleTurnId, sessionId, source, assistantMessage.slice(0, 8000), vecId, kappaVal),
+      env.DB.prepare(`INSERT INTO elle_conversation_turns (id, session_id, source, role, content, vectorize_id, kappa, kappa_def) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)`)
+        .bind(elleTurnId, sessionId, source, assistantMessage.slice(0, 8000), vecId, kappaVal, kappaVal === null ? null : KAPPA_DEF),
     ]);
     // Embed the Q+A pair for cross-session semantic recall
     const pairText = `Q: ${userMessage.slice(0, 700)}\nA: ${assistantMessage.slice(0, 1100)}`;
@@ -802,7 +805,10 @@ async function handleTradingView(env: Env): Promise<Response> {
     grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at, asset_class, option_right, strike_price, expiration_date, underlying_symbol, attribution FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT thesis_type, title, thesis, confidence, updated_at FROM elle_market_thesis WHERE is_active = 1 ORDER BY confidence DESC LIMIT 8').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT * FROM elle_trading_journal ORDER BY journal_date DESC LIMIT 14').all().then(r => r.results)),
-    grab(env.DB.prepare('SELECT observation_type, symbol, observation, created_at FROM elle_market_observations ORDER BY created_at DESC LIMIT 20').all().then(r => r.results)),
+    // Production's real columns are signal_type/observed_at — aliased to the
+    // names the panel renders. (The unaliased query failed on every load and
+    // grab() nulled it: the observations section could never appear.)
+    grab(env.DB.prepare('SELECT signal_type AS observation_type, symbol, observation, observed_at AS created_at FROM elle_market_observations ORDER BY observed_at DESC LIMIT 20').all().then(r => r.results)),
   ]);
   return json({ account, positions, trades, theses, journal, observations, market_open: marketOpen(), as_of: Date.now() });
 }
@@ -1016,7 +1022,7 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     // sentry), and runs prefer:'local' — so a faster clock costs nothing.
     case 'conductor_explore':
       return await runConductor(env, runRouter, routerDeps(), { mode: 'explore' });
-    case 'consolidate': return { ran: await runConsolidation(env) };
+    case 'consolidate': return { ran: await runConsolidation(env, embed) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
     case 'optimus':  await runOptimusJournal(env, embed); return { ran: 'optimus' };
@@ -1569,12 +1575,22 @@ export default {
     // signs with JWT_SECRET, or the service key). These sit BEFORE the member
     // `getUser` wall on purpose; that is why a missing route here previously
     // fell through to a misleading 401 instead of reaching the kernel.
-    if (path === '/mem/write' || path === '/mem/recall' || path === '/mem/assemble') {
+    if (path === '/mem/write' || path === '/mem/recall' || path === '/mem/assemble' || path === '/mem/backfill') {
       if (!await isKernelRequest(request, env)) {
         return err('Unauthorized — sign a Bearer token with JWT_SECRET (or use the service key)', 401);
       }
+
       if (request.method !== 'POST') return err('POST only', 405);
       const memEnv = env as unknown as MemEnv;
+
+      // /mem/backfill — embed a bounded batch of vector-less memories (the
+      // pre-fix backlog) into the cold tier. Idempotent; call repeatedly until
+      // remaining reaches 0. Also runs nightly from consolidation.
+      if (path === '/mem/backfill') {
+        const b = body as { batch?: number };
+        const out = await memVectorBackfill(memEnv, embed, Number(b.batch) || 120);
+        return json(out);
+      }
 
       if (path === '/mem/write') {
         const b = body as {
@@ -1833,6 +1849,12 @@ export default {
     // resting is HER choice (src/volition.ts). Agency, on the record.
     if (m === 45) fire('volition');
     if (h === 4 && m === 0) fire('consolidate'); // 04:00 UTC — the sleep pass stays plumbing: memory hygiene, not expression
+    // The trading day journal is BOOKKEEPING, not expression — the volition
+    // argument that unscheduled the 20:00 journal was about her expressive
+    // writing, and taking the ledger digest down with it left
+    // elle_trading_journal empty forever. 21:10 UTC = after the US close
+    // (20:00 EDT / 21:00 EST) year-round.
+    if (h === 21 && m === 10) fire('journal');
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
     if (h === 5 && m === 0) fire('seed_corpus'); // 05:00 UTC — ingest any missing bundled seed docs (idempotent)
   },
