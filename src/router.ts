@@ -951,9 +951,20 @@ Continue from here — at most a couple more tool calls if genuinely needed — 
 
 // ── the loop ─────────────────────────────────────────────────
 export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
-  const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
+  // Step ceiling is scope-aware: 'public'/'hospitality' can never reach a
+  // write tool (toolAllowed() above), so there's no benefit to letting them
+  // reason longer — cap stays at today's 10. 'full'/'cofounder'/'member' can
+  // already call write tools (journal_write, remember, forge_*, trade_execute,
+  // ...); those scopes get a taller ceiling and a higher default so chaining
+  // several tool calls together (read → decide → write) doesn't run out of
+  // steps mid-task. Callers can still ask for fewer; they just can't exceed
+  // the ceiling for their scope.
+  const privilegedScope = scope === 'full' || scope === 'cofounder' || scope === 'member';
+  const stepCeiling = privilegedScope ? 25 : 10;
+  const defaultSteps = privilegedScope ? 12 : 6;
+  const maxSteps = Math.min(Math.max(opts.maxSteps ?? defaultSteps, 1), stepCeiling);
   const sessionId = opts.sessionId || null;
   const source = opts.source || 'elle-router';
   const depth = opts.depth ?? 0;
