@@ -505,7 +505,10 @@ export async function ensureNotebook(env: Env): Promise<void> {
 }
 
 // ── tool dispatch ────────────────────────────────────────────
-async function runTool(
+// Exported for testing: scope gates (idea/tool_forge/fork_replay's inner
+// checks) are cheap to assert directly against runTool without standing up
+// a full runRouter() loop or mocking every provider in llm.ts.
+export async function runTool(
   name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps,
   ctx: { userId: string; sessionId: string | null; runId?: string; source?: string; depth?: number }, scope: Scope = 'full',
 ): Promise<string> {
@@ -785,8 +788,19 @@ async function runTool(
         return await runMcpTool(name, a, env);
       case 'intent':
         return await intentTool(env, a);
-      case 'idea':
+      case 'idea': {
+        const ideaOp = String(a.op || 'list');
+        // op=build/forge ships code through the exact same forge_open →
+        // forge_write → forge_pr path as the named tools — it just does it
+        // as one automated call instead of three model-visible ones. It
+        // must honor the identical boundary: whatever scope can't call
+        // forge_open directly (today: everyone but 'full') can't reach it
+        // through idea{op:forge} either.
+        if ((ideaOp === 'build' || ideaOp === 'forge') && !toolAllowed(scope, 'forge_open')) {
+          return `idea ${ideaOp}: forging ships code — the same boundary as forge_open/forge_write/forge_pr applies, and this scope doesn't have it`;
+        }
         return clip(await ideaTool(env, a, deps.handleIngest, sctx));
+      }
       case 'duplex':
         return clip(await duplexTool(env, a));
       // The notebook the mechanics prompt licenses ("notebook_write what you
@@ -893,7 +907,12 @@ async function runTool(
       case 'metabolism':
         return await metabolismTool(env as any);
       case 'tool_forge':
-        return clip(await toolForgeTool(env, a));
+        // Reserve every built-in tool name — a self-forged tool named e.g.
+        // "run_shell" or "forge_write" can't shadow the real dispatch (name
+        // collision doesn't change what tool_forge{op:invoke} runs), but it
+        // WOULD sit in the registry/prompt catalog looking exactly like a
+        // trusted native tool while running arbitrary self-authored code.
+        return clip(await toolForgeTool(env, a, new Set(Object.keys(TOOL_LINES))));
       case 'consolidate':
         return await runConsolidation(env, deps.embed);
       case 'fork_replay': {

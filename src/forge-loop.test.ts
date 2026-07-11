@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateForgeSpec, normalizeSpec, buildHarness, parseWriteResponse,
-  parseReviewResponse, allGoalsPass, forgedFiles,
+  parseReviewResponse, allGoalsPass, forgedFiles, classifyForgeCi,
   type ForgeSpec, type GoalResult,
 } from './forge-loop';
 import { parseProposals, proposalToSpec, conceptOf } from './forge-ideate';
@@ -146,5 +146,36 @@ describe('forge · ideation proposal parsing', () => {
     const c = conceptOf(parseProposals(raw)[0]);
     expect(c).toMatch(/Why:/);
     expect(c).toMatch(/spaces become dashes/);
+  });
+});
+
+// classifyForgeCi is the gate mergeForge() consults before it will ever open
+// a PR from the automated build→ship pipeline (idea{op:forge}, tool-forge's
+// self-build path) — this is the "don't ship on red/unknown CI" check, so its
+// three-way classification (green/failed/pending) needs to be exactly right.
+describe('forge · classifyForgeCi (the ship gate)', () => {
+  it('classifies green when forge_check reports green:true', () => {
+    expect(classifyForgeCi(JSON.stringify({ green: true, ci: [{ conclusion: 'success' }] })).state).toBe('green');
+  });
+  it('classifies failed when any run has conclusion:failure, even if others succeeded', () => {
+    const v = classifyForgeCi(JSON.stringify({
+      ci: [{ conclusion: 'success' }, { conclusion: 'failure', workflow: 'CI' }],
+    }));
+    expect(v.state).toBe('failed');
+    expect(v.summary).toMatch(/failure/);
+  });
+  it('classifies pending when CI is still in_progress (no failures yet, not green)', () => {
+    const v = classifyForgeCi(JSON.stringify({ ci: [{ conclusion: null, status: 'in_progress' }] }));
+    expect(v.state).toBe('pending');
+  });
+  it('classifies pending when there are no CI runs yet (forge_check returns a string note)', () => {
+    const v = classifyForgeCi(JSON.stringify({ ci: 'no CI runs yet for this branch (push first, or the run has not started — check again shortly)' }));
+    expect(v.state).toBe('pending');
+    expect(v.summary).toMatch(/no CI runs yet/);
+  });
+  it('degrades to pending — never to green — on malformed/unreadable input', () => {
+    expect(classifyForgeCi('not json at all').state).toBe('pending');
+    expect(classifyForgeCi('').state).toBe('pending');
+    expect(classifyForgeCi('{}').state).toBe('pending');
   });
 });
