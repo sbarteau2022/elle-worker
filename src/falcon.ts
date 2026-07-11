@@ -28,6 +28,7 @@
 // was actually built, and how it compared to the named Rupture.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import { callLLM, type LLMEnv } from './llm';
 
 export interface FalconEnv extends LLMEnv {
@@ -220,28 +221,7 @@ async function runFalconAnalysis(env: FalconEnv, direction: string) {
 let falconReady = false;
 async function ensureFalconSchema(env: FalconEnv): Promise<void> {
   if (falconReady) return;
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS falcon_analyses (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, direction TEXT NOT NULL,
-      tier1_json TEXT NOT NULL, tier2_json TEXT NOT NULL, validation_json TEXT,
-      status TEXT DEFAULT 'complete', created_at TEXT DEFAULT (datetime('now'))
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS falcon_ruptures (
-      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, domain TEXT,
-      rupture_json TEXT NOT NULL, discomfort_index INTEGER, first_thing_to_build TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS falcon_reasoning_log (
-      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, step TEXT NOT NULL,
-      chain TEXT NOT NULL, model TEXT, provider TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS falcon_outcomes (
-      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE,
-      what_was_built TEXT, comparison_to_rupture TEXT, founder_notes TEXT,
-      created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
-    )`),
-  ]);
+  await ensureAllSchemas(env.DB);
   falconReady = true;
 }
 

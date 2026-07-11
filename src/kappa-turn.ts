@@ -19,6 +19,7 @@
 // omitted).
 // ============================================================
 
+import { backfillConvTurnKappa } from './db/schema';
 import type { Env } from './index';
 import { computeKappa, KAPPA_DEF } from './journal';
 import { latestPoint, type KappaPoint } from './kappa-dynamics';
@@ -32,8 +33,7 @@ type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 let convKappaReady = false;
 export async function ensureConvKappaColumn(env: Env): Promise<void> {
   if (convKappaReady) return;
-  await env.DB.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa REAL').run().catch(() => {});
-  await env.DB.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa_def TEXT').run().catch(() => {});
+  await backfillConvTurnKappa(env.DB);
   convKappaReady = true;
 }
 

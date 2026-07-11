@@ -13,6 +13,7 @@
 // semantic luck. A fired drop is injected into the turn and disarmed.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 type EmbedFn = (text: string, env: Env) => Promise<number[]>;
@@ -20,15 +21,7 @@ type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_dead_drops (
-    id TEXT PRIMARY KEY,
-    trigger_text TEXT NOT NULL,
-    message TEXT NOT NULL,
-    embedding TEXT,                  -- JSON float[] of trigger_text, written at create
-    status TEXT DEFAULT 'armed',     -- armed | fired | disarmed
-    fired_at INTEGER,
-    created_at INTEGER
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

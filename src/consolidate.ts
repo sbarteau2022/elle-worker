@@ -18,6 +18,7 @@
 // elle_consolidation_log so the digest history is itself observable.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 import { skillWrite } from './skills';
@@ -30,12 +31,7 @@ type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_consolidation_log (
-    id TEXT PRIMARY KEY, ran_at INTEGER,
-    turns_read INTEGER, errors_read INTEGER,
-    memories_written INTEGER, skills_written INTEGER, scars_written INTEGER,
-    digest TEXT
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

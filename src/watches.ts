@@ -13,25 +13,14 @@
 // a recurring watch re-arms and keeps sentry.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_watches (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    check_tool TEXT NOT NULL,        -- read_sql | fetch_url | web_search
-    check_args TEXT NOT NULL,        -- JSON args for the probe
-    condition TEXT NOT NULL,         -- plain-English predicate over the probe output
-    action_goal TEXT NOT NULL,       -- the intent goal filed when it fires
-    recurring INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'armed',     -- armed | fired | paused
-    last_checked INTEGER,
-    fires INTEGER DEFAULT 0,
-    created_at INTEGER
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

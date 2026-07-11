@@ -20,23 +20,14 @@
 // tool_forge ops: write | list | read | invoke | retire.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { sandboxRunCode } from './connect-sandbox';
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_custom_tools (
-    id TEXT PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    description TEXT NOT NULL,
-    args_hint TEXT,
-    language TEXT DEFAULT 'python',
-    code TEXT NOT NULL,
-    status TEXT DEFAULT 'active',    -- active | retired
-    runs INTEGER DEFAULT 0,
-    created_at INTEGER, updated_at INTEGER
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

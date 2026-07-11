@@ -28,6 +28,7 @@
 // which is what a memory fingerprint requires. No model anywhere in here.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 export const PHI = (1 + Math.sqrt(5)) / 2;
@@ -260,12 +261,7 @@ export function kappaCrossModal(narrative: number[], physiological: number[], cf
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS pami_memories (
-    id TEXT PRIMARY KEY,
-    index_json TEXT NOT NULL,
-    content TEXT,
-    created_at INTEGER
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

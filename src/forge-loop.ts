@@ -30,6 +30,7 @@
 // pass detection, lifecycle — are exported and unit-tested with no bindings.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 import { sandboxExecCode, sandboxConfigured, pathOpen } from './connect-sandbox';
@@ -205,28 +206,7 @@ function firstJsonObject(text: string): Record<string, unknown> | null {
 let schemaReady = false;
 export async function ensureForgeSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_custom_tools (
-    id TEXT PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    description TEXT NOT NULL,
-    args_hint TEXT,
-    language TEXT DEFAULT 'python',
-    code TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    runs INTEGER DEFAULT 0,
-    created_at INTEGER, updated_at INTEGER
-  )`).run();
-  for (const col of [
-    `ALTER TABLE elle_custom_tools ADD COLUMN goals TEXT`,          // JSON ForgeGoal[]
-    `ALTER TABLE elle_custom_tools ADD COLUMN forge_status TEXT`,   // ForgeStatus
-    `ALTER TABLE elle_custom_tools ADD COLUMN review_notes TEXT`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN iterations INTEGER DEFAULT 0`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN pr_number INTEGER`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN pr_url TEXT`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN last_run_id TEXT`,
-  ]) {
-    await env.DB.prepare(col).run().catch(() => {});
-  }
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

@@ -18,6 +18,7 @@
 // die on. A run is correlated by run_id; step_index orders within a run.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 export type EventKind = 'run_start' | 'tool_call' | 'answer' | 'error' | 'note';
@@ -39,23 +40,7 @@ export interface ElleEvent {
 let schemaReady = false;
 export async function ensureEventsSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_events (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    session_id TEXT,
-    source TEXT,
-    scope TEXT,
-    step_index INTEGER,
-    kind TEXT,
-    tool TEXT,
-    args TEXT,
-    result_preview TEXT,
-    duration_ms INTEGER,
-    created_at INTEGER
-  )`).run();
-  // Indexed the two ways provenance reads it: by run (replay) and by time (recent).
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_events_run ON elle_events(run_id, step_index)`).run().catch(() => {});
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_events_time ON elle_events(created_at DESC)`).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 
