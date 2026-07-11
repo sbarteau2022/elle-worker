@@ -20,18 +20,20 @@
 // ============================================================
 
 import type { Env } from './index';
-import { computeKappa } from './journal';
+import { computeKappa, KAPPA_DEF } from './journal';
 import { latestPoint, type KappaPoint } from './kappa-dynamics';
 
 type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 
 // elle_conversation_turns is created out-of-band (no in-repo DDL), so add the
-// per-turn κ column best-effort. The ALTER throws "duplicate column" once it
-// exists, which we swallow.
+// per-turn κ columns best-effort. Each ALTER throws "duplicate column" once it
+// exists, which we swallow. kappa_def records WHICH formula produced the value
+// (NULL = legacy v1, the fixed-point formula) so series never mix regimes.
 let convKappaReady = false;
-async function ensureConvKappaColumn(env: Env): Promise<void> {
+export async function ensureConvKappaColumn(env: Env): Promise<void> {
   if (convKappaReady) return;
   await env.DB.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa REAL').run().catch(() => {});
+  await env.DB.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa_def TEXT').run().catch(() => {});
   convKappaReady = true;
 }
 
@@ -62,11 +64,13 @@ export async function computeTurnDynamics(
 
   // Prior assistant κ for this session, oldest → newest. Rows without a stored
   // κ (pre-column history) are skipped, so the series is dense and the null/zero
-  // semantics of the finite differences stay correct.
+  // semantics of the finite differences stay correct. Same-definition rows ONLY
+  // (kappa_def = current) — the legacy formula parked 84% of turns on exactly
+  // 0.5, and differencing against those would fabricate dynamics at the seam.
   const prior = await env.DB.prepare(
-    "SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND role = 'assistant' AND kappa IS NOT NULL ORDER BY created_at ASC"
-  ).bind(sessionId).all().catch(() => ({ results: [] as Array<{ kappa: number }> }));
-  const series = [...(prior.results || []).map((r: any) => Number(r.kappa)), kappa];
+    "SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND role = 'assistant' AND kappa IS NOT NULL AND kappa_def = ? ORDER BY created_at ASC"
+  ).bind(sessionId, KAPPA_DEF).all().catch(() => ({ results: [] as Array<{ kappa: number }> }));
+  const series = [...(prior.results || []).map((r: any) => Number(r.kappa)).filter(Number.isFinite), kappa];
 
   // input_perturbation: cosine distance between this user turn and the prior one.
   let inputPerturbation: number | null = null;

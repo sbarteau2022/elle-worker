@@ -23,6 +23,9 @@ import { callLLM } from './llm';
 import { skillWrite } from './skills';
 import { scarTool } from './scars';
 import { CloudGraphStore } from './graph';
+import { memWrite, memVectorBackfill, type MemEnv } from './memory';
+
+type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
@@ -48,7 +51,7 @@ Distill, don't transcribe. Respond with EXACTLY one JSON object:
 
 Discipline: a skill only when the SAME kind of task or lesson appears more than once — one occurrence is an anecdote, not a method. A scar only when the SAME failure shape repeats in the errors. Empty arrays are the correct answer for an uneventful day. Never invent; only consolidate what is actually in the material.`;
 
-export async function runConsolidation(env: Env): Promise<string> {
+export async function runConsolidation(env: Env, embed?: EmbedFn): Promise<string> {
   await ensureSchema(env);
   const since = new Date(Date.now() - 86_400_000).toISOString();
 
@@ -83,9 +86,17 @@ export async function runConsolidation(env: Env): Promise<string> {
   for (const note of (parsed.memories || []).slice(0, 4)) {
     const s = String(note || '').trim();
     if (s.length < 15) continue;
-    await env.DB.prepare(
-      `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'consolidated', 'consolidation', ?, 0.6, 0.6)`
-    ).bind(id(), s.slice(0, 1000)).run().catch(() => {});
+    // Through the kernel's write path when an embed fn is supplied (row + mem-
+    // vector, so the memory is semantically recallable the moment it exists);
+    // raw insert only as the no-embed fallback — the backfill sweeps it up.
+    if (embed) {
+      await memWrite(env as unknown as MemEnv, embed as any, { content: s.slice(0, 1000), type: 'consolidated', importance: 0.6, sourceEngine: 'consolidation' })
+        .catch((e) => console.error('[CONSOLIDATE] memWrite failed:', (e as Error).message));
+    } else {
+      await env.DB.prepare(
+        `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'consolidated', 'consolidation', ?, 0.6, 0.6)`
+      ).bind(id(), s.slice(0, 1000)).run().catch((e) => console.error('[CONSOLIDATE] memory insert failed:', (e as Error).message));
+    }
     mems++;
   }
   for (const sk of (parsed.skills || []).slice(0, 2)) {
@@ -105,7 +116,17 @@ export async function runConsolidation(env: Env): Promise<string> {
     if (s.decayed || s.pruned || s.flags.length) {
       sweepNote = ` — edges: ${s.decayed} decayed, ${s.pruned} pruned${s.flags.length ? `, ${s.flags.length} captured-resonance flag(s) (top: ${s.flags[0].node}@${s.flags[0].dominance})` : ''}`;
     }
-  } catch { /* hygiene is best-effort; never blocks a consolidation */ }
+  } catch (e) { console.error('[CONSOLIDATE] edge sweep failed:', (e as Error).message); }
+
+  // Vector-tier repair: embed a bounded batch of memories that have no mem-
+  // vector (everything the ingest/research pipelines wrote pre-fix). Idempotent;
+  // shrinks the backlog every night until remaining hits 0.
+  if (embed) {
+    try {
+      const bf = await memVectorBackfill(env as unknown as MemEnv, embed as any, 120);
+      if (bf.embedded || bf.failed) sweepNote += ` — vector backfill: ${bf.embedded} embedded, ${bf.failed} failed, ${bf.remaining} remaining`;
+    } catch (e) { console.error('[CONSOLIDATE] vector backfill failed:', (e as Error).message); }
+  }
 
   const digest = String(parsed.digest || '').slice(0, 600);
   await env.DB.prepare(
