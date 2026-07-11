@@ -28,7 +28,7 @@ import { runRouter, ensureNotebook, type Scope } from './router';
 import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState, KAPPA_DEF } from './journal';
 import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
-import { kappaMemoryState } from './kappa-memory/integration';
+import { kappaMemoryState, recordTurnTrace } from './kappa-memory/integration';
 import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
@@ -673,6 +673,11 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
 
   // Persist the exchange (with this turn's κ) — keeps the per-session series.
   await persistExchange(sessionId, src, userMessage, clean, env, kappa_dynamics?.kappa ?? null);
+
+  // κ memory: one bending trace per turn, same as the router's finish() — this
+  // single-shot door was the one chat path that never wrote traces. Awaited
+  // (a void promise is cancelled at response time); catches internally.
+  await recordTurnTrace(env, { sessionId, question: userMessage, answer: clean });
 
   return json({
     content:        clean,

@@ -1080,9 +1080,12 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     // κ memory (live, gate-closed): record one bending trace for the turn off the
     // per-session κ series just updated above. Writing is always on — the
     // substrate fills with real, relationally-inferred r/reserve/velocity — but
-    // κ ranks NOTHING until the seam clears (see src/kappa-memory). Best-effort.
+    // κ ranks NOTHING until the seam clears (see src/kappa-memory). AWAITED:
+    // a naked void-promise here is cancelled when the Worker returns the
+    // response (no ctx in scope for waitUntil) — the write never landed and the
+    // table sat empty. recordTurnTrace catches internally; this cannot throw.
     if (sessionId) {
-      void recordTurnTrace(env as unknown as { DB: D1Database }, { sessionId, question, answer }).catch(() => {});
+      await recordTurnTrace(env as unknown as { DB: D1Database }, { sessionId, question, answer });
     }
     void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: steps, kind: 'answer', result_preview: answer.slice(0, 800) });
     return {
