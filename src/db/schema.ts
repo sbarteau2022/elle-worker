@@ -356,7 +356,8 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // metabolism.ts (recordLLMCall)
     `CREATE TABLE IF NOT EXISTS elle_llm_calls (
           id TEXT PRIMARY KEY, task TEXT, provider TEXT, model TEXT,
-          ms INTEGER, ok INTEGER, created_at INTEGER
+          ms INTEGER, ok INTEGER, created_at INTEGER,
+          tokens_in INTEGER, tokens_out INTEGER
         )`,
     // trading.ts (fresh environments; production has these out-of-band)
     `CREATE TABLE IF NOT EXISTS elle_market_observations (
@@ -447,6 +448,10 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // graph.ts
     `CREATE INDEX IF NOT EXISTS idx_edges_src ON elle_memory_edges(src, kind)`,
     `CREATE INDEX IF NOT EXISTS idx_edges_dst ON elle_memory_edges(dst, kind)`,
+    // metabolism.ts — token usage on pre-existing elle_llm_calls tables. NULL on
+    // rows written before the columns existed (or by providers that report none).
+    `ALTER TABLE elle_llm_calls ADD COLUMN tokens_in INTEGER`,
+    `ALTER TABLE elle_llm_calls ADD COLUMN tokens_out INTEGER`,
   ];
   for (const sql of extras) await db.prepare(sql).run().catch(() => {});
 

@@ -90,6 +90,17 @@ export interface LLMResponse {
   search_results?: string; // grounded search snippets (Gemini with search)
   model: string;
   provider: string;
+  tokens_in?: number | null;   // prompt tokens as reported by the provider (null = not reported)
+  tokens_out?: number | null;  // completion tokens (incl. reasoning tokens where the provider counts them)
+}
+
+// OpenAI-style usage block ({ prompt_tokens, completion_tokens }) — OpenRouter,
+// Groq, GitHub Models, and Grok all report it. Absent/malformed → nulls, so a
+// provider that omits usage can never break the call.
+function usageOf(data: unknown): { tokens_in: number | null; tokens_out: number | null } {
+  const u = (data as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } })?.usage;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return { tokens_in: num(u?.prompt_tokens), tokens_out: num(u?.completion_tokens) };
 }
 
 // ── Model name helpers ────────────────────────────────────────
@@ -228,7 +239,7 @@ export async function callOpenRouter(
   // Some models return reasoning in a separate field
   if (!thinking && choice?.reasoning) thinking = choice.reasoning;
 
-  return { content, thinking, model, provider: 'openrouter' };
+  return { content, thinking, model, provider: 'openrouter', ...usageOf(data) };
 }
 
 // ── Gemini (reasoning + web search grounding) ─────────────────
@@ -309,12 +320,22 @@ export async function callGemini(
   // Extract grounded search results
   const searchResults = candidate?.groundingMetadata?.searchEntryPoint?.renderedContent;
 
+  // Gemini reports usage as usageMetadata; thoughts (thinking) tokens are billed
+  // as output, so they are folded into tokens_out.
+  const um = (data as unknown as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number } }).usageMetadata;
+  const gnum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const gIn = gnum(um?.promptTokenCount);
+  const gOut = gnum(um?.candidatesTokenCount);
+  const gThink = gnum(um?.thoughtsTokenCount);
+
   return {
     content,
     thinking,
     search_results: searchResults,
     model,
     provider: 'gemini',
+    tokens_in: gIn,
+    tokens_out: gOut == null && gThink == null ? null : (gOut ?? 0) + (gThink ?? 0),
   };
 }
 
@@ -365,6 +386,7 @@ export async function callGrok(
     thinking: msg?.reasoning_content,
     model,
     provider: 'grok',
+    ...usageOf(data),
   };
 }
 
@@ -408,7 +430,7 @@ async function callOpenAICompatible(
     thinking = thinkMatch[1].trim();
     content = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
   }
-  return { content, thinking, model, provider: label };
+  return { content, thinking, model, provider: label, ...usageOf(data) };
 }
 
 export async function callGroq(
@@ -459,7 +481,7 @@ export async function callOllama(
 
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
 
-  const data = await res.json() as { message?: { content?: string }; error?: string };
+  const data = await res.json() as { message?: { content?: string }; error?: string; prompt_eval_count?: number; eval_count?: number };
   if (data.error) throw new Error(`Ollama error: ${data.error}`);
 
   let content = toText(data.message?.content);
@@ -471,7 +493,8 @@ export async function callOllama(
     content = content.replace(/<think>[\s\S]*?<\/think>/, '').trim();
   }
 
-  return { content, thinking, model, provider: 'ollama' };
+  const onum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return { content, thinking, model, provider: 'ollama', tokens_in: onum(data.prompt_eval_count), tokens_out: onum(data.eval_count) };
 }
 
 // ── Cloudflare Workers AI — independent free pool, no external key ─────────────
@@ -487,20 +510,20 @@ export async function callWorkersAI(
   temperature = 0.7,
 ): Promise<LLMResponse> {
   if (!env.AI) throw new Error('Workers AI binding (env.AI) not set');
-  const run = async (m: string): Promise<string> => {
+  const run = async (m: string): Promise<{ content: string; tokens_in: number | null; tokens_out: number | null }> => {
     const out = await env.AI!.run(m, {
       messages: [{ role: 'system', content: system }, ...messages],
       max_tokens: maxTokens,
       temperature,
-    }) as { response?: unknown };
-    return toText(out?.response);
+    }) as { response?: unknown; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
+    return { content: toText(out?.response), ...usageOf(out) };
   };
   try {
-    return { content: await run(model), model, provider: 'workers-ai' };
+    return { ...(await run(model)), model, provider: 'workers-ai' };
   } catch (e) {
     // 70B over its neuron budget → fall to the 8B model before giving up.
     console.error('Workers AI 70B failed, trying 8B:', (e as Error).message);
-    return { content: await run(WORKERS_AI_SMALL), model: WORKERS_AI_SMALL, provider: 'workers-ai' };
+    return { ...(await run(WORKERS_AI_SMALL)), model: WORKERS_AI_SMALL, provider: 'workers-ai' };
   }
 }
 
@@ -526,7 +549,7 @@ export async function callLLM(
   // is fire-and-forget — observability never becomes a dependency.
   const t0 = Date.now();
   const record = (r: LLMResponse | null, ok: boolean, provider = r?.provider || 'none', model = r?.model || 'none') =>
-    recordLLMCall(env, { task, provider, model, ms: Date.now() - t0, ok, at: t0 });
+    recordLLMCall(env, { task, provider, model, ms: Date.now() - t0, ok, at: t0, tokens_in: r?.tokens_in ?? null, tokens_out: r?.tokens_out ?? null });
   // Autonomous callers (daemons — nobody is waiting on the answer) pass
   // prefer:'local' to spend the operator's OWN compute (self-hosted Ollama) and
   // the free Workers AI pool FIRST, so the hosted free-tier daily quota stays

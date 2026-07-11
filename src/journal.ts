@@ -25,7 +25,7 @@ import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 import { ELLE_VOICE } from './mind';
-import { velocityAt, accelerationAt, jerkAt, reserveAt } from './kappa-dynamics';
+import { velocityAt, accelerationAt, jerkAt, reserveAt, cosineDistance } from './kappa-dynamics';
 
 export type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 
@@ -416,21 +416,49 @@ export async function journalWrite(
 
   const entryId = id();
   let vectorizeId: string | null = null;
+  let contentVector: number[] | null = null;
 
   // RULE 1: only on-record content enters the learner model.
   if (!offRecord && content.trim()) {
     try {
-      const vector = await embed(content, env);
+      contentVector = await embed(content, env);
       vectorizeId = `jrnl-${entryId}`;
-      await env.VECTORIZE.upsert([{ id: vectorizeId, values: vector, metadata: { type: 'journal', thread_id: threadId, entry_id: entryId, role } }]);
+      await env.VECTORIZE.upsert([{ id: vectorizeId, values: contentVector, metadata: { type: 'journal', thread_id: threadId, entry_id: entryId, role } }]);
     } catch { vectorizeId = null; }
+  }
+
+  // anchor_distance: how far this entry sits from the thread's anchor in
+  // embedding space — the declared anchor_topic when the thread has one, else
+  // the thread's FIRST entry (its origin). An explicit caller value wins.
+  // Reuses the embedding computed above, so it exists only for on-record
+  // entries (RULE 1: off-record content is never embedded, not even in
+  // passing). Best-effort: a failure leaves null, never breaks the write.
+  let anchorDistance: number | null = typeof args.anchor_distance === 'number' ? args.anchor_distance : null;
+  if (anchorDistance == null && contentVector) {
+    try {
+      const t = await env.DB.prepare('SELECT anchor_topic FROM optimus_threads WHERE id = ?')
+        .bind(threadId).first() as { anchor_topic?: string } | null;
+      let anchorText = String(t?.anchor_topic || '').trim();
+      if (!anchorText) {
+        const first = await env.DB.prepare(
+          'SELECT content FROM optimus_entries WHERE thread_id = ? ORDER BY created_at ASC LIMIT 1'
+        ).bind(threadId).first() as { content?: string } | null;
+        anchorText = String(first?.content || '').trim();
+      }
+      // No anchor text at all means THIS entry founds the thread — it IS the
+      // anchor, at distance 0 (a measured origin, distinct from null=unknown).
+      anchorDistance = anchorText ? cosineDistance(await embed(anchorText, env), contentVector) : 0;
+    } catch (e) {
+      console.error('[OPTIMUS] anchor_distance failed:', (e as Error).message);
+      anchorDistance = null;
+    }
   }
 
   await env.DB.prepare(
     `INSERT INTO optimus_entries (id, thread_id, role, content, off_record, kappa, kappa_def, kappa_ts, reserve, velocity, accel, jerk, anchor_distance, vectorize_id, threads_json, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(entryId, threadId, role, content, offRecord, kappa, KAPPA_DEF, now, phase.reserve, phase.velocity, phase.accel, phase.jerk,
-         typeof args.anchor_distance === 'number' ? args.anchor_distance : null, vectorizeId, null, now).run();
+         anchorDistance, vectorizeId, null, now).run();
 
   // FIX 2: extract this entry's unresolved threads and store them per entry, so
   // future generation can condition on the accumulated open threads instead of
@@ -447,7 +475,7 @@ export async function journalWrite(
 
   return {
     thread_id: threadId,
-    entry: { id: entryId, role, off_record: !!offRecord, kappa, kappa_ts: now, ...phase, embedded: !!vectorizeId, threads: threads || undefined },
+    entry: { id: entryId, role, off_record: !!offRecord, kappa, kappa_ts: now, ...phase, anchor_distance: anchorDistance, embedded: !!vectorizeId, threads: threads || undefined },
   };
 }
 
