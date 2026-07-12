@@ -21,7 +21,7 @@
 
 import { estimateR, reserveOf, velocityPeak } from './kappa';
 import { SEAM, KAPPA_PROVISIONAL } from './seam';
-import { writeTrace } from './write_path';
+import { writeTrace, extractSettling } from './write_path';
 import { ensureBendingTraceSchema } from './schema';
 
 const KAPPA_WINDOW = 12; // how many recent per-turn κ samples form the settling window
@@ -40,10 +40,10 @@ async function recentKappa(db: D1Database, sessionId: string, limit = KAPPA_WIND
 }
 
 // Write one bending trace for the turn. perturbation = what arrived (the user's
-// turn), response = how she moved (her answer), settling = where it came to rest.
-// The open/closed-superposition extractor is future work, so settling records
-// 'SETTLED' for now; the r/reserve/velocity are the real, relationally-inferred
-// contraction signal over the κ window.
+// turn), response = how she moved (her answer), settling = where it came to rest
+// (extractSettling — lexical OPEN/SETTLED over the answer's tail); the
+// r/reserve/velocity are the real, relationally-inferred contraction signal
+// over the κ window.
 export async function recordTurnTrace(
   env: MemEnvLike,
   args: { sessionId: string; question: string; answer: string; sourceMass?: 'corpus' | 'elle' | 'reader' },
@@ -51,16 +51,28 @@ export async function recordTurnTrace(
   try {
     await ensureBendingTraceSchema(env.DB);
     const kappaWindow = await recentKappa(env.DB, args.sessionId);
+    // boundary_idx must grow forever: the trace id is SHA-256(thread:idx) and
+    // the INSERT is OR IGNORE, so a repeated idx is a SILENT drop. The κ window
+    // caps at KAPPA_WINDOW and would freeze the idx there — count the thread's
+    // existing traces instead (monotonic, collision-free).
+    const cnt = await env.DB.prepare('SELECT COUNT(*) AS n FROM bending_trace WHERE thread_id = ?')
+      .bind(args.sessionId).first().catch(() => null);
+    const boundaryIdx = Number((cnt as { n?: number } | null)?.n ?? kappaWindow.length);
     return await writeTrace(env.DB as any, {
       thread_id: args.sessionId,
-      boundary_idx: kappaWindow.length,           // one trace per turn; monotonic per thread
+      boundary_idx: boundaryIdx,                  // one trace per turn; monotonic per thread
       perturbation: args.question.slice(0, 4000),
       response: args.answer.slice(0, 4000),
-      settling: 'SETTLED',                          // extractor pending; provisional by construction
+      settling: extractSettling(args.answer),
       kappa_window: kappaWindow.length ? kappaWindow : undefined,
       source_mass: args.sourceMass ?? 'elle',
     });
-  } catch { return null; }
+  } catch (e) {
+    // Best-effort — never touch the answer — but never SILENT: an invisible
+    // failure here is exactly how the table sat empty while "wired".
+    console.error('[KAPPA-MEM] recordTurnTrace failed:', (e as Error).message);
+    return null;
+  }
 }
 
 export interface KappaMemoryState {

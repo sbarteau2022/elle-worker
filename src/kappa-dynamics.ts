@@ -77,6 +77,19 @@ export function latestPoint(series: number[], inputPerturbation: number | null =
   };
 }
 
+// Cosine distance between two embeddings (1 − cosine similarity), shared by
+// the chat path (input_perturbation, kappa-turn.ts) and the journal's
+// anchor_distance. null when either vector is empty/mismatched/zero — same
+// null ≠ 0 discipline as the derivatives above.
+export function cosineDistance(a: number[], b: number[]): number | null {
+  if (!a?.length || !b?.length || a.length !== b.length) return null;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  if (na === 0 || nb === 0) return null;
+  const cos = dot / (Math.sqrt(na) * Math.sqrt(nb));
+  return Number((1 - cos).toFixed(6));
+}
+
 // Every point of a series. Used by the journal backfill and the unit tests.
 export function computeSeries(kappas: number[], perturbations?: (number | null)[]): KappaPoint[] {
   return kappas.map((_k, i) => ({

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { SEAM, ranksOnKappa, KAPPA_PROVISIONAL } from './seam';
 import { estimateR, reserveOf, velocityPeak, kappaOf } from './kappa';
-import { isBoundary, writeTrace } from './write_path';
+import { isBoundary, writeTrace, extractSettling } from './write_path';
 import { retrieveAtOpen } from './retrieval';
 import { assessSovereignty } from './sovereignty';
 import { kappaMemoryState, recordTurnTrace } from './integration';
@@ -104,5 +104,36 @@ describe('recordTurnTrace (live write path)', () => {
   it('never throws — a broken db yields null, not an exception', async () => {
     const brokenDb: any = { prepare() { throw new Error('d1 down'); } };
     await expect(recordTurnTrace({ DB: brokenDb }, { sessionId: 's', question: 'q', answer: 'a' })).resolves.toBeNull();
+  });
+  it('boundary_idx follows the thread trace COUNT, not the capped κ window, so ids never collide', async () => {
+    // 12-sample window (the cap) but 40 traces already written: the id must be
+    // derived from 40. Same window at count 41 must yield a DIFFERENT id.
+    const window = Array.from({ length: 12 }, (_, i) => 1 - i * 0.01);
+    const a = await recordTurnTrace({ DB: fakeDb(window, 40) }, { sessionId: 's', question: 'q', answer: 'a' });
+    const b = await recordTurnTrace({ DB: fakeDb(window, 41) }, { sessionId: 's', question: 'q', answer: 'a' });
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('extractSettling (lexical OPEN/SETTLED over the answer tail)', () => {
+  it('a conclusive close settles', () => {
+    expect(extractSettling('The fix is deployed. All three columns now populate on every turn.')).toBe('SETTLED');
+  });
+  it('an ending question is OPEN and drives settled_open in writeTrace', async () => {
+    const s = extractSettling('I patched the write path. Do you want the migration applied too?');
+    expect(s.startsWith('OPEN:')).toBe(true);
+  });
+  it('an unresolved marker in the close is OPEN', () => {
+    const s = extractSettling('The write lands now. Whether lex2 tracks real coherence remains unknown.');
+    expect(s.startsWith('OPEN:')).toBe(true);
+  });
+  it('a hedge-saturated close is OPEN', () => {
+    const s = extractSettling('It works. Maybe the cause is caching, or perhaps a race; possibly both, I think.');
+    expect(s.startsWith('OPEN:')).toBe(true);
+  });
+  it('empty text settles trivially', () => {
+    expect(extractSettling('')).toBe('SETTLED');
   });
 });
