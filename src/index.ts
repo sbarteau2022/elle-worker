@@ -47,6 +47,7 @@ import { upsertProfile, getProfileByEmail } from './profiles';
 import { armOnboarding, disarmOnboarding } from './onboarding';
 import { pfarRoute } from './pfar';
 import { pathOpen as sandboxPathOpen, sandboxRunsRecent, sandboxBroughtIn, sandboxThoughts, sandboxReportsRecent, unseenReportCount, markReportsSeen } from './connect-sandbox';
+import { delegationsRecent } from './local-agent';
 import { sseDoor, memberDonePayload } from './stream';
 import { handleArrival } from './arrival';
 import { memWrite, memRecall, assembleContext, memVectorBackfill, type MemEnv } from './memory';
@@ -1459,6 +1460,12 @@ export default {
         sandboxReportsRecent(env, 20),
       ]);
       return json({ path: pathState, runs, brought_in, thoughts, reports });
+    }
+    // The second brain's use report: recent delegations (goal → the local
+    // model's autonomous boxed run). Admin-gated like the sandbox report.
+    if (path === '/api/elle-delegations') { if (!svc) return err('Unauthorized', 401);
+      const dq = body as { limit?: number };
+      return json({ delegations: await delegationsRecent(env, Number(dq.limit) || 40) });
     }
     // Code security analysis — the Deep-Mind code tab's upload runs through here.
     // STATIC analysis (the code is never executed): deterministic scan + LLM

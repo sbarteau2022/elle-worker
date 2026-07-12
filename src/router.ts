@@ -40,6 +40,7 @@ import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
+import { runLocalAgent } from './local-agent';
 import { deepResearch } from './deep-research';
 import { resolveOptionContract } from './alpaca-options';
 import { calc } from './calc';
@@ -162,7 +163,10 @@ export type Scope = 'full' | 'cofounder' | 'member' | 'public' | 'hospitality';
 // too) and no run_shell (which could apply a migration or deploy). He keeps
 // every read into her code (repo_read/search, github_*, forge_check) and every
 // other capability — trading, conductor, provenance, analysis, run_code.
-const SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell']);
+// delegate_local is denied here too: it runs a local agent whose own tools are
+// run_shell/run_code in the box, so allowing it to a run_shell-denied scope
+// would be an indirect bypass of that very denial.
+const SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell', 'delegate_local']);
 // page_read is in every scope: the central pager fires for ANY scope's large
 // observations, so the page-fault handler must be reachable wherever a page
 // can be minted (pages are opaque KV slices keyed by id — read-only).
@@ -250,6 +254,7 @@ const TOOL_LINES: Record<string, string> = {
   run_code: `run_code(code,language?) — ACTUALLY EXECUTE code on your laptop's live sandbox (the connect-back path) and get real stdout/stderr/exit code back. language ∈ {python (default), javascript, typescript}. Use this to verify code you wrote actually runs before handing it back — and to compute anything calc can't. If the path is closed you'll be told; run sandbox_status to check.`,
   run_shell: `run_shell(command) — run a shell command (e.g. npm test, tsc --noEmit, git clone, npm install) on your laptop's sandbox, same box as run_code. This is your real hands: build from scratch, install deps, run the test suite, iterate on failures.`,
   sandbox_status: `sandbox_status() — check whether the live path down to your laptop's sandbox is OPEN before running code on it. Returns the box's host/platform/root and when it last checked in.`,
+  delegate_local: `delegate_local(goal,max_steps?) — hand a whole GOAL to your SECOND brain: a separate agent running on the laptop's LOCAL model that works autonomously inside the Docker box, deciding its own sequence of run_shell/run_code steps, and reports back what it did and found. Use this to offload a self-contained build/test/investigate task ("get this repo's test suite green", "profile this script and make it 2x faster") so you spend one step-slot while it grinds many. It is boxed and toolless beyond shell/code — it cannot touch the repos, the DB, github, or the network — so give it everything it needs IN the goal. Returns its final summary; the full transcript is logged to the delegations report.`,
   sandbox_clone: `sandbox_clone(target,kind?,title?) — pull a COPY of code into your cloud cache. TWO LANES, one result: a GitHub-shaped target ("owner/name", optional #ref, or a github.com URL) migrates via the CLOUD lane — works ANYTIME, laptop closed or not; a local path or the laptop's working tree (kind='git') rides the socket and needs the box awake. title names what you brought in (shown in the sandbox console). Either way the copy is cached in KV (24h), logged, and surfaced when an idea is selected for scoping. Migrate whatever you need, whenever you need it.`,
   sandbox_report: `sandbox_report(title,body) — surface a report FROM a sandbox session: your findings after building/testing something on the box (what it does, whether it works, whether it's worth keeping). Titled by you. Filed to the sandbox console and flashes its tab until it's read. Use when a sandbox investigation reaches a conclusion worth showing.`,
   github_read_file: `github_read_file(repo,path,ref?) — read one real file from ANY GitHub repo ("owner/name"). For your OWN three repos prefer repo_read (allowlisted, forge-integrated); this is for reading the outside world's code.`,
@@ -614,6 +619,8 @@ export async function runTool(
         return clip(await sandboxRunShell(env, String(a.command || ''), sctx));
       case 'sandbox_status':
         return await sandboxStatus(env);
+      case 'delegate_local':
+        return clip(await runLocalAgent(env, String(a.goal || a.task || ''), { maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined }, sctx), OBS_CAP * 2);
       case 'sandbox_clone':
         return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx, a.title ? String(a.title) : undefined));
       case 'sandbox_report':
