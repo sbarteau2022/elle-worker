@@ -3,6 +3,7 @@
 // 6 endpoints: duel-engine, tutor, doctrine, cohort, replays, threads
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import { callLLM, type LLMEnv } from './llm';
 import { computeSeries, type KappaPoint } from './kappa-dynamics';
 
@@ -719,18 +720,5 @@ Return JSON: {"summary":"...","note":"..."}`,
 
 // ── DB BOOTSTRAP ─────────────────────────────────────────────
 export async function bootstrapLawSchema(env: LawEnv): Promise<void> {
-  const stmts = [
-    `CREATE TABLE IF NOT EXISTS duels (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, opponent TEXT DEFAULT 'Cerberus-03', scenario TEXT NOT NULL, question_type TEXT DEFAULT 'Necessary Assumption', status TEXT DEFAULT 'active', result TEXT, score_composure REAL, score_recognition REAL, score_walkback REAL, score_framework REAL, synthesis TEXT, created_at TEXT DEFAULT (datetime('now')), ended_at TEXT)`,
-    `CREATE TABLE IF NOT EXISTS duel_turns (id TEXT PRIMARY KEY, duel_id TEXT NOT NULL, n INTEGER NOT NULL, side TEXT NOT NULL, text TEXT NOT NULL, composure REAL DEFAULT 0.75, tactic_src TEXT, tactic_ref TEXT, tactic_name TEXT, tactic_fallacy TEXT, created_at TEXT DEFAULT (datetime('now')))`,
-    `CREATE TABLE IF NOT EXISTS law_threads (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, summary TEXT DEFAULT '', status TEXT DEFAULT 'open', last_elle_note TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))`,
-    `CREATE TABLE IF NOT EXISTS doctrine_mastery (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT NOT NULL, law_n TEXT NOT NULL, mastery REAL DEFAULT 0, deployment_count INTEGER DEFAULT 0, times_recognized INTEGER DEFAULT 0, UNIQUE(user_id,source,law_n))`,
-    `CREATE TABLE IF NOT EXISTS tutor_questions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, user_id TEXT NOT NULL, question_type TEXT NOT NULL, axis TEXT NOT NULL, difficulty INTEGER DEFAULT 2, stimulus TEXT NOT NULL, question TEXT NOT NULL, choices_json TEXT NOT NULL, correct_key TEXT NOT NULL, explanation TEXT NOT NULL, scaffolding TEXT NOT NULL, selected_key TEXT, axis_delta INTEGER DEFAULT 0, answered_at TEXT, created_at TEXT DEFAULT (datetime('now')))`,
-    `CREATE TABLE IF NOT EXISTS user_stats (user_id TEXT PRIMARY KEY, lsat_score INTEGER DEFAULT 155, streak_days INTEGER DEFAULT 0, total_sessions INTEGER DEFAULT 0, last_session TEXT, updated_at TEXT DEFAULT (datetime('now')))`,
-  ];
-  await env.DB.batch(stmts.map(sql => env.DB.prepare(sql)));
-  // Guarded column adds for tables created before κ telemetry existed. ALTERs
-  // run individually (not in the batch) so "duplicate column" never aborts the
-  // CREATEs above.
-  await env.DB.prepare(`ALTER TABLE duels ADD COLUMN kappa_json TEXT`).run().catch(()=>{});
-  await env.DB.prepare(`ALTER TABLE duels ADD COLUMN tilt_turn INTEGER`).run().catch(()=>{});
+  await ensureAllSchemas(env.DB);
 }

@@ -9,6 +9,7 @@
 //                       https://api.alpaca.markets (live, when ready)
 // ============================================================
 
+import { backfillTradesExtColumns } from './db/schema';
 import { callLLM } from './llm';
 import type { Env } from './index';
 import { resolveOptionContract } from './alpaca-options';
@@ -25,41 +26,7 @@ import { resolveOptionContract } from './alpaca-options';
 let extSchemaReady = false;
 export async function ensureTradingExtSchema(env: Env): Promise<void> {
   if (extSchemaReady) return;
-  const columns: Array<[string, string]> = [
-    ['asset_class', 'TEXT'],       // 'us_equity' | 'option'; NULL on old rows means equity
-    ['option_right', 'TEXT'],      // 'call' | 'put'
-    ['strike_price', 'REAL'],
-    ['expiration_date', 'TEXT'],   // YYYY-MM-DD
-    ['underlying_symbol', 'TEXT'], // options only — the equity the contract is written on
-    ['attribution', 'TEXT'],       // post-close: what actually happened vs. what she expected
-    // Columns the INSERT/SELECT paths have always named but production never
-    // had — the reason the ledger stayed empty while positions were real:
-    ['quantity', 'REAL'],
-    ['expected_timeframe', 'TEXT'],
-    ['confidence', 'REAL'],
-    ['status', 'TEXT'],            // 'open' | 'closed'
-    ['closed_at', 'TEXT'],
-    ['broker_order_id', 'TEXT'],
-    ['source', 'TEXT'],            // 'cron' (autonomous cycle) | 'chat' (trade_execute)
-  ];
-  for (const [name, type] of columns) {
-    await env.DB.prepare(`ALTER TABLE elle_trades ADD COLUMN ${name} ${type}`).run().catch(() => {});
-  }
-  // Fresh environments: the observations/journal tables are created out-of-band
-  // in production; give other envs the SAME shape (observed_at / signal_type)
-  // so reader aliases work everywhere.
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_market_observations (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    symbol TEXT, observation TEXT NOT NULL, what_is_suppressed TEXT,
-    signal_type TEXT, confidence REAL, acted_on INTEGER DEFAULT 0,
-    observed_at TEXT DEFAULT (datetime('now')))`).run().catch(() => {});
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_trading_journal (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    journal_date TEXT UNIQUE NOT NULL, starting_value REAL, ending_value REAL,
-    daily_pnl REAL, daily_return_pct REAL, trades_today INTEGER DEFAULT 0,
-    observations_today INTEGER DEFAULT 0, what_happened TEXT, what_she_learned TEXT,
-    what_she_got_wrong TEXT, what_surprised_her TEXT, philosophical_insight TEXT,
-    hypothesis_for_tomorrow TEXT, created_at TEXT DEFAULT (datetime('now')))`).run().catch(() => {});
+  await backfillTradesExtColumns(env.DB);
   extSchemaReady = true;
 }
 

@@ -1,3 +1,4 @@
+import { ensureAllSchemas } from './db/schema';
 // ============================================================
 // METABOLISM — src/metabolism.ts
 //
@@ -21,6 +22,9 @@ let schemaReady = false;
 export interface LLMCallRecord {
   task: string; provider: string; model: string;
   ms: number; ok: boolean; at: number;
+  // Provider-reported token usage. null (or absent — router.ts's local lane and
+  // older callsites don't pass them) = the provider didn't report usage.
+  tokens_in?: number | null; tokens_out?: number | null;
 }
 
 const RING_MAX = 200;
@@ -37,15 +41,13 @@ export function recordLLMCall(env: unknown, rec: LLMCallRecord): void {
   void (async () => {
     try {
       if (!schemaReady) {
-        await db.prepare(`CREATE TABLE IF NOT EXISTS elle_llm_calls (
-          id TEXT PRIMARY KEY, task TEXT, provider TEXT, model TEXT,
-          ms INTEGER, ok INTEGER, created_at INTEGER
-        )`).bind().run();
+        await ensureAllSchemas(db as unknown as D1Database);
         schemaReady = true;
       }
       await db.prepare(
-        `INSERT INTO elle_llm_calls (id, task, provider, model, ms, ok, created_at) VALUES (?,?,?,?,?,?,?)`
-      ).bind(crypto.randomUUID().replace(/-/g, '').slice(0, 16), rec.task, rec.provider, rec.model, rec.ms, rec.ok ? 1 : 0, rec.at).run();
+        `INSERT INTO elle_llm_calls (id, task, provider, model, ms, ok, created_at, tokens_in, tokens_out) VALUES (?,?,?,?,?,?,?,?,?)`
+      ).bind(crypto.randomUUID().replace(/-/g, '').slice(0, 16), rec.task, rec.provider, rec.model, rec.ms, rec.ok ? 1 : 0, rec.at,
+             rec.tokens_in ?? null, rec.tokens_out ?? null).run();
     } catch { /* fire-and-forget */ }
   })();
 }
@@ -72,7 +74,8 @@ export async function metabolismTool(env: MetabolismEnv): Promise<string> {
   try {
     const since = Date.now() - 86_400_000;
     const rows = await env.DB.prepare(
-      `SELECT provider, task, COUNT(*) AS calls, SUM(ok = 0) AS failures, ROUND(AVG(ms)) AS avg_ms
+      `SELECT provider, task, COUNT(*) AS calls, SUM(ok = 0) AS failures, ROUND(AVG(ms)) AS avg_ms,
+              SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out
          FROM elle_llm_calls WHERE created_at > ? GROUP BY provider, task ORDER BY calls DESC LIMIT 30`
     ).bind(since).all();
     if (rows.results?.length) day = rows.results;

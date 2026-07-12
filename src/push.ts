@@ -19,6 +19,7 @@
 // own clock, that something she finished touches something you talked about.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 
@@ -36,31 +37,7 @@ export const DEFAULT_PREFS: ReachPrefs = { reach_budget_per_week: 2, quiet_start
 let schemaReady = false;
 export async function ensurePushSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS push_devices (
-      user_id TEXT NOT NULL,
-      expo_token TEXT NOT NULL,
-      platform TEXT,
-      created_at INTEGER,
-      PRIMARY KEY (user_id, expo_token)
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS reach_outs (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      reason_kind TEXT NOT NULL,
-      reason_ref TEXT,
-      body TEXT NOT NULL,
-      sent_at INTEGER
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS user_prefs (
-      user_id TEXT PRIMARY KEY,
-      reach_budget_per_week INTEGER DEFAULT 2,
-      quiet_start INTEGER DEFAULT 22,
-      quiet_end INTEGER DEFAULT 8,
-      tz TEXT DEFAULT 'America/Chicago'
-    )`),
-    env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_reach_outs_user ON reach_outs (user_id, sent_at DESC)'),
-  ]);
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

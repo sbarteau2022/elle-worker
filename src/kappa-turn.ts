@@ -19,9 +19,10 @@
 // omitted).
 // ============================================================
 
+import { backfillConvTurnKappa } from './db/schema';
 import type { Env } from './index';
 import { computeKappa, KAPPA_DEF } from './journal';
-import { latestPoint, type KappaPoint } from './kappa-dynamics';
+import { latestPoint, cosineDistance, type KappaPoint } from './kappa-dynamics';
 
 type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 
@@ -32,18 +33,8 @@ type EmbedFn = (text: string, env: Env) => Promise<number[]>;
 let convKappaReady = false;
 export async function ensureConvKappaColumn(env: Env): Promise<void> {
   if (convKappaReady) return;
-  await env.DB.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa REAL').run().catch(() => {});
-  await env.DB.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa_def TEXT').run().catch(() => {});
+  await backfillConvTurnKappa(env.DB);
   convKappaReady = true;
-}
-
-function cosineDistance(a: number[], b: number[]): number | null {
-  if (!a?.length || !b?.length || a.length !== b.length) return null;
-  let dot = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-  if (na === 0 || nb === 0) return null;
-  const cos = dot / (Math.sqrt(na) * Math.sqrt(nb));
-  return Number((1 - cos).toFixed(6));
 }
 
 // Compute the dynamics point for the current assistant turn. Read-only w.r.t.

@@ -33,6 +33,7 @@
 // record — the ladder moves on evidence, not vibes.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import { callLLM } from './llm';
 import { resolveVoice } from './mind';
 import { duelKappa, type LawEnv } from './law';
@@ -140,23 +141,7 @@ const DUEL_SUBTLETY: Record<number, string> = {
 let warReady = false;
 async function ensureWarSchema(env: LawEnv): Promise<void> {
   if (warReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS war_rounds (
-    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, mode TEXT NOT NULL,
-    payload_json TEXT, key_json TEXT, response_json TEXT, score_json TEXT,
-    created_at TEXT DEFAULT (datetime('now')), answered_at TEXT
-  )`).run();
-  // Guarded column adds on the existing duel tables (pre-War-Room rows keep working).
-  for (const ddl of [
-    `ALTER TABLE duels ADD COLUMN rung INTEGER`,
-    `ALTER TABLE duels ADD COLUMN autopsy_json TEXT`,
-    `ALTER TABLE duel_turns ADD COLUMN tactic_id TEXT`,
-    `ALTER TABLE duel_turns ADD COLUMN tactic_valence TEXT`,
-    `ALTER TABLE duel_turns ADD COLUMN tactic2_id TEXT`,
-    `ALTER TABLE duel_turns ADD COLUMN called_tactic TEXT`,
-    `ALTER TABLE duel_turns ADD COLUMN called_valence TEXT`,
-    `ALTER TABLE duel_turns ADD COLUMN call_name_correct INTEGER`,
-    `ALTER TABLE duel_turns ADD COLUMN call_valence_correct INTEGER`,
-  ]) await env.DB.prepare(ddl).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   warReady = true;
 }
 

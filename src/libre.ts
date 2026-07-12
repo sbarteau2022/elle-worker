@@ -5,6 +5,7 @@
 // Read-only research. Sandbox production. Surface when ready.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import { callLLM, type LLMEnv } from './llm';
 
 export interface LibreEnv extends LLMEnv {
@@ -45,29 +46,7 @@ export interface SandboxItem {
 
 // ── Bootstrap ────────────────────────────────────────────────
 export async function bootstrapLibreSchema(env: LibreEnv): Promise<void> {
-  await env.DB.batch([
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_sandbox (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL DEFAULT 'other',
-      title TEXT NOT NULL,
-      genesis TEXT NOT NULL,
-      content TEXT NOT NULL,
-      surface_priority INTEGER DEFAULT 5,
-      surfaced INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'draft',
-      run_n INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    )`),
-    env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_libre_log (
-      id TEXT PRIMARY KEY,
-      run_at TEXT DEFAULT (datetime('now')),
-      curiosity_seed TEXT,
-      research_queries TEXT,
-      artifact_id TEXT,
-      notes TEXT
-    )`),
-  ]);
+  await ensureAllSchemas(env.DB);
 }
 
 // ── Context gathering ─────────────────────────────────────────

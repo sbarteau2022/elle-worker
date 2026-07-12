@@ -1,3 +1,4 @@
+import { ensureAllSchemas } from './db/schema';
 // ============================================================
 // src/router-idempotency.ts  —  exactly-once guard for the router's WRITE tools.
 //
@@ -22,13 +23,7 @@ type OnceOpts = { windowSec?: number | null };
 let schemaReady = false;
 async function ensureSchema(env: any): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_idempotency (
-    key         TEXT PRIMARY KEY,
-    tool        TEXT NOT NULL,
-    result_json TEXT,
-    status      TEXT NOT NULL DEFAULT 'pending',
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

@@ -18,6 +18,7 @@
 // passed here must match what that caller proved.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import { callLLM, sanitizeAnswer, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
@@ -499,18 +500,15 @@ async function alpacaOrder(
 let notebookReady = false;
 export async function ensureNotebook(env: Env): Promise<void> {
   if (notebookReady) return;
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS elle_notebook (
-       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-       title TEXT NOT NULL, body TEXT NOT NULL, mood TEXT,
-       tags TEXT DEFAULT '[]', source TEXT DEFAULT 'router',
-       created_at TEXT DEFAULT (datetime('now')))`
-  ).run();
+  await ensureAllSchemas(env.DB);
   notebookReady = true;
 }
 
 // ── tool dispatch ────────────────────────────────────────────
-async function runTool(
+// Exported for testing: scope gates (idea/tool_forge/fork_replay's inner
+// checks) are cheap to assert directly against runTool without standing up
+// a full runRouter() loop or mocking every provider in llm.ts.
+export async function runTool(
   name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps,
   ctx: { userId: string; sessionId: string | null; runId?: string; source?: string; depth?: number }, scope: Scope = 'full',
 ): Promise<string> {
@@ -790,8 +788,19 @@ async function runTool(
         return await runMcpTool(name, a, env);
       case 'intent':
         return await intentTool(env, a);
-      case 'idea':
+      case 'idea': {
+        const ideaOp = String(a.op || 'list');
+        // op=build/forge ships code through the exact same forge_open →
+        // forge_write → forge_pr path as the named tools — it just does it
+        // as one automated call instead of three model-visible ones. It
+        // must honor the identical boundary: whatever scope can't call
+        // forge_open directly (today: everyone but 'full') can't reach it
+        // through idea{op:forge} either.
+        if ((ideaOp === 'build' || ideaOp === 'forge') && !toolAllowed(scope, 'forge_open')) {
+          return `idea ${ideaOp}: forging ships code — the same boundary as forge_open/forge_write/forge_pr applies, and this scope doesn't have it`;
+        }
         return clip(await ideaTool(env, a, deps.handleIngest, sctx));
+      }
       case 'duplex':
         return clip(await duplexTool(env, a));
       // The notebook the mechanics prompt licenses ("notebook_write what you
@@ -898,7 +907,12 @@ async function runTool(
       case 'metabolism':
         return await metabolismTool(env as any);
       case 'tool_forge':
-        return clip(await toolForgeTool(env, a));
+        // Reserve every built-in tool name — a self-forged tool named e.g.
+        // "run_shell" or "forge_write" can't shadow the real dispatch (name
+        // collision doesn't change what tool_forge{op:invoke} runs), but it
+        // WOULD sit in the registry/prompt catalog looking exactly like a
+        // trusted native tool while running arbitrary self-authored code.
+        return clip(await toolForgeTool(env, a, new Set(Object.keys(TOOL_LINES))));
       case 'consolidate':
         return await runConsolidation(env, deps.embed);
       case 'fork_replay': {
@@ -956,9 +970,20 @@ Continue from here — at most a couple more tool calls if genuinely needed — 
 
 // ── the loop ─────────────────────────────────────────────────
 export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
-  const maxSteps = Math.min(Math.max(opts.maxSteps ?? 6, 1), 10);
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
+  // Step ceiling is scope-aware: 'public'/'hospitality' can never reach a
+  // write tool (toolAllowed() above), so there's no benefit to letting them
+  // reason longer — cap stays at today's 10. 'full'/'cofounder'/'member' can
+  // already call write tools (journal_write, remember, forge_*, trade_execute,
+  // ...); those scopes get a taller ceiling and a higher default so chaining
+  // several tool calls together (read → decide → write) doesn't run out of
+  // steps mid-task. Callers can still ask for fewer; they just can't exceed
+  // the ceiling for their scope.
+  const privilegedScope = scope === 'full' || scope === 'cofounder' || scope === 'member';
+  const stepCeiling = privilegedScope ? 25 : 10;
+  const defaultSteps = privilegedScope ? 12 : 6;
+  const maxSteps = Math.min(Math.max(opts.maxSteps ?? defaultSteps, 1), stepCeiling);
   const sessionId = opts.sessionId || null;
   const source = opts.source || 'elle-router';
   const depth = opts.depth ?? 0;
@@ -1085,9 +1110,12 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     // κ memory (live, gate-closed): record one bending trace for the turn off the
     // per-session κ series just updated above. Writing is always on — the
     // substrate fills with real, relationally-inferred r/reserve/velocity — but
-    // κ ranks NOTHING until the seam clears (see src/kappa-memory). Best-effort.
+    // κ ranks NOTHING until the seam clears (see src/kappa-memory). AWAITED:
+    // a naked void-promise here is cancelled when the Worker returns the
+    // response (no ctx in scope for waitUntil) — the write never landed and the
+    // table sat empty. recordTurnTrace catches internally; this cannot throw.
     if (sessionId) {
-      void recordTurnTrace(env as unknown as { DB: D1Database }, { sessionId, question, answer }).catch(() => {});
+      await recordTurnTrace(env as unknown as { DB: D1Database }, { sessionId, question, answer });
     }
     void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: steps, kind: 'answer', result_preview: answer.slice(0, 800) });
     return {

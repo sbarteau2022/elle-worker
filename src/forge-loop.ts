@@ -30,10 +30,11 @@
 // pass detection, lifecycle — are exported and unit-tested with no bindings.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { callLLM } from './llm';
 import { sandboxExecCode, sandboxConfigured, pathOpen } from './connect-sandbox';
-import { forgeOpen, forgeWrite, forgePR } from './forge';
+import { forgeOpen, forgeWrite, forgePR, forgeCheck } from './forge';
 import { emitEvent } from './events';
 
 // ── the spec ────────────────────────────────────────────────
@@ -205,28 +206,7 @@ function firstJsonObject(text: string): Record<string, unknown> | null {
 let schemaReady = false;
 export async function ensureForgeSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_custom_tools (
-    id TEXT PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    description TEXT NOT NULL,
-    args_hint TEXT,
-    language TEXT DEFAULT 'python',
-    code TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    runs INTEGER DEFAULT 0,
-    created_at INTEGER, updated_at INTEGER
-  )`).run();
-  for (const col of [
-    `ALTER TABLE elle_custom_tools ADD COLUMN goals TEXT`,          // JSON ForgeGoal[]
-    `ALTER TABLE elle_custom_tools ADD COLUMN forge_status TEXT`,   // ForgeStatus
-    `ALTER TABLE elle_custom_tools ADD COLUMN review_notes TEXT`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN iterations INTEGER DEFAULT 0`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN pr_number INTEGER`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN pr_url TEXT`,
-    `ALTER TABLE elle_custom_tools ADD COLUMN last_run_id TEXT`,
-  ]) {
-    await env.DB.prepare(col).run().catch(() => {});
-  }
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 
@@ -531,6 +511,22 @@ ${reviewNotes || '(approved)'}
   ];
 }
 
+// Pure: turn forge_check's JSON string into a ship/no-ship verdict. Exported
+// so the classification logic (green vs failed vs still-pending) is unit
+// testable without a live GitHub API.
+export type CiVerdict = { state: 'green' | 'failed' | 'pending'; summary: string };
+export function classifyForgeCi(raw: string): CiVerdict {
+  let d: { green?: boolean; ci?: unknown } = {};
+  try { d = JSON.parse(raw); } catch { return { state: 'pending', summary: raw.slice(0, 300) || 'forge_check returned no readable status' }; }
+  if (d.green === true) return { state: 'green', summary: 'all CI runs green' };
+  if (Array.isArray(d.ci)) {
+    const failed = d.ci.filter((r: any) => r?.conclusion === 'failure');
+    if (failed.length) return { state: 'failed', summary: JSON.stringify(failed).slice(0, 500) };
+    return { state: 'pending', summary: JSON.stringify(d.ci).slice(0, 300) };
+  }
+  return { state: 'pending', summary: typeof d.ci === 'string' ? d.ci : 'CI has not reported in yet' };
+}
+
 export async function mergeForge(
   env: Env, spec: ForgeSpec, code: string, reviewNotes: string,
 ): Promise<{ ok: boolean; pr_number?: number; url?: string; note: string }> {
@@ -544,6 +540,22 @@ export async function mergeForge(
     const w = await forgeWrite(env, { task_id: taskId, path: f.path, content: f.content, message: `forge: ${spec.name} — ${f.path.split('/').pop()}` });
     try { const d = JSON.parse(w); if (!d.committed) return { ok: false, note: `commit failed for ${f.path}: ${w.slice(0, 200)}` }; }
     catch { return { ok: false, note: `commit failed for ${f.path}: ${w.slice(0, 200)}` }; }
+  }
+
+  // Never open a PR blind. CI needs a minute or two to even start (forge_write
+  // says as much), so this is a best-effort look, not a poll/wait loop — if it's
+  // not green yet, the task stays 'open' with commits on it and no PR, which is
+  // exactly the shape the conductor's hourly forge sweep already knows how to
+  // finish (forge_check → forge_pr once green, conductor.ts). That sweep is the
+  // real gate; this just stops the automated path from ever shipping a PR on
+  // code CI has already flagged red, or before CI has looked at it at all.
+  const checked = await forgeCheck(env, { task_id: taskId }).catch((e) => JSON.stringify({ ci: `forge_check failed: ${(e as Error).message}` }));
+  const verdict = classifyForgeCi(checked);
+  if (verdict.state === 'failed') {
+    return { ok: false, note: `CI failed on the forged branch — not opening a PR: ${verdict.summary}` };
+  }
+  if (verdict.state !== 'green') {
+    return { ok: false, note: `commits pushed; CI ${verdict.summary} — no PR opened yet, the next conductor forge sweep opens it once checks are green` };
   }
 
   const prBody = `**Forged tool: \`${spec.name}\`**

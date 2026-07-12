@@ -28,6 +28,7 @@
 //   - no merge capability exists anywhere in this module
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 
 const GH = 'https://api.github.com';
@@ -112,11 +113,7 @@ async function defaultBranch(env: Env, repo: string): Promise<string> {
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_code_tasks (
-    id TEXT PRIMARY KEY, repo TEXT, branch TEXT, base_branch TEXT,
-    title TEXT, goal TEXT, status TEXT DEFAULT 'open',
-    pr_number INTEGER, commits INTEGER DEFAULT 0,
-    created_at INTEGER, updated_at INTEGER)`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

@@ -11,6 +11,7 @@
 //   0    7  * * *  Optimus canvas (Elle's unprompted daily journal + reads reader)
 // ============================================================
 
+import { ensureAllSchemas, backfillUsersColumns } from './db/schema';
 import { callLLM, MODEL, sanitizeAnswer, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
 import { runLibreMode, handleSandbox, type LibreEnv } from './libre';
 import {
@@ -27,7 +28,7 @@ import { runRouter, ensureNotebook, type Scope } from './router';
 import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState, KAPPA_DEF } from './journal';
 import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
-import { kappaMemoryState } from './kappa-memory/integration';
+import { kappaMemoryState, recordTurnTrace } from './kappa-memory/integration';
 import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
 import { handleMadmind } from './madmind';
@@ -329,11 +330,7 @@ function routerScope(tier: string | undefined): 'full' | 'cofounder' {
 let usersColsReady = false;
 async function ensureUserColumns(env: Env): Promise<void> {
   if (usersColsReady) return;
-  await env.DB.prepare('ALTER TABLE users ADD COLUMN must_reset INTEGER DEFAULT 0').run().catch(() => {});
-  // provision/reset/set_password all SET updated_at on a table that never had
-  // the column — an uncaught D1 "no such column" error, surfaced to the caller
-  // as Cloudflare's generic 1101 instead of a real response.
-  await env.DB.prepare('ALTER TABLE users ADD COLUMN updated_at TEXT').run().catch(() => {});
+  await backfillUsersColumns(env.DB);
   usersColsReady = true;
 }
 
@@ -676,6 +673,11 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
 
   // Persist the exchange (with this turn's κ) — keeps the per-session series.
   await persistExchange(sessionId, src, userMessage, clean, env, kappa_dynamics?.kappa ?? null);
+
+  // κ memory: one bending trace per turn, same as the router's finish() — this
+  // single-shot door was the one chat path that never wrote traces. Awaited
+  // (a void promise is cancelled at response time); catches internally.
+  await recordTurnTrace(env, { sessionId, question: userMessage, answer: clean });
 
   return json({
     content:        clean,
@@ -1189,6 +1191,12 @@ export default {
     const path = url.pathname;
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
+
+    // Centralized, one-shot schema bootstrap. Idempotent and guarded per-isolate
+    // (see src/db/schema.ts) — the single place every table is ensured, replacing
+    // the per-module ensure* calls that used to race on first write. Best-effort:
+    // a bootstrap hiccup must never take down the request path.
+    await ensureAllSchemas(env.DB).catch(() => {});
 
     // The laptop's sandbox agent dials in here and upgrades to a long-lived
     // WebSocket. Auth is NOT the admin JWT — the SandboxAgent DO checks the
@@ -1823,6 +1831,9 @@ export default {
 
   // ── Scheduled crons ────────────────────────────────────────
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    // Cron paths write to D1 without going through fetch(); ensure the schema
+    // once here too (idempotent, guarded).
+    await ensureAllSchemas(env.DB).catch(() => {});
     const now = new Date();
     const m = now.getUTCMinutes();
     const h = now.getUTCHours();

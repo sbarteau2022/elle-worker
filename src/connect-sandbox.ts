@@ -14,6 +14,7 @@
 // stdout/stderr previews, the clone's KV key, whether the path was open).
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import type { ExecResult, CloneResult, LlmResult, AgentStatus } from './sandbox-agent';
 import { resolveRepo } from './forge';
@@ -90,30 +91,7 @@ export async function sandboxLLM(
 let schemaReady = false;
 export async function ensureSandboxSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_sandbox_runs (
-    id TEXT PRIMARY KEY,
-    run_id TEXT, session_id TEXT, source TEXT, user_id TEXT,
-    kind TEXT,                -- code | shell | clone
-    language TEXT, command TEXT, code_preview TEXT,
-    target TEXT, clone_key TEXT,
-    exit INTEGER, stdout_preview TEXT, stderr_preview TEXT,
-    ok INTEGER, path_open INTEGER, duration_ms INTEGER, created_at INTEGER
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_time ON elle_sandbox_runs(created_at DESC)`).run().catch(() => {});
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_run ON elle_sandbox_runs(run_id)`).run().catch(() => {});
-  // `title` was added after the table first shipped — a clone can be named by
-  // her ("what she brought in, titled by her"). ADD COLUMN throws if it already
-  // exists; we swallow that so this stays idempotent across live deployments.
-  await env.DB.prepare(`ALTER TABLE elle_sandbox_runs ADD COLUMN title TEXT`).run().catch(() => {});
-  // Reports she surfaces from a sandbox session — the thing that flashes the
-  // console tab. seen=0 until the console is opened and marks them read.
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_sandbox_reports (
-    id TEXT PRIMARY KEY,
-    run_id TEXT, session_id TEXT, user_id TEXT,
-    title TEXT, body TEXT,
-    seen INTEGER DEFAULT 0, created_at INTEGER
-  )`).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sandbox_reports_time ON elle_sandbox_reports(created_at DESC)`).run().catch(() => {});
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 

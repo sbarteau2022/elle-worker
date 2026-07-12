@@ -20,23 +20,14 @@
 // tool_forge ops: write | list | read | invoke | retire.
 // ============================================================
 
+import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { sandboxRunCode } from './connect-sandbox';
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_custom_tools (
-    id TEXT PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
-    description TEXT NOT NULL,
-    args_hint TEXT,
-    language TEXT DEFAULT 'python',
-    code TEXT NOT NULL,
-    status TEXT DEFAULT 'active',    -- active | retired
-    runs INTEGER DEFAULT 0,
-    created_at INTEGER, updated_at INTEGER
-  )`).run();
+  await ensureAllSchemas(env.DB);
   schemaReady = true;
 }
 
@@ -56,7 +47,7 @@ function harness(language: string, code: string, argsJson: string): string {
   return `import json, base64\nargs = json.loads(base64.b64decode("${b64}").decode("utf8"))\n${code}`;
 }
 
-export async function toolForgeTool(env: Env, a: Record<string, unknown>): Promise<string> {
+export async function toolForgeTool(env: Env, a: Record<string, unknown>, reservedNames?: Set<string>): Promise<string> {
   await ensureSchema(env);
   const op = String(a.op || a.action || 'list').trim();
   const now = Date.now();
@@ -67,6 +58,7 @@ export async function toolForgeTool(env: Env, a: Record<string, unknown>): Promi
     const code = String(a.code || '');
     const language = LANGUAGES.has(String(a.language)) ? String(a.language) : 'python';
     if (!name) return 'tool_forge write refused: name required (lowercase, a-z0-9_-)';
+    if (reservedNames?.has(name)) return `tool_forge write refused: "${name}" is a built-in tool name — self-forged tools can't shadow it. Pick a different name.`;
     if (description.length < 15) return 'tool_forge write refused: description too short — say WHEN to reach for this tool';
     if (code.trim().length < 20) return 'tool_forge write refused: code too short to be a tool';
     if (code.length > MAX_TOOL_CODE) return `tool_forge write refused: code too long (max ${MAX_TOOL_CODE} chars)`;
