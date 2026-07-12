@@ -294,6 +294,16 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     title TEXT, body TEXT,
     seen INTEGER DEFAULT 0, created_at INTEGER
   )`,
+    // local-agent.ts — the second brain's use report: one row per delegation
+    // (goal handed down by the cloud brain → the local model's autonomous run).
+    `CREATE TABLE IF NOT EXISTS elle_delegations (
+    id TEXT PRIMARY KEY,
+    run_id TEXT, session_id TEXT, user_id TEXT, source TEXT,
+    goal TEXT, model TEXT,
+    steps INTEGER, ok INTEGER,
+    final TEXT, transcript TEXT,
+    duration_ms INTEGER, created_at INTEGER
+  )`,
     // oracle.ts
     `CREATE TABLE IF NOT EXISTS elle_predictions (
     id TEXT PRIMARY KEY,
@@ -430,6 +440,9 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_sandbox_run ON elle_sandbox_runs(run_id)`,
     `ALTER TABLE elle_sandbox_runs ADD COLUMN title TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_sandbox_reports_time ON elle_sandbox_reports(created_at DESC)`,
+    // local-agent.ts
+    `CREATE INDEX IF NOT EXISTS idx_delegations_time ON elle_delegations(created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_delegations_run ON elle_delegations(run_id)`,
     // oracle.ts
     `CREATE INDEX IF NOT EXISTS idx_predictions_due ON elle_predictions(status, resolve_by)`,
     // law.ts (κ telemetry backfill on duels)
