@@ -51,6 +51,7 @@ import { delegationsRecent } from './local-agent';
 import { sseDoor, memberDonePayload } from './stream';
 import { handleArrival } from './arrival';
 import { memWrite, memRecall, assembleContext, memVectorBackfill, type MemEnv } from './memory';
+import { parseIntake } from './mem-intake';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
@@ -1565,6 +1566,24 @@ export default {
     if (path === '/api/elle-self') {
       if (!svc) return err('Unauthorized', 401);
       return json(await selfMirror(env));
+    }
+    // Locally-encoded memory intake — the workbench's multimodal lane. The
+    // workbench encodes (Qwen-VL / prosody → text) and embeds on the SAME
+    // bge-large-en-v1.5 weights locally (Ollama), then delivers
+    // { content, vector } here. A supplied vector rides in as the injected
+    // EmbedFn, so memWrite stays the one write path (kernel spec §3.1) and
+    // Workers AI is never billed for a vector the laptop already computed.
+    // A missing vector embeds server-side as always; a MALFORMED one is a
+    // precise 400, never a silent server-side re-embed — wrong-dims means
+    // wrong local model, and masking that is how vector spaces rot.
+    if (path === '/api/elle-intake') {
+      if (!svc) return err('Unauthorized', 401);
+      const p = parseIntake(body);
+      if (p.error || !p.opts) return err(p.error || 'invalid intake');
+      const supplied = p.vector;
+      const embedFn = supplied ? async () => supplied : embed;
+      const { id } = await memWrite(env as unknown as MemEnv, embedFn, p.opts);
+      return json({ ok: true, id, embedded_via: supplied ? 'supplied_local' : 'workers_ai' });
     }
     if (path === '/api/elle-code-engine') {
       if (!svc) { const u = await getUser(request, env); if (!u) return err('Unauthorized', 401); }
