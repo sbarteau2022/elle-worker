@@ -57,13 +57,26 @@
 // prior state — trust is earned across consecutive confirmations, ~7-8
 // ticks to 0.9 from a wipeout vs ~5 for the first-order form).
 //
-// STATUS: SHADOW. Nothing imports this. NOT VALIDATED. What one "step"
-// means (tick / bar / decision cycle) is deliberately NOT fixed here — the
-// φ⁻¹ contraction is per-step, so cadence changes the effective half-life
-// (~1.44 steps), and that choice must be made consciously at the call site,
-// not inherited (the exact unit-bug class kappa-dynamics.ts's header
-// documents). Like superposition.ts: advisory shape only until wired
-// through RULE-0 and validated against real series.
+// STATUS: SHADOW. Nothing imports this. NOT VALIDATED.
+//
+// THE STEP, now fixed (it was deliberately open in the first cut): one step
+// is one observation on the ρ = 0.02 cadence — the leak-rate floor, the 2%
+// that sits just below the noise floor (holding.ts: the RLS forgetting
+// factor optimal when drift is 2% of noise scale per turn, Muth 1960). What
+// makes a step WELL-FORMED is an invariant, not a unit: a single step's
+// perturbation — even maximal — must not be able to collapse the function
+// across its threshold; thresholds are reached by ACCUMULATION only.
+// Proven against the real modules in step-invariant.test.ts, with exact
+// minima: 13 consecutive worst-case steps to strain the ρ=0.02 valve from
+// rest (one step reaches 8% of threshold), 3 for the ρ=0.10 fast valve
+// (worst-case floor under PT-II's measured 5), 4 consecutive strains from
+// neutral / 6 from full conviction to cross this regulator's 0.15 floor
+// (single-step collapse impossible from any κ ≥ 0.15·φ ≈ 0.243) — and the
+// mirror in recovery: one confirming step from a wipeout restores only
+// φ⁻² ≈ 0.382, never absolution in one blow. The invariant's knee sits at
+// ρ ≈ 0.223 (where one maximal step CAN strain) — the 2% floor carries 11×
+// slack, the fast valve better than 2×. Like superposition.ts: advisory
+// shape only until wired through RULE-0 and validated against real series.
 // ============================================================
 
 // φ and its powers. W2 is defined as 1 − W1 (not φ⁻² independently) so the
