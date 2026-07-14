@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { PHI, ASYM_Z_MAX, stepAsymmetricZ, createAsymmetricRegulator } from './recovery';
 import {
   freshState, observeCycle, reading, targetFraction, trimQty, isEquitySymbol,
-  KAPPA_NEUTRAL, TRIM_MIN_FRACTION, CONVICTION_ATR_N,
+  replayBars, KAPPA_NEUTRAL, TRIM_MIN_FRACTION, CONVICTION_ATR_N,
 } from './conviction';
 
 const logistic = (z: number) => 1 / (1 + Math.exp(-z));
@@ -142,6 +142,60 @@ describe('observeCycle — the perturbation form at the live cadence', () => {
       k++;
     }
     expect(k).toBe(3); // ceil(φ²) — same behavioral law proven in recovery-asymmetric.test.ts
+  });
+});
+
+describe('replayBars — the same live functions, driven over history', () => {
+  const series = (closes: number[]) => closes.map((c, i) => ({ d: `2026-01-${String(i + 1).padStart(2, '0')}`, c }));
+
+  it('drives observeCycle verbatim: a hand-stepped trajectory equals the replay', () => {
+    const closes = series([100, 102, 99, 105]);
+    const r = replayBars('T', 'long', closes, 10)!;
+    // Reproduce by hand through the exact live functions.
+    let st = freshState('T', 100, 10);
+    const hand: number[] = [];
+    for (let i = 1; i < closes.length; i++) { const x = observeCycle(st, closes[i].c, 'long'); st = x.state; hand.push(x.kappa); }
+    expect(r.trajectory.map(s => s.k)).toEqual(hand); // exact — no re-implementation
+    expect(r.bars).toBe(4);
+    expect(r.entryPrice).toBe(100);
+  });
+
+  it('a position that only ran up never strains and never trims — the shaper stays silent', () => {
+    const r = replayBars('WIN', 'long', series([100, 103, 107, 112, 120, 131]), 100)!;
+    expect(r.everStrained).toBe(false);
+    expect(r.finalKappa).toBeGreaterThan(0.5);
+    expect(r.maxTrimFraction).toBe(0);
+    expect(r.totalTrimmed).toBe(0);
+  });
+
+  it('a constant-percentage grind DOWN only borders strain — every bar is normal-sized against its own vol', () => {
+    // A real property, not a bug: constant-% moves are all w≈0.5, whose fixed
+    // point sits exactly AT the strained boundary (z*=-zMax/2), approached
+    // never crossed. Straining takes acceleration, not just decline.
+    const grind = [100]; for (let i = 0; i < 20; i++) grind.push(grind[grind.length - 1] * 0.95);
+    const r = replayBars('GRIND', 'long', series(grind), 100)!;
+    expect(r.finalKappa).toBeLessThan(0.5);   // conviction erodes
+    expect(r.everStrained).toBe(false);        // but never tips over on a steady slope
+  });
+
+  it('an ACCELERATING crash strains conviction and the executor walks size down (never to zero)', () => {
+    // Calm first (sets a low vol scale), then drops bigger than that scale →
+    // w→1 → strain crosses. This is the shock the shaper exists to catch.
+    const closes = [100, 101, 100, 101, 100];      // calm: low vol scale
+    let px = 100;
+    for (let i = 0; i < 10; i++) { px *= 0.90; closes.push(px); } // 10 drops ≥2×ATR → w=1 (need ≥7 to cross)
+    const r = replayBars('SHOCK', 'long', series(closes), 100)!;
+    expect(r.everStrained).toBe(true);
+    expect(r.minKappa).toBeLessThan(0.4);
+    expect(r.maxTrimFraction).toBeGreaterThan(0);
+    expect(r.totalTrimmed).toBeLessThan(100); // open floor: the position is never flattened
+  });
+
+  it('degenerate input is refused, not guessed', () => {
+    expect(replayBars('T', 'long', [], 10)).toBeNull();
+    expect(replayBars('T', 'long', [{ d: '2026-01-01', c: 100 }], 10)).toBeNull();
+    // NaN/zero closes filtered; if <2 survive → null
+    expect(replayBars('T', 'long', [{ d: 'a', c: NaN }, { d: 'b', c: 0 }, { d: 'c', c: 100 }], 10)).toBeNull();
   });
 });
 
