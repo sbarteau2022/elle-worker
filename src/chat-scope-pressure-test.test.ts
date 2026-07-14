@@ -23,14 +23,14 @@
 //   npx vitest run src/chat-scope-pressure-test.test.ts
 // ============================================================
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { toolAllowed } from './router';
 
 // Parsed straight from the source so this fails loudly — not silently — the
 // moment a new tool is added to the catalog without an explicit scope
 // decision being made in the sets below.
-const ROUTER_SRC = readFileSync(fileURLToPath(new URL('./router.ts', import.meta.url)), 'utf8');
+const ROUTER_SRC = readFileSync(join(__dirname, 'router.ts'), 'utf8');
 function extractCatalogToolNames(src: string): string[] {
   const m = src.match(/const TOOL_LINES[^{]*\{([\s\S]*?)\n\};/);
   if (!m) throw new Error('TOOL_LINES block not found — router.ts catalog shape changed; update this test');
