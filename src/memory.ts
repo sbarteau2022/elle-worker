@@ -28,6 +28,7 @@
 
 import { ensureAllSchemas } from './db/schema';
 import { CloudGraphStore, graphExpandAB, recordAssociations } from './graph';
+import { logCoRecallEvents } from './atlas-events';
 import { jaccardDistance, orderedDivergence } from './recall-ab';
 
 export interface MemEnv {
@@ -251,6 +252,11 @@ export async function memRecall(env: MemEnv, embed: EmbedFn, query: string, k = 
     }
     void recordAssociations(store, result.map(r => r.id))
       .catch((e) => console.error('[GRAPH] recordAssociations failed:', (e as Error).message));
+    // The same co-recall facts, appended to the immutable atlas-event ledger
+    // the on-device cartographer pulls from (atlas-events.ts). Best-effort:
+    // the recall never depends on the ledger accepting the write.
+    void logCoRecallEvents(env, result.map(r => r.id))
+      .catch((e) => console.error('[GRAPH] atlas event log failed:', (e as Error).message));
     // Live A/B log: the top-k graph-tier ids each arm surfaces (by activation,
     // excluding the semantic hits) + their divergence. Best-effort, off the hot
     // path's success criteria — a failed log never touches the returned recall.
