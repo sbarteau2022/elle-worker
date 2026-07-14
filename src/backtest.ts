@@ -124,7 +124,7 @@ export function runKappaBacktest(
 }
 
 // ── Alpaca daily bars (self-contained; the worker has the keys) ──
-interface BtEnv {
+export interface BtEnv {
   ALPACA_API_KEY?: string;
   ALPACA_SECRET_KEY?: string;
   DB: D1Database;
@@ -134,7 +134,7 @@ const alpacaHeaders = (env: BtEnv) => ({
   'APCA-API-SECRET-KEY': env.ALPACA_SECRET_KEY || '',
 });
 
-async function fetchYears(env: BtEnv, symbol: string, startISO: string): Promise<number[]> {
+export async function fetchYears(env: BtEnv, symbol: string, startISO: string): Promise<number[]> {
   const out: number[] = [];
   let pageToken = '';
   for (let guard = 0; guard < 20; guard++) {
