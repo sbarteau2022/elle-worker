@@ -13,6 +13,7 @@ import { backfillTradesExtColumns } from './db/schema';
 import { callLLM } from './llm';
 import type { Env } from './index';
 import { resolveOptionContract } from './alpaca-options';
+import { runConvictionCycle, trimQty, type ConvictionReading, type LivePosition } from './conviction';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -268,6 +269,24 @@ export async function runTradingCycle(env: Env): Promise<void> {
   const positions = await getPositions(env);
   await syncPositions(env, positions);
 
+  // ── conviction channel (built in — the promoted recovery regulator) ──
+  // Every open equity position carries an asymmetric log-odds regulator;
+  // each cron cycle is one observation (market hours only — a closed market
+  // carries no information and must not leak the state). κ is surfaced to
+  // the decision prompt below; the order-touching trim executor further
+  // down stays behind ELLE_CONVICTION_ENFORCE. Best-effort: a D1 hiccup
+  // here never blocks the cycle.
+  let conviction = new Map<string, ConvictionReading>();
+  try {
+    const live: LivePosition[] = positions.map(p => ({
+      symbol: p.symbol,
+      side: p.side === 'short' ? 'short' as const : 'long' as const,
+      qty: parseFloat(p.qty),
+      price: parseFloat(p.current_price),
+    }));
+    conviction = await runConvictionCycle(env.DB, live, isMarketHours());
+  } catch (e) { console.error('[CONVICTION] cycle failed:', (e as Error).message); }
+
   // unrealized_pnl is the sum of the open positions (a real, always-available
   // number); day_pnl is equity vs. yesterday's close when Alpaca returns
   // last_equity. Fields the real table has no confident source for
@@ -313,6 +332,11 @@ Portfolio: $${parseFloat(account.portfolio_value).toFixed(2)} total, $${parseFlo
 You trade with philosophical reasoning grounded in the Observer methodology.
 What markets suppress is often where the move lives. Bilateral suppression is the load-bearing axis.
 
+Each open position may show a conviction κ — your recovery regulator's live trust in that thesis
+(0.5 neutral; trust is lost ~2.6× faster than it is re-earned, by design). It is a drawdown-shaper,
+not an oracle: a strained κ means the position has been moving against you in size-weighted terms
+across cycles. Weigh it; you may still overrule it with reasoning.
+
 This is the paper account — losing money here is fine as long as you learn something real from it;
 what matters is the depth of the reasoning, not the P&L. Every position you take should trace: the
 theory, the catalyst you expect, and (once it closes) what actually happened against that theory.
@@ -343,7 +367,16 @@ Return ONLY valid JSON:
 asset_class/option_right/strike/expiration only apply to option decisions — omit them (or set
 asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
 
-  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%`).join('\n')}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}\n\nWhat do you see? What do you do?`;
+  // Conviction readout per position: κ is the regulator's live trust in the
+  // thesis (0.5 = neutral; strain is earned ~φ² faster than recovery). The
+  // decision loop SEES its own strain every cycle — that is the build-in.
+  const convictionNote = (symbol: string): string => {
+    const r = conviction.get(symbol);
+    if (!r || r.state.step === 0) return '';
+    return `, conviction κ=${r.kappa.toFixed(2)} (${r.status}, target size ${(r.targetFraction * 100).toFixed(0)}%)`;
+  };
+
+  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}\n\nWhat do you see? What do you do?`;
 
   let decision: Record<string, unknown>;
   try {
@@ -380,10 +413,15 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
   const h = alpacaHeaders(env);
   const base = alpacaBase(env);
 
+  // Symbols the decision loop itself traded this cycle — the conviction
+  // executor below must not stack a trim on top of a same-cycle order.
+  const actedSymbols = new Set<string>();
+
   for (const d of (decision.decisions as Array<Record<string, unknown>>) || []) {
     const action = d.action as string;
     const symbol = d.symbol as string;
     const isOption = d.asset_class === 'option';
+    if (['buy', 'sell', 'short', 'cover'].includes(action)) actedSymbols.add(symbol);
 
     // ── options: buy (open long / close short) or sell (write short / close long) a call or put ──
     if (isOption && (action === 'buy' || action === 'sell') && (d.quantity as number) > 0) {
@@ -533,6 +571,41 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
         console.log(`[TRADE] COVER ${symbol}: ${pnl > 0 ? '+' : ''}$${pnl.toFixed(2)}`);
         await writeAttribution(env, symbol, d.reasoning, d.expected_catalyst, pnl, pnlPct);
       } catch (e) { console.error(`[COVER] Failed: ${(e as Error).message}`); }
+    }
+  }
+
+  // ── conviction trim executor (GATED: ELLE_CONVICTION_ENFORCE === 'on') ──
+  // The de-risk half of the validated overlay, live: when a position's
+  // conviction has strained below neutral, reduce toward
+  // entryQty · min(1, κ/0.5). De-risk ONLY — this path never adds size, and
+  // the regulator's open floor (κ never reaches 0) means it can never flatten
+  // a position by itself; full exits remain the decision loop's call (and
+  // RULE 0's, which lives outside κ entirely). Until the flag is thrown the
+  // ledger above still runs and records what this executor WOULD have done.
+  if ((env.ELLE_CONVICTION_ENFORCE || '').toLowerCase() === 'on') {
+    for (const p of positions) {
+      if (actedSymbols.has(p.symbol)) continue;
+      const r = conviction.get(p.symbol);
+      if (!r || r.state.step === 0) continue;
+      const qty = Math.abs(parseFloat(p.qty));
+      const trim = trimQty(qty, r.state, r.kappa);
+      if (trim < 1) continue;
+      const side = p.side === 'short' ? 'buy' : 'sell'; // reduce, whichever direction the position points
+      try {
+        const orderRes = await fetch(`${base}/v2/orders`, {
+          method: 'POST', headers: h,
+          body: JSON.stringify({ symbol: p.symbol, qty: trim.toString(), side, type: 'market', time_in_force: 'day' }),
+        });
+        const order = await orderRes.json() as { id: string; status: string; reject_reason?: string };
+        if (order.status === 'rejected') { console.log(`[CONVICTION] trim ${p.symbol} rejected: ${order.reject_reason}`); continue; }
+        console.log(`[CONVICTION] TRIM ${trim} ${p.symbol} (κ=${r.kappa.toFixed(3)} ${r.status}, target ${(r.targetFraction * 100).toFixed(0)}% of ${r.state.entryQty})`);
+        await env.DB.prepare(
+          `INSERT INTO elle_market_observations (id, signal_type, symbol, observation) VALUES (?, 'conviction_trim', ?, ?)`,
+        ).bind(
+          generateId(), p.symbol,
+          `Regulator de-risk: trimmed ${trim} of ${qty} (κ=${r.kappa.toFixed(3)}, ${r.status}, target ${(r.targetFraction * 100).toFixed(0)}% of entry ${r.state.entryQty}). Order ${order.id}.`,
+        ).run().catch(() => {});
+      } catch (e) { console.error(`[CONVICTION] trim failed for ${p.symbol}: ${(e as Error).message}`); }
     }
   }
 
