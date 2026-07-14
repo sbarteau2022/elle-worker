@@ -132,6 +132,9 @@ export interface Env extends LLMEnv {
   ALPACA_API_KEY?:    string;
   ALPACA_SECRET_KEY?: string;
   ALPACA_BASE_URL?: string;  // https://paper-api.alpaca.markets or https://api.alpaca.markets
+  // Conviction channel (src/conviction.ts): the ledger + prompt surface run
+  // unconditionally; set to 'on' to arm the de-risk-only trim executor.
+  ELLE_CONVICTION_ENFORCE?: string;
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set

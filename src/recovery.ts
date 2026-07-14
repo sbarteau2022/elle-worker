@@ -1,5 +1,14 @@
 // ============================================================
-// RECOVERY REGULATOR — src/recovery.ts  —  SHADOW / NOT VALIDATED
+// RECOVERY REGULATOR — src/recovery.ts
+//
+// STATUS: PROMOTED. Built in. The asymmetric regulator below is the live
+// conviction channel (src/conviction.ts → src/trading.ts): it observes every
+// open position on the trading cron and its κ is surfaced to the decision
+// loop; order-touching enforcement stays behind ELLE_CONVICTION_ENFORCE.
+// Promotion earned by measurement, not narration — the validation trail is
+// docs/RECOVERY_VS_ATR_REAL.md → RECOVERY_OVERLAY_REAL.md → WITNESS_GATES.md
+// (5yr real OHLC, 591 paired envelopes; measured identity: drawdown-shaper —
+// cheapest-to-run left-tail control in the series, NOT an alpha source).
 //
 // The recursive recovery regulator: the recovery-side companion to
 // superposition.ts's collapse logic. Where the holding valve prices STRAIN
@@ -57,7 +66,8 @@
 // prior state — trust is earned across consecutive confirmations, ~7-8
 // ticks to 0.9 from a wipeout vs ~5 for the first-order form).
 //
-// STATUS: SHADOW. Nothing imports this. NOT VALIDATED.
+// (The two-term κ forms below remain advisory-shape instruments; the
+// PROMOTED live channel is the asymmetric log-odds regulator further down.)
 //
 // THE STEP, now fixed (it was deliberately open in the first cut): one step
 // is one observation on the ρ = 0.02 cadence — the leak-rate floor, the 2%
@@ -171,7 +181,8 @@ export function stepKappaWeighted(kappa: number, kappaPrev: number, dir: Recover
 //
 // The perturbation weight w carries straight over (w=1 is the worst case,
 // so single-step-no-collapse minima are provable here exactly as in
-// step-invariant.test.ts). SHADOW, like everything else in this module.
+// step-invariant.test.ts). This regulator is the PROMOTED live channel —
+// see the file header for the validation trail.
 export const ASYM_RHO_DEFAULT = 0.10;  // the fast clock — detection lives here (Pressure Test II); the 0.02 clock is the historian
 export const ASYM_Z_MAX = 3;           // κ confined to (logistic(−3), logistic(3)) ≈ (0.047, 0.953)
 
@@ -192,6 +203,23 @@ export interface AsymmetricState {
 }
 
 const logistic = (z: number) => 1 / (1 + Math.exp(-z));
+
+// The one-step z update as a PURE function — the same line the regulator
+// closure applies, exported so persisted state (a z stored in D1 between
+// stateless Worker invocations) steps through EXACTLY the arithmetic the
+// closure would have applied. One law, whether the state lives in memory
+// or in a row.
+export function stepAsymmetricZ(
+  z: number, dir: RecoveryDirection, weight = 1,
+  rho: number = ASYM_RHO_DEFAULT, zMax: number = ASYM_Z_MAX,
+): number {
+  const s = (rho * zMax) / PHI;
+  const w = Number.isFinite(weight) ? Math.max(0, Math.min(1, weight)) : 0;
+  const z0 = Number.isFinite(z) ? z : 0;
+  return (1 - rho) * z0 + w * (dir === 'recover' ? s / PHI : -(PHI * s));
+}
+
+export const asymmetricKappa = (z: number) => logistic(z);
 
 export function createAsymmetricRegulator(rho: number = ASYM_RHO_DEFAULT, zMax: number = ASYM_Z_MAX) {
   // Solve s from the rail: Z = φ·s/ρ  →  s = ρ·Z/φ. The collapse step is
@@ -214,8 +242,7 @@ export function createAsymmetricRegulator(rho: number = ASYM_RHO_DEFAULT, zMax: 
   return {
     observe(dir: RecoveryDirection, weight = 1): AsymmetricState {
       step++;
-      const w = Number.isFinite(weight) ? Math.max(0, Math.min(1, weight)) : 0;
-      z = (1 - rho) * z + w * (dir === 'recover' ? S_RECOVER : -S_COLLAPSE);
+      z = stepAsymmetricZ(z, dir, weight, rho, zMax);
       return state();
     },
     state,
