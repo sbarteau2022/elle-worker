@@ -19,6 +19,8 @@ import {
 } from './conviction';
 import { runKappaBacktestSuite, ensureBacktestSchema } from './backtest';
 import { runDissonanceBacktestSuite, ensureDissonanceSchema } from './dissonance';
+import { runCoherenceField, ensureCoherenceSchema } from './coherence';
+import { runPerturbationBacktestSuite, ensurePerturbationSchema } from './perturbation';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -431,6 +433,33 @@ export async function runTradingCycle(env: Env): Promise<void> {
       if (n > 0) console.log(`[DISSONANCE] ran two-clock backtest on ${n} symbols`);
     }
   } catch (e) { console.error('[DISSONANCE] failed:', (e as Error).message); }
+
+  // The coherence field — MEASURED material ground for the spine's Tier 1.
+  // Refreshed DAILY (not once): the field is day-to-day ground, so recompute on
+  // the first cron of each day. Aggregates κ + dissonance per area and the world
+  // map from real prices. Best-effort; writes elle_coherence_field.
+  try {
+    await ensureCoherenceSchema(env.DB);
+    const fresh = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM elle_coherence_field WHERE scope='world' AND substr(updated_at,1,10)=date('now')`,
+    ).first() as { n: number } | null;
+    if (!fresh || fresh.n === 0) {
+      const n = await runCoherenceField(env);
+      if (n > 0) console.log(`[COHERENCE] refreshed field: ${n} rows (areas + world)`);
+    }
+  } catch (e) { console.error('[COHERENCE] failed:', (e as Error).message); }
+
+  // One-shot perturbation backtest: dissonance wired BACK IN as the drive —
+  // does the regulated needle stay alive and cross where the plain one froze,
+  // without breaking the open rails. Guarded on the table being empty.
+  try {
+    await ensurePerturbationSchema(env.DB);
+    const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM elle_perturbation_backtest`).first() as { n: number } | null;
+    if (!done || done.n === 0) {
+      const n = await runPerturbationBacktestSuite(env);
+      if (n > 0) console.log(`[PERTURBATION] ran on ${n} symbols`);
+    }
+  } catch (e) { console.error('[PERTURBATION] failed:', (e as Error).message); }
 
   // unrealized_pnl is the sum of the open positions (a real, always-available
   // number); day_pnl is equity vs. yesterday's close when Alpaca returns
