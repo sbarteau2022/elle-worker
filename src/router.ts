@@ -50,6 +50,7 @@ import { predictTool } from './oracle';
 import { devilTool } from './adversary';
 import { reachOutTool } from './push';
 import { ssrfGuard } from './ssrf';
+import { recordThreat } from './security-network';
 import { vfarRoute, type VfarInput } from './vfar';
 import { hyperRoute, type HyperInput } from './hyper';
 import { torusRoute, type TorusInput } from './torus';
@@ -554,7 +555,10 @@ export async function runTool(
       case 'fetch_url': {
         const url = String(a.url || '');
         const guard = ssrfGuard(url);
-        if (!guard.ok) return `fetch_url: ${guard.error}`;
+        if (!guard.ok) {
+          await recordThreat(env, { actorKey: `user:${ctxUserId}`, source: 'ssrf', kind: 'ssrf.blocked', detail: `${guard.error}: ${url.slice(0, 200)}` }).catch(() => {});
+          return `fetch_url: ${guard.error}`;
+        }
         // Bound the fetch itself: a slow or endless response from an
         // attacker-chosen host must not tie up the isolate. 10s ceiling.
         const ctl = new AbortController();
