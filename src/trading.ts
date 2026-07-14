@@ -18,6 +18,7 @@ import {
   type ConvictionReading, type LivePosition,
 } from './conviction';
 import { runKappaBacktestSuite, ensureBacktestSchema } from './backtest';
+import { runDissonanceBacktestSuite, ensureDissonanceSchema } from './dissonance';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -418,6 +419,18 @@ export async function runTradingCycle(env: Env): Promise<void> {
       if (n > 0) console.log(`[BACKTEST] ran train/test on ${n} symbols`);
     }
   } catch (e) { console.error('[BACKTEST] failed:', (e as Error).message); }
+
+  // One-shot dissonance backtest: the two-clock beat (fast ρ=0.10 vs slow
+  // ρ=0.02) on the same universe — does it FIRE where single-κ never crossed a
+  // rail, and does it lead forward volatility. Guarded on the table being empty.
+  try {
+    await ensureDissonanceSchema(env.DB);
+    const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM elle_dissonance_backtest`).first() as { n: number } | null;
+    if (!done || done.n === 0) {
+      const n = await runDissonanceBacktestSuite(env);
+      if (n > 0) console.log(`[DISSONANCE] ran two-clock backtest on ${n} symbols`);
+    }
+  } catch (e) { console.error('[DISSONANCE] failed:', (e as Error).message); }
 
   // unrealized_pnl is the sum of the open positions (a real, always-available
   // number); day_pnl is equity vs. yesterday's close when Alpaca returns
