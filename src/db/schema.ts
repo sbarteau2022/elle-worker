@@ -382,6 +382,14 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     observations_today INTEGER DEFAULT 0, what_happened TEXT, what_she_learned TEXT,
     what_she_got_wrong TEXT, what_surprised_her TEXT, philosophical_insight TEXT,
     hypothesis_for_tomorrow TEXT, created_at TEXT DEFAULT (datetime('now')))`,
+    // security-network.ts — the adversarial security network's event ledger.
+    // One row per classified signal (auth failures, SSRF blocks, cyber.ts
+    // findings, malware hits); actor posture itself lives in KV (SESSIONS,
+    // decaying score) so the hot path never waits on D1.
+    `CREATE TABLE IF NOT EXISTS elle_security_events (
+    id TEXT PRIMARY KEY, actor_key TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL,
+    tactic_ids TEXT DEFAULT '', severity_weight INTEGER DEFAULT 1, posture TEXT DEFAULT 'normal',
+    detail TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`,
   ];
   await db.batch(creates.map((s) => db.prepare(s)));
 
@@ -465,6 +473,9 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // rows written before the columns existed (or by providers that report none).
     `ALTER TABLE elle_llm_calls ADD COLUMN tokens_in INTEGER`,
     `ALTER TABLE elle_llm_calls ADD COLUMN tokens_out INTEGER`,
+    // security-network.ts
+    `CREATE INDEX IF NOT EXISTS idx_security_events_time ON elle_security_events(created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_security_events_actor ON elle_security_events(actor_key)`,
   ];
   for (const sql of extras) await db.prepare(sql).run().catch(() => {});
 

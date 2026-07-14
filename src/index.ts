@@ -32,6 +32,9 @@ import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
 import { kappaMemoryState, recordTurnTrace } from './kappa-memory/integration';
 import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
+import {
+  recordThreat, getPosture, scanBuffer, sha256Hex, isBlockedHash, blockHash, securityReport,
+} from './security-network';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -351,13 +354,21 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
   if (!password && !NO_PW.includes(action)) return err('email and password required');
   const emailL = email.toLowerCase();
 
+  const authActorKey = `ip:${request.headers.get('CF-Connecting-IP') || 'unknown'}`;
+  if ((await getPosture(env, authActorKey).catch(() => ({ posture: 'normal' as const }))).posture === 'blocked') {
+    return err('Temporarily blocked — the security network flagged this address', 403);
+  }
+
   if (action === 'signup') {
     // The door is open to everyone, but not to a script: a handful of new
     // accounts per IP per hour is every honest signup and no farm.
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
     const rlKey = `signup-rl:${ip}`;
     const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
-    if (count >= 5) return err('Too many signups from this address — try again in an hour', 429);
+    if (count >= 5) {
+      await recordThreat(env, { actorKey: authActorKey, source: 'ratelimit', kind: 'auth.signup_flood', detail: emailL }).catch(() => {});
+      return err('Too many signups from this address — try again in an hour', 429);
+    }
     await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
     if (await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL).first()) return err('Email already registered', 409);
     const salt = generateSalt(); const id = generateId();
@@ -370,9 +381,15 @@ async function handleAuth(body: Record<string, string>, env: Env, request: Reque
 
   if (action === 'login') {
     const user = await env.DB.prepare('SELECT id, email, password_hash, access_tier, must_reset FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; password_hash: string; access_tier: string; must_reset?: number } | null;
-    if (!user) return err('Invalid credentials', 401);
+    if (!user) {
+      await recordThreat(env, { actorKey: authActorKey, source: 'auth', kind: 'auth.bad_credentials', detail: emailL }).catch(() => {});
+      return err('Invalid credentials', 401);
+    }
     const [salt, stored] = user.password_hash.split(':');
-    if (await hashPassword(password, salt) !== stored) return err('Invalid credentials', 401);
+    if (await hashPassword(password, salt) !== stored) {
+      await recordThreat(env, { actorKey: authActorKey, source: 'auth', kind: 'auth.bad_credentials', detail: emailL }).catch(() => {});
+      return err('Invalid credentials', 401);
+    }
     await env.DB.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").bind(user.id).run();
     const jti = generateId(); const exp = Math.floor(Date.now() / 1000) + 2592000;
     const tier = user.access_tier || 'standard';
@@ -1342,7 +1359,30 @@ export default {
           return err('no file in form field "file"', 400);
         }
         const file = f as unknown as { name: string; type: string; arrayBuffer(): Promise<ArrayBuffer> };
-        const parsed = await parseUpload(env, { name: file.name, type: file.type, bytes: await file.arrayBuffer() });
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        const hash = await sha256Hex(bytes);
+
+        // The security network's own hash blocklist — populated at runtime by
+        // blockHash(), so a confirmed-malicious upload is refused forever after,
+        // with no redeploy required.
+        if (await isBlockedHash(env, hash)) {
+          await recordThreat(env, { actorKey: `hash:${hash}`, source: 'upload', kind: 'upload.malware_signature', detail: file.name }).catch(() => {});
+          return err('upload rejected — this file matches a known-malicious signature', 403);
+        }
+
+        const fileFindings = scanBuffer(bytes, file.name);
+        if (fileFindings.length) {
+          const actorKey = `ip:${request.headers.get('CF-Connecting-IP') || 'unknown'}`;
+          const kind = fileFindings.some(f => f.kind.startsWith('polyglot.')) ? 'upload.polyglot' : 'upload.malware_signature';
+          const outcome = await recordThreat(env, { actorKey, source: 'upload', kind, detail: `${file.name}: ${fileFindings.map(f => f.kind).join(', ')}` }).catch(() => null);
+          if (fileFindings.some(f => f.severity === 'critical')) {
+            await blockHash(env, hash, `auto-blocked: ${fileFindings[0].detail}`).catch(() => {});
+          }
+          return json({ rejected: true, findings: fileFindings, tactics: outcome?.tactics.map(t => ({ id: t.id, name: t.name, counter: t.counter })) || [] }, 422);
+        }
+
+        const parsed = await parseUpload(env, { name: file.name, type: file.type, bytes: buf });
         return json(parsed);
       } catch (e) { return err(`upload failed: ${(e as Error).message}`, 400); }
     }
@@ -1370,9 +1410,16 @@ export default {
     // Rate limited per IP: 30 requests/hour via KV.
     if (path === '/api/widget-chat') {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const actorKey = `ip:${ip}`;
+      if ((await getPosture(env, actorKey).catch(() => ({ posture: 'normal' as const }))).posture === 'blocked') {
+        return err('Temporarily blocked — the security network flagged this address', 403);
+      }
       const rlKey = `widget-rl:${ip}`;
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
-      if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
+      if (count >= 30) {
+        await recordThreat(env, { actorKey, source: 'ratelimit', kind: 'ratelimit.exceeded', detail: '/api/widget-chat' }).catch(() => {});
+        return err('Rate limit reached — try again in an hour', 429);
+      }
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
       return handleMindConversation(body, env, 'widget', 'public', ctx);
     }
@@ -1384,9 +1431,16 @@ export default {
     // existing widget/Atlas client parses it unchanged.
     if (path === '/api/atlas') {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const actorKey = `ip:${ip}`;
+      if ((await getPosture(env, actorKey).catch(() => ({ posture: 'normal' as const }))).posture === 'blocked') {
+        return err('Temporarily blocked — the security network flagged this address', 403);
+      }
       const rlKey = `atlas-rl:${ip}`;
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
-      if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
+      if (count >= 30) {
+        await recordThreat(env, { actorKey, source: 'ratelimit', kind: 'ratelimit.exceeded', detail: '/api/atlas' }).catch(() => {});
+        return err('Rate limit reached — try again in an hour', 429);
+      }
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
       const ab = body as { query?: string; q?: string; max_steps?: number; session_id?: string };
       const q = String(ab.query || ab.q || '').trim();
@@ -1409,9 +1463,16 @@ export default {
     // so the open door gets the same 30/hour valve.
     if (path === '/api/chat') {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const actorKey = `ip:${ip}`;
+      if ((await getPosture(env, actorKey).catch(() => ({ posture: 'normal' as const }))).posture === 'blocked') {
+        return err('Temporarily blocked — the security network flagged this address', 403);
+      }
       const rlKey = `chat-rl:${ip}`;
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
-      if (count >= 30) return err('Rate limit reached — try again in an hour', 429);
+      if (count >= 30) {
+        await recordThreat(env, { actorKey, source: 'ratelimit', kind: 'ratelimit.exceeded', detail: '/api/chat' }).catch(() => {});
+        return err('Rate limit reached — try again in an hour', 429);
+      }
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
       return handleMindConversation(body, env, 'guest', 'public', ctx);
     }
@@ -1525,7 +1586,31 @@ export default {
     // Code security analysis — the Deep-Mind code tab's upload runs through here.
     // STATIC analysis (the code is never executed): deterministic scan + LLM
     // security review → a vulnerability/exploit report. Admin-gated.
-    if (path === '/api/elle-cyber-analyze') { if (!svc) return err('Unauthorized', 401); return json(await analyzeCode(String(body.code || ''), body.language ? String(body.language) : undefined, env)); }
+    if (path === '/api/elle-cyber-analyze') {
+      if (!svc) return err('Unauthorized', 401);
+      const report = await analyzeCode(String(body.code || ''), body.language ? String(body.language) : undefined, env);
+      // Feed critical/high findings into the security network's ledger — the
+      // same taxonomy war-room.ts teaches as rhetoric, read here as attacker
+      // tactics, so the tactical dashboard (/api/elle-security-status) shows
+      // what's actually been submitted, not just what the tutor covers.
+      if (report.risk === 'critical' || report.risk === 'high') {
+        const top = report.findings[0];
+        const kind = top?.kind.startsWith('secret.') ? 'cyber.secret'
+          : top?.kind === 'exec.reverse-shell' ? 'cyber.reverse_shell'
+          : top?.kind.startsWith('obf.') ? 'cyber.obfuscation'
+          : top?.kind.startsWith('inject.') ? 'cyber.injection'
+          : 'cyber.exec';
+        const actorKey = `ip:${request.headers.get('CF-Connecting-IP') || 'unknown'}`;
+        await recordThreat(env, { actorKey, source: 'cyber', kind, detail: top ? `${top.kind} @L${top.line}` : 'cyber scan' }).catch(() => {});
+      }
+      return json(report);
+    }
+    // The tactical dashboard — recent classified signals, current postures,
+    // and which doctrine tactics have actually fired, most-hit first.
+    if (path === '/api/elle-security-status') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await securityReport(env));
+    }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
