@@ -118,6 +118,32 @@ export function stepKappa(kappa: number, kappaPrev: number, dir: RecoveryDirecti
   return dir === 'strain' ? strainStep(kappa, kappaPrev) : recoverStep(kappa, kappaPrev);
 }
 
+// ── perturbation-weighted step ───────────────────────────────
+// The binary step treats a 0.3·ATR red tick and a crash bar identically —
+// the magnitude channel (input_perturbation, in the valve's vocabulary) was
+// discarded, patched over by an arbitrary dead-band at the call site. This
+// puts the perturbation INTO the step: w ∈ [0,1] is how much of the full
+// φ⁻¹ contraction this observation earns.
+//
+//   κ_next = (1−w)·m + w·target(dir)
+//
+//   w = 1  →  exactly the binary step (the worst case — so every minimum
+//             proven in step-invariant.test.ts still holds as the floor:
+//             no single perturbation, even maximal, collapses anything);
+//   w = 0  →  κ_next = m: no information, no net move — the state just
+//             settles internally toward its own blend. The dead-band's
+//             arbitrary cutoff dissolves into a continuous weight.
+//
+// Boundedness survives by the same argument as everything else here: a
+// convex combination of m ∈ [0,1] and target ∈ [0,1] cannot leave [0,1].
+// No clamps in the update path; the weight itself is sanitized once.
+export function stepKappaWeighted(kappa: number, kappaPrev: number, dir: RecoveryDirection, weight: number): number {
+  const w = Number.isFinite(weight) ? Math.max(0, Math.min(1, weight)) : 0;
+  const m = memoryBlend(kappa, kappaPrev);
+  const target = dir === 'strain' ? W1 * m : 1 - W1 * (1 - m);
+  return (1 - w) * m + w * target;
+}
+
 // ── the regulator (two floats of state, O(1) per step) ───────
 // Starts at 0/0 by default: no conviction until earned — the conservative
 // initial condition for anything that might one day size a position.
@@ -130,6 +156,15 @@ export function createRecoveryRegulator(initialKappa = 0, initialPrev = initialK
     observe(dir: RecoveryDirection): RecoveryState {
       step++;
       const next = stepKappa(kappa, kappaPrev, dir);
+      kappaPrev = kappa;
+      kappa = next;
+      return state();
+    },
+    // The perturbation-weighted observation: dir says which way, weight says
+    // how much of the full φ⁻¹ contraction this observation earned.
+    observeWeighted(dir: RecoveryDirection, weight: number): RecoveryState {
+      step++;
+      const next = stepKappaWeighted(kappa, kappaPrev, dir, weight);
       kappaPrev = kappa;
       kappa = next;
       return state();

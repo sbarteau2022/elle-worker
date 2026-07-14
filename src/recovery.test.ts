@@ -10,7 +10,7 @@
 // ============================================================
 import { describe, it, expect } from 'vitest';
 import {
-  PHI, W1, W2, memoryBlend, strainStep, recoverStep, stepKappa,
+  PHI, W1, W2, memoryBlend, strainStep, recoverStep, stepKappa, stepKappaWeighted,
   createRecoveryRegulator, type RecoveryDirection,
 } from './recovery';
 import { RETENTION_BASE } from './graph';
@@ -171,5 +171,61 @@ describe('the two-term memory is real, not a relabeled first-order form', () => 
   it('stepKappa dispatches to the right direction', () => {
     expect(stepKappa(0.5, 0.5, 'strain')).toBeCloseTo(strainStep(0.5, 0.5), 12);
     expect(stepKappa(0.5, 0.5, 'recover')).toBeCloseTo(recoverStep(0.5, 0.5), 12);
+  });
+});
+
+describe('the perturbation-weighted step — magnitude goes INTO the recursion', () => {
+  it('w=1 reproduces the binary step exactly — so every step-invariant minimum holds as the worst-case floor', () => {
+    for (const [k1, k2] of [[0.5, 0.5], [0.9, 0.1], [0.01, 0.99]] as const) {
+      expect(stepKappaWeighted(k1, k2, 'strain', 1)).toBeCloseTo(strainStep(k1, k2), 12);
+      expect(stepKappaWeighted(k1, k2, 'recover', 1)).toBeCloseTo(recoverStep(k1, k2), 12);
+    }
+  });
+
+  it('w=0 is the pure blend — no information, no net move, the dead-band cutoff dissolved', () => {
+    expect(stepKappaWeighted(0.7, 0.3, 'strain', 0)).toBeCloseTo(memoryBlend(0.7, 0.3), 12);
+    expect(stepKappaWeighted(0.7, 0.3, 'recover', 0)).toBeCloseTo(memoryBlend(0.7, 0.3), 12);
+  });
+
+  it('monotone in w toward the target, in both directions', () => {
+    let prev = stepKappaWeighted(0.5, 0.5, 'strain', 0);
+    for (let w = 0.1; w <= 1.001; w += 0.1) {
+      const next = stepKappaWeighted(0.5, 0.5, 'strain', w);
+      expect(next).toBeLessThanOrEqual(prev + 1e-12);
+      prev = next;
+    }
+    prev = stepKappaWeighted(0.5, 0.5, 'recover', 0);
+    for (let w = 0.1; w <= 1.001; w += 0.1) {
+      const next = stepKappaWeighted(0.5, 0.5, 'recover', w);
+      expect(next).toBeGreaterThanOrEqual(prev - 1e-12);
+      prev = next;
+    }
+  });
+
+  it('bounded [0,1] strictly under 50k random fuzz steps (states, directions, and weights all random)', () => {
+    const reg = createRecoveryRegulator(rnd());
+    for (let i = 0; i < 50_000; i++) {
+      const s = reg.observeWeighted(rnd() < 0.5 ? 'strain' : 'recover', rnd() * 2 - 0.5); // deliberately out-of-range weights too
+      expect(s.kappa).toBeGreaterThanOrEqual(0);
+      expect(s.kappa).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('half-weight perturbations take LONGER to cross the floor than full ones — small bars earn small strain', () => {
+    const floor = 0.15;
+    const count = (w: number) => {
+      const reg = createRecoveryRegulator(0.5);
+      let k = 0;
+      while (reg.state().kappa >= floor && k < 100) { reg.observeWeighted('strain', w); k++; }
+      return k;
+    };
+    expect(count(1)).toBe(4);                 // the proven binary minimum, unchanged
+    expect(count(0.5)).toBeGreaterThan(count(1));
+    expect(count(0.25)).toBeGreaterThan(count(0.5));
+  });
+
+  it('non-finite weights read as zero information, never NaN poisoning', () => {
+    expect(stepKappaWeighted(0.5, 0.5, 'strain', NaN)).toBeCloseTo(memoryBlend(0.5, 0.5), 12);
+    expect(Number.isFinite(stepKappaWeighted(0.5, 0.5, 'recover', Infinity))).toBe(true);
   });
 });
