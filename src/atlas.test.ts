@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ingestAtlas, getLatestAtlas, atlasRoute, type AtlasIngestEnv } from './atlas';
+import { ingestAtlas, getLatestAtlas, atlasRoute, listAtlasHistory, getAtlasByHash, type AtlasIngestEnv } from './atlas';
 
 // ── fakes ────────────────────────────────────────────────────────────────
 function fakeEnv() {
@@ -13,7 +13,11 @@ function fakeEnv() {
     async run() {
       const args = (this as unknown as { _args?: unknown[] })._args || [];
       if (this._sql.startsWith('INSERT INTO elle_atlas_snapshots')) {
-        d1Rows.push({ id: args[0], version: args[1], created_at: args[2], r2_key: args[9] });
+        d1Rows.push({
+          id: args[0], version: args[1], created_at: args[2],
+          node_count: args[3], edge_count: args[4], cycle_rank: args[5],
+          drift_mean: args[8], r2_key: args[9],
+        });
       }
       return { success: true };
     },
@@ -22,7 +26,18 @@ function fakeEnv() {
       const latest = [...d1Rows].sort((a, b) => (b.created_at as number) - (a.created_at as number))[0];
       return { r2_key: latest.r2_key };
     },
-    async all() { return { results: [] }; },
+    async all() {
+      const args = (this as unknown as { _args?: unknown[] })._args || [];
+      if (this._sql.includes('FROM elle_atlas_snapshots') && this._sql.includes('ORDER BY created_at ASC')) {
+        const limit = Number(args[0]) || 100;
+        const rows = [...d1Rows]
+          .sort((a, b) => (a.created_at as number) - (b.created_at as number))
+          .slice(0, limit)
+          .map((r) => ({ hash: r.id, version: r.version, created_at: r.created_at, node_count: r.node_count, edge_count: r.edge_count, cycle_rank: r.cycle_rank, drift_mean: r.drift_mean }));
+        return { results: rows };
+      }
+      return { results: [] };
+    },
   };
 
   const db = {
@@ -148,5 +163,40 @@ describe('getLatestAtlas / atlasRoute (Elle\'s ENTIRE surface onto the graph —
     // tool signature for the router to pass graph-mutating data through.
     const input: import('./atlas').AtlasToolInput = { mode: 'stats', id: 'a', k: 5 };
     expect(Object.keys(input).sort()).toEqual(['id', 'k', 'mode']);
+  });
+});
+
+describe('listAtlasHistory / getAtlasByHash (the replay reads)', () => {
+  const HASH_A = 'aaaaaaaaaaaaaaaa';
+  const HASH_B = 'bbbbbbbbbbbbbbbb';
+
+  it('lists the timeline oldest first with the index fields the scrubber needs', async () => {
+    const { env } = fakeEnv();
+    await ingestAtlas(env, { snapshot: snapshot({ hash: HASH_B, version: '2', created_at: 2000 }) });
+    await ingestAtlas(env, { snapshot: snapshot({ hash: HASH_A, version: '1', created_at: 1000 }) });
+    const history = await listAtlasHistory(env);
+    expect(history.map((h) => h.hash)).toEqual([HASH_A, HASH_B]);
+    expect(history[0]).toMatchObject({ version: '1', created_at: 1000, node_count: 3, edge_count: 2 });
+  });
+
+  it('is empty before anything is ingested', async () => {
+    const { env } = fakeEnv();
+    expect(await listAtlasHistory(env)).toEqual([]);
+  });
+
+  it('fetches one historical frame by content hash', async () => {
+    const { env } = fakeEnv();
+    await ingestAtlas(env, { snapshot: snapshot({ hash: HASH_A, version: '1', created_at: 1000 }) });
+    await ingestAtlas(env, { snapshot: snapshot({ hash: HASH_B, version: '2', created_at: 2000 }) });
+    const frame = await getAtlasByHash(env, HASH_A);
+    expect(frame?.version).toBe('1');
+    expect(await getAtlasByHash(env, 'cccccccccccccccc')).toBeNull(); // unknown
+  });
+
+  it('rejects a malformed hash before it can shape an R2 key', async () => {
+    const { env } = fakeEnv();
+    expect(await getAtlasByHash(env, '../secrets')).toBeNull();
+    expect(await getAtlasByHash(env, 'ABCDEF0123456789')).toBeNull(); // uppercase = not the CLI's address form
+    expect(await getAtlasByHash(env, '')).toBeNull();
   });
 });

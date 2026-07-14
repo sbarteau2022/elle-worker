@@ -174,6 +174,37 @@ export async function getLatestAtlas(env: AtlasIngestEnv): Promise<AtlasSnapshot
   try { return JSON.parse(await obj.text()) as AtlasSnapshotShape; } catch { return null; }
 }
 
+// ── replay reads (still strictly views) ────────────────────────────────────
+
+export interface AtlasHistoryEntry {
+  hash: string; version: string; created_at: number;
+  node_count: number; edge_count: number; cycle_rank: number | null; drift_mean: number | null;
+}
+
+// The snapshot timeline, oldest first — the site's replay scrubber runs over
+// this. Index rows only; each frame's full geometry loads via getAtlasByHash.
+export async function listAtlasHistory(env: AtlasIngestEnv, limit = 100): Promise<AtlasHistoryEntry[]> {
+  await ensureSchema(env);
+  const n = Math.max(1, Math.min(500, Math.trunc(limit) || 100));
+  const r = await env.DB.prepare(
+    `SELECT id AS hash, version, created_at, node_count, edge_count, cycle_rank, drift_mean
+     FROM elle_atlas_snapshots ORDER BY created_at ASC LIMIT ?`
+  ).bind(n).all();
+  return (r.results as unknown as AtlasHistoryEntry[]) || [];
+}
+
+// One historical frame by content hash. The hash is the publish CLI's
+// 16-hex-char content address — anything else is rejected before it can
+// shape an R2 key.
+const HASH_RE = /^[0-9a-f]{16}$/;
+
+export async function getAtlasByHash(env: AtlasIngestEnv, hash: string): Promise<AtlasSnapshotShape | null> {
+  if (!HASH_RE.test(hash)) return null;
+  const obj = await env.DOCUMENTS.get(`atlas/${hash}.json`);
+  if (!obj) return null;
+  try { return JSON.parse(await obj.text()) as AtlasSnapshotShape; } catch { return null; }
+}
+
 // ── the read-only LLM surface ──────────────────────────────────────────────
 // No parameter here can write, edit, or embed anything — mode selects a VIEW.
 
