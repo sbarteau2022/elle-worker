@@ -17,6 +17,7 @@ import {
   runConvictionCycle, trimQty, replayBars, ensureReplaySchema, isEquitySymbol,
   type ConvictionReading, type LivePosition,
 } from './conviction';
+import { runKappaBacktestSuite, ensureBacktestSchema } from './backtest';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -404,6 +405,19 @@ export async function runTradingCycle(env: Env): Promise<void> {
       if (n > 0) console.log(`[REPLAY] reconstructed ${n} position trajectories`);
     }
   } catch (e) { console.error('[REPLAY] failed:', (e as Error).message); }
+
+  // One-shot κ backtest: warm the regulator on the first half of ~6 years of
+  // real daily data, predict on the second half, and measure whether κ fluxes
+  // with / leads the market (elle_kappa_backtest). Heavy Alpaca pull, so it
+  // runs ONCE — guarded on the table being empty; clear it to re-run.
+  try {
+    await ensureBacktestSchema(env.DB);
+    const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM elle_kappa_backtest`).first() as { n: number } | null;
+    if (!done || done.n === 0) {
+      const n = await runKappaBacktestSuite(env);
+      if (n > 0) console.log(`[BACKTEST] ran train/test on ${n} symbols`);
+    }
+  } catch (e) { console.error('[BACKTEST] failed:', (e as Error).message); }
 
   // unrealized_pnl is the sum of the open positions (a real, always-available
   // number); day_pnl is equity vs. yesterday's close when Alpaca returns
