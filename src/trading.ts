@@ -21,6 +21,7 @@ import { runKappaBacktestSuite, ensureBacktestSchema } from './backtest';
 import { runDissonanceBacktestSuite, ensureDissonanceSchema } from './dissonance';
 import { runCoherenceField, ensureCoherenceSchema } from './coherence';
 import { runPerturbationBacktestSuite, ensurePerturbationSchema } from './perturbation';
+import { runRegimeSuite, ensureRegimeSchema } from './regime';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -460,6 +461,18 @@ export async function runTradingCycle(env: Env): Promise<void> {
       if (n > 0) console.log(`[PERTURBATION] ran on ${n} symbols`);
     }
   } catch (e) { console.error('[PERTURBATION] failed:', (e as Error).message); }
+
+  // One-shot regime analysis: SNR + confidence indexing, conditional transition
+  // cells (Risk = f(κ, Δκ, D)), lead-time distribution, recovery half-life —
+  // the experiments that separate STATE from TRANSITION. Guarded on empty table.
+  try {
+    await ensureRegimeSchema(env.DB);
+    const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM elle_regime_analysis`).first() as { n: number } | null;
+    if (!done || done.n === 0) {
+      const n = await runRegimeSuite(env);
+      if (n > 0) console.log(`[REGIME] analyzed ${n} symbols`);
+    }
+  } catch (e) { console.error('[REGIME] failed:', (e as Error).message); }
 
   // unrealized_pnl is the sum of the open positions (a real, always-available
   // number); day_pnl is equity vs. yesterday's close when Alpaca returns
