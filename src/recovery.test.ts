@@ -45,13 +45,18 @@ describe('boundedness by construction — no clamps in the update path', () => {
     expect(recoverStep(0, 0)).toBeCloseTo(W2, 12);      // min possible recovery output
     expect(recoverStep(1, 1)).toBeCloseTo(1, 12);       // max
   });
-  it('100k random step sequences never leave [0,1] — strictly, no epsilon', () => {
+  it('100k random step sequences never leave [0,1] — strictly, no epsilon', { timeout: 20_000 }, () => {
+    // Violations accumulated in plain JS, asserted once — 200k in-loop
+    // expect() calls timed out on slower CI runners at identical coverage.
     const reg = createRecoveryRegulator(rnd());
+    let lo = Infinity, hi = -Infinity;
     for (let i = 0; i < 100_000; i++) {
       const s = reg.observe(rnd() < 0.5 ? 'strain' : 'recover');
-      expect(s.kappa).toBeGreaterThanOrEqual(0);
-      expect(s.kappa).toBeLessThanOrEqual(1);
+      if (s.kappa < lo) lo = s.kappa;
+      if (s.kappa > hi) hi = s.kappa;
     }
+    expect(lo).toBeGreaterThanOrEqual(0);
+    expect(hi).toBeLessThanOrEqual(1);
   });
   it('monotone in the right direction: recovery strictly raises κ below 1, strain strictly lowers it above 0', () => {
     // (with equal stored states, where blend === kappa)
@@ -202,13 +207,16 @@ describe('the perturbation-weighted step — magnitude goes INTO the recursion',
     }
   });
 
-  it('bounded [0,1] strictly under 50k random fuzz steps (states, directions, and weights all random)', () => {
+  it('bounded [0,1] strictly under 50k random fuzz steps (states, directions, and weights all random)', { timeout: 20_000 }, () => {
     const reg = createRecoveryRegulator(rnd());
+    let lo = Infinity, hi = -Infinity;
     for (let i = 0; i < 50_000; i++) {
       const s = reg.observeWeighted(rnd() < 0.5 ? 'strain' : 'recover', rnd() * 2 - 0.5); // deliberately out-of-range weights too
-      expect(s.kappa).toBeGreaterThanOrEqual(0);
-      expect(s.kappa).toBeLessThanOrEqual(1);
+      if (s.kappa < lo) lo = s.kappa;
+      if (s.kappa > hi) hi = s.kappa;
     }
+    expect(lo).toBeGreaterThanOrEqual(0);
+    expect(hi).toBeLessThanOrEqual(1);
   });
 
   it('half-weight perturbations take LONGER to cross the floor than full ones — small bars earn small strain', () => {

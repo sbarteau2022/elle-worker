@@ -63,16 +63,24 @@ describe('constraint 2 — open rails: complete failure and complete success unr
     expect(1 - st.kappaMax).toBeGreaterThan(st.kappaMin); // distance-to-perfect-success > distance-to-perfect-failure
   });
 
-  it('100k hostile random steps (random dirs, out-of-range and non-finite weights) never leave the open rails', () => {
+  it('100k hostile random steps (random dirs, out-of-range and non-finite weights) never leave the open rails', { timeout: 20_000 }, () => {
+    // Extremes accumulated in plain JS, asserted once — 400k in-loop expect()
+    // calls timed out on slower CI runners at identical coverage.
     const reg = createAsymmetricRegulator();
+    const zMax = reg.state().zMax;
+    let zLo = Infinity, zHi = -Infinity, kLo = Infinity, kHi = -Infinity;
     for (let i = 0; i < 100_000; i++) {
       const w = i % 997 === 0 ? NaN : rnd() * 3 - 1; // sprinkle NaN and out-of-range
       const st = reg.observe(rnd() < 0.5 ? 'strain' : 'recover', w);
-      expect(st.z).toBeGreaterThan(-st.zMax);
-      expect(st.z).toBeLessThan(st.zMax);
-      expect(st.kappa).toBeGreaterThan(0);
-      expect(st.kappa).toBeLessThan(1);
+      if (st.z < zLo) zLo = st.z;
+      if (st.z > zHi) zHi = st.z;
+      if (st.kappa < kLo) kLo = st.kappa;
+      if (st.kappa > kHi) kHi = st.kappa;
     }
+    expect(zLo).toBeGreaterThan(-zMax);
+    expect(zHi).toBeLessThan(zMax);
+    expect(kLo).toBeGreaterThan(0);
+    expect(kHi).toBeLessThan(1);
   });
 
   it('thresholds are fractions of the structure, not constants: change ρ or Z and they move with it', () => {
