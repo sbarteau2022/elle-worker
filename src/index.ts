@@ -55,6 +55,7 @@ import { parseIntake } from './mem-intake';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
+import { ingestAtlas, getLatestAtlas } from './atlas';
 
 // The connect-back sandbox Durable Object must be exported from the worker
 // entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
@@ -1275,6 +1276,17 @@ export default {
       return json(await kappaMemoryState(env, sid));
     }
 
+    // Atlas — the on-device memory-graph snapshot (Dynanic-Hyperbolic-Neural-
+    // Graph). Read-only, authenticated: any signed-in user can see the SHAPE
+    // of the graph, the same boundary the `atlas` router tool enforces for
+    // the LLM — a view, never a write. Powers the 3D atlas panel in the site.
+    if (path === '/api/atlas/latest' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      const snapshot = await getLatestAtlas(env);
+      if (!snapshot) return err('no atlas ingested yet', 404);
+      return json(snapshot);
+    }
+
     // Embeddable consumer widget — one script tag on any hub page
     if (path === '/widget.js' && request.method === 'GET') {
       return new Response(WIDGET_JS, {
@@ -1310,6 +1322,19 @@ export default {
     if (request.method === 'POST') {
       try { body = await request.json(); }
       catch { return err('Invalid JSON body'); }
+    }
+
+    // Atlas ingest — the ONLY write path onto the memory graph, and the LLM
+    // cannot reach it: it takes the service key, not a user JWT, and the
+    // router never calls it. The device (Dynanic-Hyperbolic-Neural-Graph's
+    // publish script) pushes its own computed snapshot here; Elle only ever
+    // reads it back (the `atlas` router tool, and /api/atlas/latest above).
+    if (path === '/api/atlas/ingest' && request.method === 'POST') {
+      if (!isServiceRequest(request, env)) return err('Unauthorized', 401);
+      try {
+        const result = await ingestAtlas(env, body);
+        return json(result);
+      } catch (e) { return err(`atlas ingest failed: ${(e as Error).message}`, 400); }
     }
 
     // Public widget chat — no key required; service key stays server-side.
