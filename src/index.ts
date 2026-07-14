@@ -21,6 +21,7 @@ import {
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
 import { handleFalcon, type FalconEnv } from './falcon';
+import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
@@ -1869,6 +1870,10 @@ export default {
     // Member-gated like the other engines above it; a Falcon run spends
     // ~17 model calls, so it rides the same auth door, not a public one.
     if (path === '/api/falcon')                 return handleFalcon(body, env as unknown as FalconEnv, user.id);
+    // THE SPINE — unified Falcon: three tier-collapses in order, dissent holds
+    // (does not collapse), Axis 17 predicts. SHADOW — gates no real decision;
+    // κ accrues across runs, the same regulator that sizes a position.
+    if (path === '/api/spine')                  return handleSpine(body, env as unknown as SpineEnv, user.id);
     if (path === '/api/elle-duel-engine')       return handleDuelEngine(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-tutor')             return handleTutor(body, env as unknown as LawEnv, user.id);
     if (path === '/api/elle-doctrine')          return handleDoctrine(body, env as unknown as LawEnv, user.id);
