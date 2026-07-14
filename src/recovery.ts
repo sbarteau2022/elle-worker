@@ -144,6 +144,85 @@ export function stepKappaWeighted(kappa: number, kappaPrev: number, dir: Recover
   return (1 - w) * m + w * target;
 }
 
+// ── the asymmetric log-odds regulator ────────────────────────
+// Two design constraints, formalized:
+//
+//   1. "The rate of collapse has to be inversely proportional to the rate
+//      of recovery."  S_C · S_R = s², exactly — and φ supplies the
+//      canonical pair for free: S_C = φ·s, S_R = φ⁻¹·s, so S_C·S_R = s²
+//      (φ·φ⁻¹ = 1). Trust is lost φ² ≈ 2.618× faster than it is earned;
+//      the product of the two rates is invariant.
+//
+//   2. "The threshold must be dynamic and never let the loss function
+//      achieve complete failure or complete success."  The state lives in
+//      LOG-ODDS space: z = ln(κ/(1−κ)), κ = logistic(z), updated as a
+//      leaky integrator on the ρ clock (the same leak-rate floor as
+//      everything else):
+//
+//          z_{k+1} = (1−ρ)·z_k + w·(recover ? +φ⁻¹·s : −φ·s)
+//
+//      The leak bounds |z| < Z = φ·s/ρ STRICTLY (same proof as the valve:
+//      a leaky integrator with bounded input is bounded), so κ is confined
+//      to the OPEN interval (logistic(−Z), logistic(+Z)) — complete
+//      failure (κ=0) and complete success (κ=1) are structurally
+//      unreachable, not clamped away. And every threshold is a FRACTION
+//      of Z, not a hardcoded κ: change ρ or s and the thresholds move
+//      with the structure — dynamic by construction.
+//
+// The perturbation weight w carries straight over (w=1 is the worst case,
+// so single-step-no-collapse minima are provable here exactly as in
+// step-invariant.test.ts). SHADOW, like everything else in this module.
+export const ASYM_RHO_DEFAULT = 0.10;  // the fast clock — detection lives here (Pressure Test II); the 0.02 clock is the historian
+export const ASYM_Z_MAX = 3;           // κ confined to (logistic(−3), logistic(3)) ≈ (0.047, 0.953)
+
+// The rails themselves are asymmetric — a consequence, not a choice: strain
+// pushes with φ·s so sustained maximal strain saturates at −zMax, but
+// recovery pushes with only φ⁻¹·s, so sustained maximal confirmation
+// saturates at +zMax/φ² ≈ 0.382·zMax. The structure itself makes complete
+// success even more unreachable than complete failure. Both rails are open:
+// approached asymptotically, attained never.
+export interface AsymmetricState {
+  step: number;
+  z: number;          // log-odds state ∈ (−zMax, +zMax/φ²) strictly
+  kappa: number;      // logistic(z), open interval (kappaMin, kappaMax)
+  zMax: number;       // the collapse-side structural rail: φ·s/ρ
+  kappaMin: number;   // logistic(−zMax) — the worst conviction can get (never 0)
+  kappaMax: number;   // logistic(+zMax/φ²) — the best it can get (never 1, and lower than the failure rail is deep)
+  status: 'strained' | 'holding' | 'charged';  // thresholds at half of each DIRECTIONAL rail — fractions of the structure, not constants
+}
+
+const logistic = (z: number) => 1 / (1 + Math.exp(-z));
+
+export function createAsymmetricRegulator(rho: number = ASYM_RHO_DEFAULT, zMax: number = ASYM_Z_MAX) {
+  // Solve s from the rail: Z = φ·s/ρ  →  s = ρ·Z/φ. The collapse step is
+  // then exactly ρ·Z (reaches the rail only as the infinite-step limit of
+  // sustained maximal strain), and the recovery step is ρ·Z/φ².
+  const s = (rho * zMax) / PHI;
+  const S_COLLAPSE = PHI * s;        // = ρ·zMax
+  const S_RECOVER = s / PHI;         // = ρ·zMax/φ²  →  S_COLLAPSE·S_RECOVER = s², S_COLLAPSE/S_RECOVER = φ²
+  let step = 0;
+  let z = 0;                          // neutral start: κ = 0.5, conviction earned from the middle
+  const zMaxRecover = zMax / (PHI * PHI);   // the recovery-side rail: S_RECOVER/ρ
+  const state = (): AsymmetricState => ({
+    step, z,
+    kappa: logistic(z),
+    zMax,
+    kappaMin: logistic(-zMax),
+    kappaMax: logistic(zMaxRecover),
+    status: z < -zMax / 2 ? 'strained' : z > zMaxRecover / 2 ? 'charged' : 'holding',
+  });
+  return {
+    observe(dir: RecoveryDirection, weight = 1): AsymmetricState {
+      step++;
+      const w = Number.isFinite(weight) ? Math.max(0, Math.min(1, weight)) : 0;
+      z = (1 - rho) * z + w * (dir === 'recover' ? S_RECOVER : -S_COLLAPSE);
+      return state();
+    },
+    state,
+    constants: { s, S_COLLAPSE, S_RECOVER },
+  };
+}
+
 // ── the regulator (two floats of state, O(1) per step) ───────
 // Starts at 0/0 by default: no conviction until earned — the conservative
 // initial condition for anything that might one day size a position.

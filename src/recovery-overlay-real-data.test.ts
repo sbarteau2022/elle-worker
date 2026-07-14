@@ -12,7 +12,7 @@
 // itself, dissolving the arbitrary dead-band cutoff.
 //
 // Same fixture, same 591 paired 55-bar-breakout entries, same true Wilder
-// ATR(22). Three policies per entry, exactly paired:
+// ATR(22). Four policies per entry, exactly paired:
 //   A       binary Chandelier 3×ATR(22) exit, size 1 throughout (the
 //           incumbent: +0.754R/trade on these entries)
 //   C_bin   overlay: size_t = conviction from the BINARY regulator
@@ -21,6 +21,10 @@
 //   C_pert  overlay: size_t = conviction from the PERTURBATION-WEIGHTED
 //           regulator (w = |ret|/(2·ATR) clamped; NO dead-band — the weight
 //           subsumes it) — same identical trade envelope
+//   C_asym  overlay: size_t = conviction from the ASYMMETRIC log-odds
+//           regulator (collapse φ·s, recovery φ⁻¹·s — rates inversely
+//           proportional, product s²; open rails κ ∈ (0.047, 0.759) — no
+//           complete failure or success reachable) — same envelope
 // Sizing uses the conviction BEFORE the bar being P&L'd (no lookahead).
 // Because the overlays share A's exact entry AND exit bars, the comparison
 // isolates ONE question: what does conviction-sizing do to the identical
@@ -43,7 +47,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRecoveryRegulator } from './recovery';
+import { createRecoveryRegulator, createAsymmetricRegulator } from './recovery';
 
 interface Bar { date: string; o: number; h: number; l: number; c: number }
 
@@ -97,15 +101,16 @@ function chandelierExitBar(bars: Bar[], i0: number): number {
 interface OverlayTrade { pnlR: number; exposure: number; bars: number; minCumR: number }
 
 // One trade, one sizing rule. mode 'unit' = constant size 1 (policy A).
-function runOverlay(bars: Bar[], i0: number, exitBar: number, mode: 'unit' | 'bin' | 'pert'): OverlayTrade {
+function runOverlay(bars: Bar[], i0: number, exitBar: number, mode: 'unit' | 'bin' | 'pert' | 'asym'): OverlayTrade {
   const entry = bars[i0].c, R = STOP_MULT * trueATR(bars, i0);
   const reg = createRecoveryRegulator(0.5);
+  const asym = createAsymmetricRegulator(); // rho=0.10, Z=3: kappa in (0.047, 0.759), neutral start 0.5
   let pnlR = 0, exposure = 0, minCumR = 0;
   for (let i = i0 + 1; i <= exitBar; i++) {
     const ret = bars[i].c - bars[i - 1].c;
     const atr = trueATR(bars, i);
     // Size for THIS bar = conviction as of the PREVIOUS bar (no lookahead).
-    const size = mode === 'unit' ? 1 : reg.state().kappa;
+    const size = mode === 'unit' ? 1 : mode === 'asym' ? asym.state().kappa : reg.state().kappa;
     pnlR += size * ret / R;
     exposure += size;
     minCumR = Math.min(minCumR, pnlR);
@@ -114,6 +119,8 @@ function runOverlay(bars: Bar[], i0: number, exitBar: number, mode: 'unit' | 'bi
       if (Math.abs(ret) >= DEAD_BAND_ATR * atr) reg.observe(ret > 0 ? 'recover' : 'strain');
     } else if (mode === 'pert') {
       reg.observeWeighted(ret > 0 ? 'recover' : 'strain', Math.abs(ret) / (2 * atr));
+    } else if (mode === 'asym') {
+      asym.observe(ret > 0 ? 'recover' : 'strain', Math.abs(ret) / (2 * atr));
     }
   }
   return { pnlR, exposure, bars: exitBar - i0, minCumR };
@@ -124,16 +131,17 @@ const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / xs.length;
 
 describe('the de-risking overlay with perturbation-weighted conviction — real data, paired envelopes', () => {
   const data = loadFixture();
-  const A: OverlayTrade[] = [], Cbin: OverlayTrade[] = [], Cpert: OverlayTrade[] = [];
-  const nvda = { a: [] as OverlayTrade[], pert: [] as OverlayTrade[] };
+  const A: OverlayTrade[] = [], Cbin: OverlayTrade[] = [], Cpert: OverlayTrade[] = [], Casym: OverlayTrade[] = [];
+  const nvda = { a: [] as OverlayTrade[], pert: [] as OverlayTrade[], asym: [] as OverlayTrade[] };
   for (const [name, bars] of data) {
     for (const i0 of signals(bars)) {
       const exitBar = chandelierExitBar(bars, i0);
       const a = runOverlay(bars, i0, exitBar, 'unit');
       const b = runOverlay(bars, i0, exitBar, 'bin');
       const p = runOverlay(bars, i0, exitBar, 'pert');
-      A.push(a); Cbin.push(b); Cpert.push(p);
-      if (name === 'NVDA') { nvda.a.push(a); nvda.pert.push(p); }
+      const y = runOverlay(bars, i0, exitBar, 'asym');
+      A.push(a); Cbin.push(b); Cpert.push(p); Casym.push(y);
+      if (name === 'NVDA') { nvda.a.push(a); nvda.pert.push(p); nvda.asym.push(y); }
     }
   }
   const perUnit = (ts: OverlayTrade[]) => ts.reduce((s, t) => s + t.pnlR, 0) / Math.max(1e-9, ts.reduce((s, t) => s + t.exposure, 0));
@@ -178,6 +186,29 @@ describe('the de-risking overlay with perturbation-weighted conviction — real 
     expect(perUnit(Cpert)).toBeGreaterThanOrEqual(perUnit(Cbin));
   });
 
+  // ── the asymmetric regulator, pre-registered before first run ──────────
+  // The design constraints: collapse rate inversely proportional to recovery
+  // rate (φ·s vs φ⁻¹·s, product s², ratio φ²), and open rails — complete
+  // failure/success structurally unreachable (κ ∈ (0.047, 0.759), log-odds
+  // leaky integrator). The genuine risk being tested: φ²-slow recovery may
+  // bleed size through a trend's pullback-recover cycles and re-commit the
+  // tail amputation. PA1–PA4:
+  it('PA1 (pre-registered) — fast collapse cuts the left tail at least as well as symmetric: worst trade ≤ C_pert\'s', () => {
+    expect(Math.min(...Casym.map(t => t.pnlR))).toBeGreaterThanOrEqual(Math.min(...Cpert.map(t => t.pnlR)) - 0.05);
+  });
+
+  it('PA2 (pre-registered) — the drawdown shape improves or holds: mean in-trade DD ≤ C_pert\'s', () => {
+    expect(mean(Casym.map(t => t.minCumR))).toBeGreaterThanOrEqual(mean(Cpert.map(t => t.minCumR)) - 0.02);
+  });
+
+  it('PA3 (pre-registered) — THE question: does φ²-slow recovery re-amputate the tail? NVDA must stay > +1.0R', () => {
+    expect(mean(nvda.asym.map(t => t.pnlR))).toBeGreaterThan(1.0);
+  });
+
+  it('PA4 (pre-registered) — expectancy stays solidly positive (> +0.25R, the bar the pert overlay cleared)', () => {
+    expect(mean(Casym.map(t => t.pnlR))).toBeGreaterThan(0.25);
+  });
+
   it('prints the full overlay table', () => {
     const rowOf = (label: string, ts: OverlayTrade[]) => {
       console.log(
@@ -186,10 +217,10 @@ describe('the de-risking overlay with perturbation-weighted conviction — real 
         `${mean(ts.map(t => t.minCumR)).toFixed(3).padStart(7)}`
       );
     };
-    console.log('\n=== OVERLAY on real data — same 591 entries, same Chandelier envelope, three sizing rules ===');
+    console.log('\n=== OVERLAY on real data — same 591 entries, same Chandelier envelope, four sizing rules ===');
     console.log('policy | exp(R)  | per-unit | expos. | worst  | meanMinCum');
-    rowOf('A', A); rowOf('C_bin', Cbin); rowOf('C_pert', Cpert);
-    console.log(`\nNVDA expectancy: A ${mean(nvda.a.map(t => t.pnlR)).toFixed(3)} · C_pert ${mean(nvda.pert.map(t => t.pnlR)).toFixed(3)}`);
+    rowOf('A', A); rowOf('C_bin', Cbin); rowOf('C_pert', Cpert); rowOf('C_asym', Casym);
+    console.log(`\nNVDA expectancy: A ${mean(nvda.a.map(t => t.pnlR)).toFixed(3)} · C_pert ${mean(nvda.pert.map(t => t.pnlR)).toFixed(3)} · C_asym ${mean(nvda.asym.map(t => t.pnlR)).toFixed(3)}`);
     expect(A.length).toBeGreaterThan(0);
   });
 });

@@ -88,3 +88,49 @@ mapping (size = κ raw was the a-priori choice).
 ---
 
 *Run it: `npx vitest run src/recovery-overlay-real-data.test.ts --reporter=verbose`.*
+
+---
+
+## Addendum — Round Three: The Asymmetric Regulator (first 4/4 pre-registration sweep)
+
+Two further design constraints were specified and formalized:
+
+1. **"The rate of collapse has to be inversely proportional to the rate of
+   recovery."** → `S_collapse · S_recovery = s²` exactly, with φ supplying the
+   canonical pair: `S_C = φ·s`, `S_R = φ⁻¹·s` (ratio φ² ≈ 2.618 — trust lost
+   ~2.6× faster than earned; behaviorally verified: one violation takes 3
+   confirmations to clear, ceil(φ²)).
+2. **"The threshold must be dynamic and never let the loss function achieve
+   complete failure or complete success."** → the state lives in log-odds
+   space as a ρ-leaky integrator (`createAsymmetricRegulator`, ρ=0.10 per
+   PT-II's fast clock, Z=3): |z| is bounded strictly by the same proof as the
+   valve, so κ is confined to the OPEN interval — and the asymmetry makes the
+   rails themselves asymmetric as a *consequence*: κ ∈ (0.047, 0.759). The
+   success ceiling sits nearer neutral than the failure floor — complete
+   success is structurally harder to approach than complete failure. All
+   thresholds are fractions of the structural rails: change ρ or Z and they
+   move with the structure (10 property tests, incl. 100k hostile-input fuzz).
+
+**Raced as the fourth sizing rule on the identical 591 envelopes:**
+
+| policy | expectancy (R/trade) | per-unit | median exposure | worst trade | mean in-trade DD |
+|---|---|---|---|---|---|
+| A (incumbent) | +0.754 | 0.0222 | 23.0 | −1.92 | −0.599 |
+| C_pert (symmetric) | +0.366 | 0.0191 | 12.0 | −1.08 | −0.316 |
+| **C_asym** | +0.321 | **0.0199** | 11.0 | **−0.89** | **−0.280** |
+
+NVDA: A +2.918 · C_pert +1.478 · **C_asym +1.263**.
+
+**All four pre-registered claims held — the first clean sweep of the series:**
+PA1 (worst trade ≤ symmetric's: −0.89 vs −1.08 ✓), PA2 (in-trade DD improves:
+−0.280 vs −0.316 ✓), PA3 (**the** question — φ²-slow recovery does NOT
+re-amputate the tail: NVDA +1.263R, above the +1.0 bar ✓), PA4 (expectancy
+solidly positive ✓).
+
+**Verdict:** the asymmetric regulator is the best drawdown-shaper in the
+series — better per-unit efficiency than the symmetric overlay (0.0199 vs
+0.0191, closing to 90% of the incumbent's), the shallowest worst trade
+(−0.89R, 54% shallower than the incumbent), the shallowest in-trade
+drawdowns, at a modest tail cost (NVDA 1.26 vs 1.48) that stays well above
+the amputation floor. The two specified constraints didn't just survive
+contact with real data — they improved every risk metric they touched.
