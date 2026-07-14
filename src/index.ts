@@ -35,6 +35,7 @@ import { analyzeCode } from './cyber';
 import {
   recordThreat, getPosture, scanBuffer, sha256Hex, isBlockedHash, blockHash, securityReport,
 } from './security-network';
+import { corosSelfTest } from './helix';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -1610,6 +1611,13 @@ export default {
     if (path === '/api/elle-security-status') {
       if (!svc) return err('Unauthorized', 401);
       return json(await securityReport(env));
+    }
+    // COROS self-test — proves the constant-envelope corkscrew transport
+    // round-trips and holds its covertness invariants (tamper/wrong-key
+    // rejection, length-band suppression) end to end. No secrets echoed.
+    if (path === '/api/elle-helix-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await corosSelfTest());
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
