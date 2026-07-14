@@ -56,7 +56,7 @@ import { parseIntake } from './mem-intake';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
-import { ingestAtlas, getLatestAtlas } from './atlas';
+import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
 import { readAtlasEvents } from './atlas-events';
 
 // The connect-back sandbox Durable Object must be exported from the worker
@@ -1300,6 +1300,20 @@ export default {
       if (!isServiceRequest(request, env)) return err('Unauthorized', 401);
       const q = new URL(request.url).searchParams;
       return json(await readAtlasEvents(env, Number(q.get('since')) || 0, Number(q.get('limit')) || 500));
+    }
+
+    // Atlas replay — the snapshot timeline and individual historical frames,
+    // authenticated reads like /api/atlas/latest. Powers the site's replay
+    // scrubber: watch a memory drift, split, or be absorbed across builds.
+    if (path === '/api/atlas/history' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      return json({ snapshots: await listAtlasHistory(env, Number(new URL(request.url).searchParams.get('limit')) || 100) });
+    }
+    if (path === '/api/atlas/at' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      const snapshot = await getAtlasByHash(env, String(new URL(request.url).searchParams.get('hash') || ''));
+      if (!snapshot) return err('no such atlas snapshot', 404);
+      return json(snapshot);
     }
 
     // Embeddable consumer widget — one script tag on any hub page
