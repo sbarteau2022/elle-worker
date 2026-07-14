@@ -22,6 +22,7 @@ import { runDissonanceBacktestSuite, ensureDissonanceSchema } from './dissonance
 import { runCoherenceField, ensureCoherenceSchema } from './coherence';
 import { runPerturbationBacktestSuite, ensurePerturbationSchema } from './perturbation';
 import { runRegimeSuite, ensureRegimeSchema } from './regime';
+import { runPhiOscSuite, ensurePhiOscSchema } from './phi-oscillator';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -473,6 +474,18 @@ export async function runTradingCycle(env: Env): Promise<void> {
       if (n > 0) console.log(`[REGIME] analyzed ${n} symbols`);
     }
   } catch (e) { console.error('[REGIME] failed:', (e as Error).message); }
+
+  // One-shot φ-oscillator backtest: dissonance as an OSCILLATOR (not a constant
+  // gain) — does the golden-frequency perturbation wake the needle where the
+  // constant gain left it frozen, three-way vs plain and constant. Guarded.
+  try {
+    await ensurePhiOscSchema(env.DB);
+    const done = await env.DB.prepare(`SELECT COUNT(*) AS n FROM elle_phi_perturbation_backtest`).first() as { n: number } | null;
+    if (!done || done.n === 0) {
+      const n = await runPhiOscSuite(env);
+      if (n > 0) console.log(`[PHI-OSC] ran on ${n} symbols`);
+    }
+  } catch (e) { console.error('[PHI-OSC] failed:', (e as Error).message); }
 
   // unrealized_pnl is the sum of the open positions (a real, always-available
   // number); day_pnl is equity vs. yesterday's close when Alpaca returns
