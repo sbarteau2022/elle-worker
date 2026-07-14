@@ -131,6 +131,80 @@ export function isEquitySymbol(symbol: string): boolean {
   return /^[A-Z][A-Z.]{0,6}$/.test(symbol);
 }
 
+// ── replay: the SAME live functions, run over a historical bar series ──
+// "Run the previous trades back through" = seed at the entry bar, then feed
+// every bar close through observeCycle exactly as the live cron would have,
+// one bar = one cycle. Nothing here re-implements the regulator; it drives
+// the identical observeCycle/trimQty the live path uses, so the trajectory
+// is what the channel WOULD have reported had it been live for that trade.
+export interface ReplayStep {
+  d: string;   // bar date (ISO)
+  c: number;   // close
+  k: number;   // kappa
+  s: ConvictionReading['status'];
+  tf: number;  // target fraction
+  trim: number; // units the (gated) executor would have trimmed this bar
+}
+export interface ReplayResult {
+  symbol: string;
+  side: 'long' | 'short';
+  entryPrice: number;
+  entryQty: number;
+  bars: number;
+  finalKappa: number;
+  minKappa: number;
+  minStatus: ConvictionReading['status'];
+  everStrained: boolean;
+  maxTrimFraction: number;   // deepest de-risk the executor would have taken
+  totalTrimmed: number;      // units, if every would-be trim had fired in sequence
+  trajectory: ReplayStep[];
+}
+
+// closes: chronological bar closes over the holding period (closes[0] = entry
+// bar). qty/side are the real position. The executor half is simulated in
+// sequence (running qty walks down as trims fire) so the trajectory reflects
+// what enforcement WOULD have done, not just the passive κ.
+export function replayBars(
+  symbol: string, side: 'long' | 'short', closes: Array<{ d: string; c: number }>, entryQty: number,
+): ReplayResult | null {
+  const clean = closes.filter(b => Number.isFinite(b.c) && b.c > 0);
+  if (clean.length < 2) return null;
+  let state = freshState(symbol, clean[0].c, entryQty);
+  const trajectory: ReplayStep[] = [];
+  let minKappa = 0.5, minStatus: ConvictionReading['status'] = 'holding';
+  let maxTrimFraction = 0, runningQty = entryQty, totalTrimmed = 0;
+  let everStrained = false;
+  for (let i = 1; i < clean.length; i++) {
+    const r = observeCycle(state, clean[i].c, side);
+    state = r.state;
+    const trim = trimQty(runningQty, state, r.kappa);
+    if (trim > 0) { runningQty -= trim; totalTrimmed += trim; }
+    const trimmedFraction = 1 - runningQty / entryQty;
+    if (trimmedFraction > maxTrimFraction) maxTrimFraction = trimmedFraction;
+    if (r.kappa < minKappa) { minKappa = r.kappa; minStatus = r.status; }
+    if (r.status === 'strained') everStrained = true;
+    trajectory.push({ d: clean[i].d, c: clean[i].c, k: r.kappa, s: r.status, tf: r.targetFraction, trim });
+  }
+  const last = trajectory[trajectory.length - 1];
+  return {
+    symbol, side, entryPrice: clean[0].c, entryQty,
+    bars: clean.length, finalKappa: last.k, minKappa, minStatus, everStrained,
+    maxTrimFraction, totalTrimmed, trajectory,
+  };
+}
+
+export async function ensureReplaySchema(db: D1Database): Promise<void> {
+  await db.prepare(
+    `CREATE TABLE IF NOT EXISTS elle_conviction_replay (
+       symbol TEXT PRIMARY KEY,
+       side TEXT, entry_source TEXT, entry_price REAL, current_price REAL,
+       qty REAL, bars INTEGER, final_kappa REAL, min_kappa REAL, min_status TEXT,
+       ever_strained INTEGER, max_trim_fraction REAL, total_trimmed REAL,
+       trajectory_json TEXT, as_of TEXT, updated_at TEXT
+     )`,
+  ).run();
+}
+
 // ── D1 persistence (thin; all judgment lives in the pure functions above) ──
 
 export async function ensureConvictionSchema(db: D1Database): Promise<void> {

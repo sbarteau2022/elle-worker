@@ -13,7 +13,10 @@ import { backfillTradesExtColumns } from './db/schema';
 import { callLLM } from './llm';
 import type { Env } from './index';
 import { resolveOptionContract } from './alpaca-options';
-import { runConvictionCycle, trimQty, type ConvictionReading, type LivePosition } from './conviction';
+import {
+  runConvictionCycle, trimQty, replayBars, ensureReplaySchema, isEquitySymbol,
+  type ConvictionReading, type LivePosition,
+} from './conviction';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -252,6 +255,107 @@ async function gatherMarketData(env: Env) {
   return { symbols, news };
 }
 
+// ── replay: run her ACTUAL open trades back through the conviction channel ──
+// The channel went live today, so it has no history of its own yet. This
+// reconstructs what it WOULD have reported over the real life of each open
+// position: real entry date (from Alpaca fills), real daily bars (Alpaca
+// data), stepped through the identical live functions (conviction.replayBars).
+// Best-effort, idempotent per day; writes to elle_conviction_replay. Runs
+// regardless of market hours (it reads history, places nothing).
+async function fetchEntryDates(env: Env, symbols: string[]): Promise<Map<string, string>> {
+  const entry = new Map<string, string>();
+  try {
+    // FILL activities carry the real fill timestamps; earliest fill per symbol
+    // approximates the entry (an add-to-position only moves it earlier, which
+    // just lengthens the replay — conservative).
+    const res = await fetch(`${alpacaBase(env)}/v2/account/activities/FILL?page_size=500`, { headers: alpacaHeaders(env) });
+    if (!res.ok) return entry;
+    const fills = await res.json() as Array<{ symbol: string; transaction_time: string; side: string }>;
+    for (const f of fills) {
+      if (!symbols.includes(f.symbol)) continue;
+      const prev = entry.get(f.symbol);
+      if (!prev || f.transaction_time < prev) entry.set(f.symbol, f.transaction_time);
+    }
+  } catch (e) { console.error('[REPLAY] fills fetch failed:', (e as Error).message); }
+  return entry;
+}
+
+async function fetchDailyCloses(env: Env, symbol: string, startISO: string): Promise<Array<{ d: string; c: number }>> {
+  const out: Array<{ d: string; c: number }> = [];
+  const d = alpacaData(env);
+  const h = alpacaHeaders(env);
+  let pageToken = '';
+  try {
+    for (let guard = 0; guard < 10; guard++) {
+      const url = `${d}/v2/stocks/${symbol}/bars?timeframe=1Day&start=${encodeURIComponent(startISO)}&limit=1000&adjustment=all&feed=iex${pageToken ? `&page_token=${pageToken}` : ''}`;
+      const res = await fetch(url, { headers: h });
+      if (!res.ok) break;
+      const data = await res.json() as { bars?: Array<{ t: string; c: number }>; next_page_token?: string | null };
+      for (const b of data.bars || []) out.push({ d: b.t, c: b.c });
+      if (!data.next_page_token) break;
+      pageToken = data.next_page_token;
+    }
+  } catch (e) { console.error(`[REPLAY] bars fetch failed for ${symbol}:`, (e as Error).message); }
+  return out;
+}
+
+export async function replayOpenPositions(env: Env): Promise<number> {
+  await ensureReplaySchema(env.DB);
+  const positions = (await getPositions(env)).filter(p => isEquitySymbol(p.symbol));
+  if (positions.length === 0) return 0;
+  const symbols = positions.map(p => p.symbol);
+  const entryDates = await fetchEntryDates(env, symbols);
+  // 180-day fallback window when a fill date isn't available.
+  const fallbackStart = new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10);
+  let written = 0;
+
+  for (const p of positions) {
+    const side = p.side === 'short' ? 'short' as const : 'long' as const;
+    const entryPrice = parseFloat(p.avg_entry_price);
+    const qty = Math.abs(parseFloat(p.qty));
+    const filledAt = entryDates.get(p.symbol);
+    const entrySource = filledAt ? 'fill' : 'price-match';
+    const startISO = (filledAt ? filledAt.slice(0, 10) : fallbackStart);
+    let closes = await fetchDailyCloses(env, p.symbol, startISO);
+    if (closes.length < 2) continue;
+
+    // Without a fill date, approximate entry by the bar whose close is nearest
+    // the recorded entry price, and replay from there — noted as 'price-match'.
+    if (!filledAt) {
+      let bestI = 0, bestD = Infinity;
+      for (let i = 0; i < closes.length; i++) {
+        const dist = Math.abs(closes[i].c - entryPrice);
+        if (dist < bestD) { bestD = dist; bestI = i; }
+      }
+      closes = closes.slice(bestI);
+    }
+    if (closes.length < 2) continue;
+
+    const r = replayBars(p.symbol, side, closes, qty);
+    if (!r) continue;
+    await env.DB.prepare(
+      `INSERT INTO elle_conviction_replay
+         (symbol, side, entry_source, entry_price, current_price, qty, bars, final_kappa,
+          min_kappa, min_status, ever_strained, max_trim_fraction, total_trimmed,
+          trajectory_json, as_of, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now'), datetime('now'))
+       ON CONFLICT(symbol) DO UPDATE SET
+         side=excluded.side, entry_source=excluded.entry_source, entry_price=excluded.entry_price,
+         current_price=excluded.current_price, qty=excluded.qty, bars=excluded.bars,
+         final_kappa=excluded.final_kappa, min_kappa=excluded.min_kappa, min_status=excluded.min_status,
+         ever_strained=excluded.ever_strained, max_trim_fraction=excluded.max_trim_fraction,
+         total_trimmed=excluded.total_trimmed, trajectory_json=excluded.trajectory_json,
+         as_of=excluded.as_of, updated_at=excluded.updated_at`,
+    ).bind(
+      r.symbol, r.side, entrySource, r.entryPrice, parseFloat(p.current_price), r.entryQty, r.bars,
+      r.finalKappa, r.minKappa, r.minStatus, r.everStrained ? 1 : 0, r.maxTrimFraction, r.totalTrimmed,
+      JSON.stringify(r.trajectory),
+    ).run();
+    written++;
+  }
+  return written;
+}
+
 export async function runTradingCycle(env: Env): Promise<void> {
   if (!env.ALPACA_API_KEY || !env.ALPACA_SECRET_KEY) {
     console.log('[TRADING] ALPACA_API_KEY not set — skipping');
@@ -286,6 +390,20 @@ export async function runTradingCycle(env: Env): Promise<void> {
     }));
     conviction = await runConvictionCycle(env.DB, live, isMarketHours());
   } catch (e) { console.error('[CONVICTION] cycle failed:', (e as Error).message); }
+
+  // One-shot per day: reconstruct what the conviction channel WOULD have
+  // reported over the real life of each open position (the channel itself
+  // only went live today, so it has no history yet). Best-effort, guarded.
+  try {
+    await ensureReplaySchema(env.DB);
+    const fresh = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM elle_conviction_replay WHERE substr(updated_at,1,10) = date('now')`,
+    ).first() as { n: number } | null;
+    if (!fresh || fresh.n === 0) {
+      const n = await replayOpenPositions(env);
+      if (n > 0) console.log(`[REPLAY] reconstructed ${n} position trajectories`);
+    }
+  } catch (e) { console.error('[REPLAY] failed:', (e as Error).message); }
 
   // unrealized_pnl is the sum of the open positions (a real, always-available
   // number); day_pnl is equity vs. yesterday's close when Alpaca returns
