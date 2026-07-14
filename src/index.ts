@@ -56,6 +56,7 @@ import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, r
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas } from './atlas';
+import { readAtlasEvents } from './atlas-events';
 
 // The connect-back sandbox Durable Object must be exported from the worker
 // entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
@@ -1288,6 +1289,16 @@ export default {
       const snapshot = await getLatestAtlas(env);
       if (!snapshot) return err('no atlas ingested yet', 404);
       return json(snapshot);
+    }
+
+    // Atlas event pull — the device cartographer's read of the append-only
+    // co-recall ledger (atlas-events.ts). Service-key only, like the ingest
+    // push: this is the device's channel, not a user or LLM surface. Cursor
+    // pagination via ?since=<last id>&limit=.
+    if (path === '/api/atlas/events' && request.method === 'GET') {
+      if (!isServiceRequest(request, env)) return err('Unauthorized', 401);
+      const q = new URL(request.url).searchParams;
+      return json(await readAtlasEvents(env, Number(q.get('since')) || 0, Number(q.get('limit')) || 500));
     }
 
     // Embeddable consumer widget — one script tag on any hub page
