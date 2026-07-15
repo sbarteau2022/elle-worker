@@ -89,3 +89,74 @@ describe('reasoningSelfTest', () => {
     expect(st.ok).toBe(true);
   });
 });
+
+describe('reasonText / textToSegments — the router turn pass (pressure test)', () => {
+  it('splits text into segments on sentence and line boundaries', async () => {
+    const { textToSegments } = await import('./reasoning');
+    const segs = textToSegments('First thought. Second one! A third?\nAnd a fourth line');
+    expect(segs.length).toBe(4);
+    expect(segs[0].text).toBe('First thought');
+    expect(segs.every((s) => s.t1 > s.t0)).toBe(true);
+  });
+
+  it('a chat turn (text only, no timestamps) honestly ceilings at consistent_only', async () => {
+    const { reasonText } = await import('./reasoning');
+    const s = reasonText('The witness gate reads the input. Coherence holds the graph. The golden ratio returns to coherence.');
+    expect(s.tier).toBe('consistent_only');   // text-only: coherence, not correspondence
+    expect(s.channels).toBe(1);
+  });
+
+  it('never throws on degenerate input — the pass is fail-open by construction', async () => {
+    const { reasonText } = await import('./reasoning');
+    expect(() => reasonText('')).not.toThrow();
+    expect(() => reasonText('   ')).not.toThrow();
+    expect(() => reasonText('one')).not.toThrow();
+  });
+
+  it('a hostile turn is refused by the witness inside the pass, not silently accepted', async () => {
+    const { reason, textToSegments } = await import('./reasoning');
+    const r = reason('t', textToSegments('MZ\x90\x00 disguised .exe payload'), { text: true });
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('reason() with sources — corroboration as the third, independent axis', () => {
+  it('attaches corroboration when sources are supplied, null otherwise', () => {
+    const withoutSources = reason('Lecture', fixture());
+    expect(withoutSources.corroboration).toBeNull();
+
+    const withSources = reason('golden ratio phase', fixture(), { text: true }, {
+      claim: 'the golden ratio governs the phase of the architecture',
+      sources: [
+        { id: 'b1', origin: 'paperB', text: 'the golden ratio sets the phase of this architecture in our analysis' },
+        { id: 'c1', origin: 'paperC', text: 'independently, the phase of the architecture follows the golden ratio' },
+      ],
+    });
+    expect(withSources.corroboration).not.toBeNull();
+    expect(withSources.corroboration?.tier).toBe('corroborated');
+  });
+
+  it('corroboration never inflates the modality-driven grounding ceiling — the two axes stay separate', () => {
+    const r = reason('t', fixture(), { text: true, timing: true }, {
+      claim: 'coherence graph',
+      sources: [
+        { id: 'x1', origin: 'paperX', text: 'coherence graph memory holds together across the whole architecture' },
+        { id: 'y1', origin: 'paperY', text: 'independently, the coherence graph memory holds the architecture together' },
+      ],
+    });
+    expect(r.corroboration?.tier).toBe('corroborated');
+    expect(r.confidence.ceiling).toBe('consistent_only'); // text+timing only — corroboration does NOT raise this
+  });
+
+  it('an echo among sources is reflected honestly, not laundered into corroboration', () => {
+    const echoText = 'coherence graph memory holds together, as established here';
+    const r = reason('t', fixture(), { text: true }, {
+      claim: 'coherence graph',
+      sources: [
+        { id: 'z1', origin: 'paperZ', text: echoText },
+        { id: 'z2', origin: 'paperZ', text: echoText },
+      ],
+    });
+    expect(r.corroboration?.tier).toBe('echoed');
+  });
+});

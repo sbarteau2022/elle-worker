@@ -26,8 +26,10 @@
 
 import { runMindMap, type Segment, type MindMapResult } from './mindmap-pipeline';
 import type { GroundingVerdict } from './harmonic-coherence';
+import { convergence, type Source, type ConvergenceResult } from './convergence';
 
 export type { Segment } from './mindmap-pipeline';
+export type { Source } from './convergence';
 
 // Which real channels the upstream extractor actually produced for this run.
 export interface ModalityProfile {
@@ -100,6 +102,12 @@ export interface ReasoningResult {
   invariants: { converged: boolean; F0: number; F_final: number } | null;
   // the actual verdict is capped by the input: you can't out-ground your channels
   confidence: { reached: GroundingVerdict; ceiling: GroundingVerdict; capped: boolean; note: string };
+  // THE THIRD AXIS, independent of modality — corpus corroboration: do
+  // independent-origin sources agree with the claim? Reported separately from
+  // `confidence` on purpose: text agreeing with text is never promoted to
+  // world-grounding, no matter how many independent origins converge. See
+  // convergence.ts. Present only when `sources` was supplied to reason().
+  corroboration: ConvergenceResult | null;
   readout: string;         // a plain structural summary — NOT an LLM claim; the LLM is not in this loop
   mindmap: MindMapResult;  // the full graphs + replay trace, for the spindle
 }
@@ -111,11 +119,25 @@ const VERDICT_RANK: Record<GroundingVerdict, number> = {
 const weaker = (a: GroundingVerdict, b: GroundingVerdict): GroundingVerdict =>
   VERDICT_RANK[a] <= VERDICT_RANK[b] ? a : b;
 
+export interface ReasonOptions {
+  sources?: Source[];  // corpus passages to corroborate against — the third axis
+  claim?: string;      // what to check the sources against; defaults to `title`
+}
+
 // THE REASONING FUNCTION. Runs the unified architecture on a stream and returns
 // one confidence-tagged result. Default profile = text+timing (the caption path).
-export function reason(title: string, segments: Segment[], profile: ModalityProfile = { text: true, timing: true }): ReasoningResult {
+// Pass `sources` (corpus passages, each tagged with its independent origin) to
+// additionally compute corroboration — kept as a separate, honest axis, never
+// merged into the modality-driven grounding ceiling.
+export function reason(
+  title: string,
+  segments: Segment[],
+  profile: ModalityProfile = { text: true, timing: true },
+  opts: ReasonOptions = {},
+): ReasoningResult {
   const tier = modalityTier(profile);
   const mm = runMindMap(title, segments);
+  const corroboration = opts.sources ? convergence(opts.claim ?? title, opts.sources) : null;
 
   if (!mm.ok) {
     return {
@@ -124,6 +146,7 @@ export function reason(title: string, segments: Segment[], profile: ModalityProf
       bimodal: { kappa: 0, grounding: 'incoherent' },
       coherence: null, invariants: null,
       confidence: { reached: 'incoherent', ceiling: tier.grounding_ceiling, capped: false, note: mm.refused?.reason || 'refused' },
+      corroboration,
       readout: `Refused at the witness gate: ${mm.refused?.reason || 'unusable input'}.`,
       mindmap: mm,
     };
@@ -140,7 +163,8 @@ export function reason(title: string, segments: Segment[], profile: ModalityProf
   const readout =
     `${mm.nodes.length} nodes · ${derivation} derivation · ${recognition} recognition callbacks · ` +
     `κ=${mm.kappa.toFixed(3)} · coherence gain ${mm.coherence?.path_len_gain ?? 1}× · ` +
-    `verdict ${reached}${capped ? ' (capped by input tier)' : ''} — ${tier.disclaimer}`;
+    `verdict ${reached}${capped ? ' (capped by input tier)' : ''} — ${tier.disclaimer}` +
+    (corroboration ? ` · corpus: ${corroboration.tier} (${corroboration.distinct_origins} origins, index ${corroboration.convergence_index})` : '');
 
   return {
     ok: true, title, modality: tier,
@@ -154,8 +178,42 @@ export function reason(title: string, segments: Segment[], profile: ModalityProf
         ? `The content reads as "${mm.grounding}", but the input tier caps it at "${tier.grounding_ceiling}" — you can't out-ground your channels.`
         : `Verdict "${reached}" is within the input tier's ceiling.`,
     },
+    corroboration,
     readout,
     mindmap: mm,
+  };
+}
+
+// ── split plain text into segments (for a chat turn: no real timestamps, so
+// the timing channel is synthetic and the caller passes a text-only profile). ──
+export function textToSegments(text: string): Segment[] {
+  const parts = String(text || '').split(/[\n.!?]+/).map((s) => s.trim()).filter(Boolean);
+  let t = 0;
+  return parts.map((p) => { const dur = Math.max(1, p.split(/\s+/).filter(Boolean).length / 3); const s = { t0: t, t1: t + dur, text: p }; t += dur; return s; });
+}
+
+// A compact summary of a reasoning pass, for attaching to a router run.
+export interface ReasoningSummary {
+  tier: GroundingVerdict;      // the grounding ceiling set by the input's modality
+  grounding: GroundingVerdict; // the verdict actually reached (capped by tier)
+  channels: number;
+  nodes: number;
+  recognition: number;
+  disclaimer: string;
+}
+
+// Run the reasoning function over plain text and return the compact summary —
+// the router's per-turn pass. Text-only by default (a chat turn has no world
+// channel), so it honestly ceilings at consistent_only.
+export function reasonText(text: string, profile: ModalityProfile = { text: true }): ReasoningSummary {
+  const r = reason('turn', textToSegments(text), profile);
+  return {
+    tier: r.modality.grounding_ceiling,
+    grounding: r.confidence.reached,
+    channels: r.modality.channels,
+    nodes: r.graphs.nodes,
+    recognition: r.graphs.recognition_edges,
+    disclaimer: r.modality.disclaimer,
   };
 }
 

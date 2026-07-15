@@ -52,6 +52,8 @@ import { handleLattice, type LatticeEnv } from './lattice';
 import { handleMadmind } from './madmind';
 import { handleMindmapPost, handleMindmapGet } from './mindmap';
 import { reasoningSelfTest } from './reasoning';
+import { convergenceSelfTest } from './convergence';
+import { reasonWithCorpus } from './corpus-reasoning';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
 import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
@@ -193,7 +195,7 @@ function err(msg: string, status = 400): Response {
 }
 
 // ── Embeddings ────────────────────────────────────────────────
-async function embed(text: string, env: Env): Promise<number[]> {
+export async function embed(text: string, env: Env): Promise<number[]> {
   const result = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [text.slice(0, 2000)] }) as { data: number[][] };
   if (!result?.data?.[0]) throw new Error('Embedding returned no data');
   return result.data[0];
@@ -1517,6 +1519,26 @@ export default {
     if (path === '/api/elle-reason-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(reasoningSelfTest());
+    }
+    // Convergence self-test — the index between convergence and fact: the
+    // deterministic Falcon-shaped (parallel reads → adversarial cross-check →
+    // named dissent) engine that scores corpus corroboration, with the
+    // load-bearing guarantee that a same-origin echo can never be mistaken for
+    // independent agreement.
+    if (path === '/api/elle-convergence-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(convergenceSelfTest());
+    }
+    // Reason with the corpus — the unified architecture run over REAL,
+    // independent corpus passages retrieved for a claim: the witness gate, both
+    // graphs, bimodal κ, and now corpus corroboration (convergence.ts) as the
+    // third axis. { claim, limit? } in, the full reasoning result out.
+    if (path === '/api/elle-reason-corpus') {
+      if (!svc) return err('Unauthorized', 401);
+      const claim = String((body as { claim?: string }).claim || '').trim();
+      if (!claim) return err('provide { claim }', 400);
+      const limit = Math.max(1, Math.min(30, Number((body as { limit?: number }).limit) || 12));
+      return json(await reasonWithCorpus(env, claim, limit));
     }
 
     // External scheduler (GitHub Actions) drives the daemon loops via HTTP,
