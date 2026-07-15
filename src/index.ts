@@ -43,6 +43,7 @@ import { coherenceSelfTest } from './coherence-layer';
 import { harmonicSelfTest } from './harmonic-coherence';
 import { scaffoldSelfTest } from './scaffold';
 import { regulatorSelfTest } from './regulator';
+import { phaseVesselSelfTest } from './phase-vessel';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1682,6 +1683,16 @@ export default {
     if (path === '/api/elle-regulator-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(regulatorSelfTest());
+    }
+    // Phase-vessel self-test — the place dynamic enough to HOLD a superposition:
+    // a conjugate pair winding the golden ellipse (semi-axes φ, 1/φ, product 1)
+    // seated dead center of the architecture. It falls into the golden rhythm,
+    // then holds it — area φ·1/φ=1 conserved while the phase keeps winding — a
+    // dynamic balance a dissipative holder would collapse. Bound by the same
+    // no-privileged / conservation invariants, at the singularity.
+    if (path === '/api/elle-phase-vessel-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(phaseVesselSelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any
