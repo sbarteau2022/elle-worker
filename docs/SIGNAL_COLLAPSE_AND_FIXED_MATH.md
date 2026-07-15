@@ -39,26 +39,38 @@ JavaScript language — not by convention, by rule. So a walk built entirely
 out of those three operations can never disagree with itself across
 machines.
 
-### Two real bugs this caught before anything shipped
+### Three real bugs this caught before anything shipped
 
 Writing new integer math from scratch is exactly the kind of place a subtle
 mistake hides, so every function was checked against the ordinary decimal
 version before being trusted:
 
-1. **A gain constant was upside down.** CORDIC's spinning process stretches
+1. **The very first draft would have shipped the exact bug it was built to
+   remove.** The whole point of this file is: never call a decimal
+   trig/tanh function at the moment two computers need to agree. The first
+   version of the code built its internal lookup tables by calling
+   `Math.atan` and `Math.atanh` *the instant the program starts up* — which
+   quietly puts the "different computers might disagree" problem right back
+   in, just one step earlier than before. Caught by re-reading what the file
+   was actually promising versus what it was actually doing, before a single
+   test was even run against it. The fix: those tables are now computed once,
+   by hand, ahead of time, and typed into the file as fixed numbers that
+   never change and are never recalculated by any computer at any point —
+   every copy of the file carries the identical numbers, permanently.
+2. **A gain constant was upside down.** CORDIC's spinning process stretches
    the numbers a little on every step; you have to divide that stretch back
    out at the end with a correction constant. The correction constant for the
    hyperbolic (tanh-family) version was accidentally written as the *stretch
    itself* rather than *one divided by the stretch* — so `cosh(0)`, which
    must equal exactly 1, was coming out as 0.69. Caught by testing against
    `Math.cosh` directly, not by reading the formula and trusting it.
-2. **A direction rule was backwards.** One of the two CORDIC modes (the one
+3. **A direction rule was backwards.** One of the two CORDIC modes (the one
    that computes `atanh`) has a rule for which way to turn at each step, and
    the code had that rule flipped — every answer came out with the wrong
    sign and the wrong size. Also caught by testing against `Math.atanh`, not
    by inspection.
 
-Both are fixed, and now every function is checked against its ordinary
+All three are fixed, and now every function is checked against its ordinary
 decimal counterpart across a real range of values, every time the tests run.
 
 ### The two honest boundaries this format has
