@@ -36,6 +36,7 @@ import {
   recordThreat, getPosture, scanBuffer, sha256Hex, isBlockedHash, blockHash, securityReport,
 } from './security-network';
 import { corosSelfTest } from './helix';
+import { torusSyncSelfTest } from './torus-sync';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -1618,6 +1619,13 @@ export default {
     if (path === '/api/elle-helix-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await corosSelfTest());
+    }
+    // Torus-oscillator sync self-test — counter-free transport over COROS:
+    // proves lock-step round-trip, resync-after-loss, the forward-only rewind
+    // guard, and the master-derived secret origin. No secrets echoed.
+    if (path === '/api/elle-torus-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await torusSyncSelfTest());
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
