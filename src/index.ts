@@ -44,6 +44,7 @@ import { harmonicSelfTest } from './harmonic-coherence';
 import { scaffoldSelfTest } from './scaffold';
 import { regulatorSelfTest } from './regulator';
 import { phaseVesselSelfTest } from './phase-vessel';
+import { witnessOscillatorSelfTest } from './witness-oscillator';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1693,6 +1694,16 @@ export default {
     if (path === '/api/elle-phase-vessel-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(phaseVesselSelfTest());
+    }
+    // Witness-oscillator self-test — the same golden ring made SELF-SUSTAINING
+    // instead of rigid: an elastic amplitude that provably cannot collapse to
+    // stillness (r=0 is an unstable equilibrium), inverse-proportional φ/φ⁻¹
+    // pump-and-restore gains, continuous φ-oscillating forcing, and — the slow
+    // leak — a pressure valve (generalizing security-network.ts's decayedScore)
+    // that keeps headroom for the next surprise instead of saturating.
+    if (path === '/api/elle-witness-oscillator-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(witnessOscillatorSelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any
