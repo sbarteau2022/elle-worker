@@ -149,6 +149,8 @@ export const SIGNAL_TACTIC: Record<string, string[]> = {
   'upload.malware_signature':    ['formlessness'],
   'recon.enumeration':           ['laying_plans'],
   'supply_chain.unverified':     ['win_without_fighting'],
+  'sync.replay_attempt':         ['mirror', 'surrender_tactic'],
+  'sync.breach_burn':            ['surrender_tactic', 'formlessness'],
 };
 
 export function tacticsFor(signalKind: string): SecurityTactic[] {
@@ -269,7 +271,7 @@ function genId(): string {
 
 export interface ThreatSignal {
   actorKey: string;   // 'ip:x.x.x.x' | 'user:<id>' | 'hash:<sha256>'
-  source: 'auth' | 'ratelimit' | 'ssrf' | 'cyber' | 'upload' | 'recon' | 'supply_chain';
+  source: 'auth' | 'ratelimit' | 'ssrf' | 'cyber' | 'upload' | 'recon' | 'supply_chain' | 'sync';
   kind: string;       // key into SIGNAL_TACTIC
   detail: string;
 }

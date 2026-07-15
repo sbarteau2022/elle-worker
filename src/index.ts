@@ -39,6 +39,9 @@ import { corosSelfTest } from './helix';
 import { torusSyncSelfTest } from './torus-sync';
 import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { mixingReport } from './hyperbolic-mixing';
+import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
+import { signalCollapseSelfTest } from './signal-collapse';
+import { handleLattice, type LatticeEnv } from './lattice';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -1642,6 +1645,31 @@ export default {
     if (path === '/api/elle-mixing-report') {
       if (!svc) return err('Unauthorized', 401);
       return json(mixingReport());
+    }
+    // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
+    // cross-platform-deterministic variant: bit-identical on any
+    // spec-compliant JS engine, unlike the floating-point version above.
+    if (path === '/api/elle-hyperbolic-fixed-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await hyperbolicSyncFixedSelfTest());
+    }
+    // Signal-collapse self-test — burn-on-breach lifecycle, burst detection,
+    // and the ECDH rekey's post-compromise-recovery proof (a leaked master
+    // key, alone, cannot reproduce the next epoch's key).
+    if (path === '/api/elle-signal-collapse-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await signalCollapseSelfTest());
+    }
+    // The Lattice — 32-axis, 3-layer security deduction engine (Seed of Life
+    // 7 + Flower of Life 12 + Fruit of Life 11, then Validation + The
+    // Reckoning). A deliberate, on-demand deep read of one incident, sitting
+    // beside — not instead of — the fast Witness's live scoring. ~32 model
+    // calls per run, so it rides the admin door, same family as the other
+    // security engines above, not a public one.
+    if (path === '/api/elle-lattice') {
+      if (!svc) return err('Unauthorized', 401);
+      const u = await getUser(request, env);
+      return handleLattice(body, env as unknown as LatticeEnv, u?.id || 'service');
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
