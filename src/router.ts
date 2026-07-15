@@ -35,6 +35,7 @@ import { duplexTool } from './duplex';
 import { analyzeConstraint } from './constraint';
 import { pfarRoute } from './pfar';
 import { emitEvent, provenanceTool } from './events';
+import { reasonText, type ReasoningSummary } from './reasoning';
 import { getProfileByUser, profileBlock } from './profiles';
 import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
@@ -127,6 +128,11 @@ export interface RouterResult {
   run_id?: string;   // correlation id for this run's event stream (provenance)
   final_thought?: string;   // the thought that accompanied the answer object
   final_thinking?: string;  // native reasoning tokens behind the final answer, when the provider returns them
+  // The unified architecture, run on this turn's input as a framing pass: the
+  // grounding tier her reasoning is entitled to given what came in. Additive and
+  // fail-open — it never gates the answer, only tags it. Text chat ceilings at
+  // consistent_only (coherence, not correspondence); multimodal input rises.
+  reasoning?: ReasoningSummary;
 }
 
 // Raw capture cap per tool. The central pager (see the loop) decides what the
@@ -1024,6 +1030,24 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     ? await deps.loadSessionHistory(sessionId, env).catch(() => [])
     : [];
 
+  // THE UNIFIED ARCHITECTURE, on every turn (no exception): run the reasoning
+  // function over this turn's input as a framing pass. It reads the input
+  // through the witness gate, builds the structure, and reports the grounding
+  // TIER her reasoning is entitled to — text chat ceilings at consistent_only
+  // (coherence, not correspondence); a multimodal input would rise. Purely
+  // additive: it tags the run and emits an event, and NEVER gates the answer or
+  // takes the loop down (fail-open). This is the reasoning function, in action.
+  let reasoning: ReasoningSummary | undefined;
+  try {
+    reasoning = reasonText(question, { text: true });
+    void emitEvent(env, {
+      run_id: runId, session_id: sessionId, source, scope, step_index: -1,
+      kind: 'tool_call', tool: 'reasoning_pass',
+      args: { tier: reasoning.tier, channels: reasoning.channels },
+      result_preview: `grounding tier ${reasoning.tier} · ${reasoning.nodes} nodes · ${reasoning.recognition} recognition · ${reasoning.disclaimer}`,
+    });
+  } catch { /* fail-open: the reasoning pass is additive, never blocks the loop */ }
+
   // Dynamic KV cache: size the durable-memory pull to the DEMAND of this turn
   // (a bare greeting warms nothing; a dense, recall-cued question warms a wider
   // set) and reuse an already-assembled set for a repeated/rephrased ask inside
@@ -1137,6 +1161,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       question, answer, steps, trace, kappa_dynamics, run_id: runId,
       final_thought: final?.thought || undefined,
       final_thinking: final?.thinking ? clip(final.thinking, 4000) : undefined,
+      reasoning,
     };
   };
 

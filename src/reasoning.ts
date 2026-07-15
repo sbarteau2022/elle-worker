@@ -159,6 +159,39 @@ export function reason(title: string, segments: Segment[], profile: ModalityProf
   };
 }
 
+// ── split plain text into segments (for a chat turn: no real timestamps, so
+// the timing channel is synthetic and the caller passes a text-only profile). ──
+export function textToSegments(text: string): Segment[] {
+  const parts = String(text || '').split(/[\n.!?]+/).map((s) => s.trim()).filter(Boolean);
+  let t = 0;
+  return parts.map((p) => { const dur = Math.max(1, p.split(/\s+/).filter(Boolean).length / 3); const s = { t0: t, t1: t + dur, text: p }; t += dur; return s; });
+}
+
+// A compact summary of a reasoning pass, for attaching to a router run.
+export interface ReasoningSummary {
+  tier: GroundingVerdict;      // the grounding ceiling set by the input's modality
+  grounding: GroundingVerdict; // the verdict actually reached (capped by tier)
+  channels: number;
+  nodes: number;
+  recognition: number;
+  disclaimer: string;
+}
+
+// Run the reasoning function over plain text and return the compact summary —
+// the router's per-turn pass. Text-only by default (a chat turn has no world
+// channel), so it honestly ceilings at consistent_only.
+export function reasonText(text: string, profile: ModalityProfile = { text: true }): ReasoningSummary {
+  const r = reason('turn', textToSegments(text), profile);
+  return {
+    tier: r.modality.grounding_ceiling,
+    grounding: r.confidence.reached,
+    channels: r.modality.channels,
+    nodes: r.graphs.nodes,
+    recognition: r.graphs.recognition_edges,
+    disclaimer: r.modality.disclaimer,
+  };
+}
+
 // ── self-test — the reasoning function, in action, at two tiers ──
 export interface ReasoningSelfTest {
   ok: boolean;
