@@ -491,9 +491,13 @@ to Elle by construction. `main` auto-deploys via
 | `torus-sync.ts` | counter-free torus-oscillator sync over COROS: free-running golden winding + AEAD-gated forward-search resync (flat spine for the hyperbolic variant) |
 | `hyperbolic-sync.ts` | the hyperbolic-geodesic ("Einstein-Rosen") sync: Poincaré-disk geodesic walk + curvature-warped clock, same spine as torus-sync |
 | `hyperbolic-mixing.ts` | mixing diagnostics: measured Lyapunov exponent (hyperbolic vs. flat-torus control) + state-space coverage — numbers, not adjectives |
+| `fixed-math.ts` | integer CORDIC core (sin/cos/tanh/atanh/sqrt via add-subtract-shift only) — bit-identical on any spec-compliant JS engine |
+| `hyperbolic-sync-fixed.ts` | the hyperbolic-geodesic sync rebuilt on fixed-math.ts — cross-platform-safe counterpart to hyperbolic-sync.ts |
+| `signal-collapse.ts` | burn-on-breach (observable evidence → immediate lockout, tied to the Witness) + ECDH rekey (real post-compromise recovery) |
 | `corpus/**/*.md` | version-controlled corpus seed documents |
 | `docs/WAR_ROOM_TODO.md` | the paused War Room / Duelist build note |
 | `docs/SECURITY_ARCHITECTURE.md` | the Witness & the Corkscrew — security network + signal crypto tunnel, system-wide |
 | `docs/TORUS_SYNC.md` | counter-free torus-oscillator sync over COROS + the hyperbolic-geodesic next rung |
 | `docs/HYPERBOLIC_BRIDGE.md` | the Einstein-Rosen rung: Poincaré-disk geodesic sync, honest physics, the numerical-determinism caveat |
 | `docs/MIXING_DIAGNOSTICS.md` | measuring the walk: Lyapunov divergence + coverage, with the honest correction of the "empirical mixing" overclaim |
+| `docs/SIGNAL_COLLAPSE_AND_FIXED_MATH.md` | plain-language: the fixed-point/CORDIC core (+ 2 bugs caught before shipping) and what "the signal collapses on breach" honestly means — burn-on-breach + real key-healing vs. the undetectable-passive-listener line |

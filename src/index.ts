@@ -39,6 +39,8 @@ import { corosSelfTest } from './helix';
 import { torusSyncSelfTest } from './torus-sync';
 import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { mixingReport } from './hyperbolic-mixing';
+import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
+import { signalCollapseSelfTest } from './signal-collapse';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -1642,6 +1644,20 @@ export default {
     if (path === '/api/elle-mixing-report') {
       if (!svc) return err('Unauthorized', 401);
       return json(mixingReport());
+    }
+    // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
+    // cross-platform-deterministic variant: bit-identical on any
+    // spec-compliant JS engine, unlike the floating-point version above.
+    if (path === '/api/elle-hyperbolic-fixed-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await hyperbolicSyncFixedSelfTest());
+    }
+    // Signal-collapse self-test — burn-on-breach lifecycle, burst detection,
+    // and the ECDH rekey's post-compromise-recovery proof (a leaked master
+    // key, alone, cannot reproduce the next epoch's key).
+    if (path === '/api/elle-signal-collapse-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await signalCollapseSelfTest());
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
