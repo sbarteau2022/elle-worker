@@ -41,6 +41,7 @@ import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { mixingReport } from './hyperbolic-mixing';
 import { coherenceSelfTest } from './coherence-layer';
 import { harmonicSelfTest } from './harmonic-coherence';
+import { scaffoldSelfTest } from './scaffold';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1661,6 +1662,15 @@ export default {
     if (path === '/api/elle-grounding-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(harmonicSelfTest());
+    }
+    // Scaffold self-test — the structural substrate: five load-bearing pillars
+    // (equal load, C5-symmetric, no privileged pillar) and the bridge fabric
+    // where any node may reach any other with NO PRIVILEGED NODE — hubless and
+    // bottleneck-free, proven by measuring the egalitarian (Watts–Strogatz)
+    // build against a hub-forming (preferential-attachment) control.
+    if (path === '/api/elle-scaffold-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(scaffoldSelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any
