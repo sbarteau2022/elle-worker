@@ -58,7 +58,7 @@ const KNOWN_MEMBER_TOOLS = new Set([
   'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
 ]);
-const KNOWN_SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell', 'delegate_local']);
+const KNOWN_SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell', 'delegate_local', 'sandbox_lane']);
 
 describe('ALL_CATALOG_TOOLS snapshot', () => {
   it('parsed a plausible number of real tools out of router.ts (catches a broken parse)', () => {

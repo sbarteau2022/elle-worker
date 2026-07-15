@@ -83,7 +83,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `public` | `/api/chat`, widget (rate-limited, no auth) | read-only mind: corpus, find_document, memory recall, web, code_engine, diagnose, calc |
 | `member` | authenticated standard-tier user | public + their own journal + self_state, remember, skills (read), scratchpad |
 | `full` | service key or admin/superadmin JWT | **everything** — read_sql, trades, forge, MCP, run_code/run_shell, github_*, intents, self-revision |
-| `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr` and `run_shell` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
+| `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr`, `run_shell`, `delegate_local`, and `sandbox_lane` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
 
 ### The ~59 tools (full scope)
@@ -125,6 +125,18 @@ container image, no Cloudflare Containers entitlement. If the laptop isn't
 connected the tools report "path not open" plainly rather than hanging; run
 `sandbox_status` to check. See **"Getting the sandbox path open"** below, and
 `src/sandbox-agent.ts` + `src/connect-sandbox.ts`.
+
+**The lane registry** — `sandbox_lane` (`src/sandbox-registry.ts`), a
+first-class router tool over the same connect-back protocol as the sandbox
+tools above, generalized past the single `primary` lane: `op=create/list/
+remove` names and lists as many lanes as she can manage (free bookkeeping —
+each only gains real execution power once a connect-back client actually
+dials into that name); `op=dispatch{name,kind,payload}` sends a job to one
+lane by name; `op=stability{laneA,laneB}` / `op=report` read the topological
+entanglement check (`src/topology-lock.ts`) off each lane's real dispatch
+history. Because `dispatch` can reach the same `kind:'exec'` shell path as
+`run_shell`, `sandbox_lane` sits in `SHIP_DENY` too — a `cofounder` cannot use
+it to route around the `run_shell` denial.
 
 **Her codebase & the forge** — `repo_read`/`repo_search` (allowlisted repos),
 `github_read_file`/`github_list_files`/`github_search_code` (ANY repo via the
@@ -465,6 +477,7 @@ to Elle by construction. `main` auto-deploys via
 | `rapid.ts` | native hospitality tools |
 | `sandbox-agent.ts` | the `SandboxAgent` DO — holds the laptop's WebSocket, dispatches jobs down it |
 | `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane |
+| `sandbox-registry.ts` | the named-lane registry: `sandbox_lane` router tool (create/list/remove/dispatch/stability/report) + the topology-lock stability readout |
 | `duplex.ts` | the duplex channel — sovereign (laptop) ↔ cloud, append-only ledger, `/api/duplex` |
 | `deep-research.ts` | `deep_research` tool — chained multi-round web research, local-first gap detection |
 | `github-tools.ts` | read any repo via the worker token |
