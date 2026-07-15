@@ -51,6 +51,7 @@ import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
 import { handleMadmind } from './madmind';
 import { handleMindmapPost, handleMindmapGet } from './mindmap';
+import { reasoningSelfTest } from './reasoning';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
 import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
@@ -1508,6 +1509,14 @@ export default {
       if (!svc) return err('Unauthorized', 401);
       if (request.method === 'GET') return handleMindmapGet(url, env);
       return handleMindmapPost(body as Record<string, unknown>, env);
+    }
+    // The reasoning function, in action — the unified architecture as one call:
+    // witness → both graphs → bimodal κ → coherence → the held invariants →
+    // the modality tier (the honest confidence ceiling set by what came in).
+    // Runs a caption-tier and a full-set-tier example and returns both traces.
+    if (path === '/api/elle-reason-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(reasoningSelfTest());
     }
 
     // External scheduler (GitHub Actions) drives the daemon loops via HTTP,
