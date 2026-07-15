@@ -30,21 +30,37 @@ export interface RunCtx { runId?: string; sessionId?: string | null; source?: st
 
 function newId(): string { return crypto.randomUUID().replace(/-/g, '').slice(0, 20); }
 
-function stub(env: Env) {
+// Named lanes: a Durable Object namespace mints a distinct instance per string
+// id at no standing cost, so any number of lanes can exist as bookkeeping —
+// each one only gains real execution power once a connect-back client (a
+// laptop, a runner) actually dials into that specific name. Every existing
+// caller omits `lane` and gets today's exact behavior — 'primary', unchanged.
+function stub(env: Env, lane = 'primary') {
   const ns = env.SANDBOX_AGENT!; // callers guard sandboxConfigured() first
-  return ns.get(ns.idFromName('primary'));
+  return ns.get(ns.idFromName(lane));
 }
 
 export function sandboxConfigured(env: Env): boolean { return !!env.SANDBOX_AGENT; }
 
-export async function pathOpen(env: Env): Promise<AgentStatus> {
+export async function pathOpen(env: Env, lane = 'primary'): Promise<AgentStatus> {
   if (!env.SANDBOX_AGENT) return { open: false };
   try {
-    const r = await stub(env).fetch('https://sandbox/status');
+    const r = await stub(env, lane).fetch('https://sandbox/status');
     return (await r.json()) as AgentStatus;
   } catch {
     return { open: false };
   }
+}
+
+// Generic dispatch to a NAMED lane — the hardwired function the registry's
+// tool call routes through. Same wire protocol as the existing primary-lane
+// dispatchers (kind + payload → the DO → the connected client), just callable
+// against any lane name instead of only 'primary'.
+export async function dispatchToLane(env: Env, lane: string, kind: string, payload: Record<string, unknown>): Promise<unknown> {
+  const r = await stub(env, lane).fetch('https://sandbox/dispatch', {
+    method: 'POST', body: JSON.stringify({ kind, payload }),
+  });
+  return r.json();
 }
 
 async function dispatchExec(env: Env, payload: Record<string, unknown>): Promise<ExecResult> {

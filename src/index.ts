@@ -54,6 +54,8 @@ import { handleMindmapPost, handleMindmapGet } from './mindmap';
 import { reasoningSelfTest } from './reasoning';
 import { convergenceSelfTest } from './convergence';
 import { reasonWithCorpus } from './corpus-reasoning';
+import { topologySelfTest } from './topology-lock';
+import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport, sandboxRegistrySelfTest } from './sandbox-registry';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
 import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
@@ -1539,6 +1541,51 @@ export default {
       if (!claim) return err('provide { claim }', 400);
       const limit = Math.max(1, Math.min(30, Number((body as { limit?: number }).limit) || 12));
       return json(await reasonWithCorpus(env, claim, limit));
+    }
+    // Topology-lock self-test — "quantum knots to stabilize," honestly: the
+    // real, load-bearing idea (topological invariance under continuous
+    // deformation) computed from raw 3D coordinates via the discrete Gauss
+    // linking integral, and checked against a textbook fact (the Hopf link's
+    // linking number is exactly ±1) — not asserted, reproduced.
+    if (path === '/api/elle-topology-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(topologySelfTest());
+    }
+    // The sandbox lane registry — as many execution lanes as she can manage,
+    // named and dispatched to via one hardwired, deterministic routing
+    // function, stabilized by the topological linking-number check above:
+    // { action: 'create'|'list'|'remove'|'dispatch'|'stability'|'report', ... }.
+    if (path === '/api/elle-sandbox-lane') {
+      if (!svc) return err('Unauthorized', 401);
+      const b = body as { action?: string; name?: string; description?: string; kind?: string; payload?: Record<string, unknown>; dispatchesTo?: string[]; laneA?: string; laneB?: string };
+      const action = String(b.action || '');
+      if (action === 'create') {
+        if (!b.name) return err('provide { name }', 400);
+        return json(await laneCreate(env, b.name, b.description));
+      }
+      if (action === 'list') return json({ lanes: await laneList(env) });
+      if (action === 'remove') {
+        if (!b.name) return err('provide { name }', 400);
+        await laneRemove(env, b.name);
+        return json({ removed: true });
+      }
+      if (action === 'dispatch') {
+        if (!b.name || !b.kind) return err('provide { name, kind, payload? }', 400);
+        try {
+          const result = await laneDispatch(env, b.name, b.kind, b.payload || {}, { dispatchesTo: b.dispatchesTo });
+          return json({ ok: true, result });
+        } catch (e) { return err(String((e as Error).message || e), 502); }
+      }
+      if (action === 'stability') {
+        if (!b.laneA || !b.laneB) return err('provide { laneA, laneB }', 400);
+        return json(await laneStability(env, b.laneA, b.laneB));
+      }
+      if (action === 'report') return json(await registryReport(env));
+      return err('unknown action (expected create|list|remove|dispatch|stability|report)', 400);
+    }
+    if (path === '/api/elle-sandbox-registry-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(sandboxRegistrySelfTest());
     }
 
     // External scheduler (GitHub Actions) drives the daemon loops via HTTP,
