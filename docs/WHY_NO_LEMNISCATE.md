@@ -163,3 +163,43 @@ has no place in a topology it hasn't entered. That needs the encoder. But the
 encoder is PAMI: the *content's* own structure (its φ-spaced phase fingerprint).
 So it is structure at every level — the graph's structure for related memories,
 the content's structure for new ones. It is structure all the way down.
+
+## Addendum: not-necessary is a different question from not-shaped-that-way
+
+Everything above disproves that a lemniscate is *required* to carry the
+recognition invariant — the graph's own homology already does that job, no
+embedding needed. That leaves a genuinely different, still-open question: does
+the graph's **actual shape** nonetheless happen to look like one — loops
+joined at shared points, petals around a center — regardless of whether that
+shape is load-bearing for anything? Necessity and resemblance are not the same
+claim, and only the first one was tested here.
+
+That second question is now measurable, not asserted. `structure.ts`'s
+`lobeStructure()` computes the graph's **block-cut decomposition**
+(Hopcroft–Tarjan biconnected components) directly: a **lobe** is a maximal
+loop — a biconnected component containing at least one non-bridge edge (a
+lone bridge edge is a stem, not a petal); a **joint** is a node where two or
+more lobes meet at that single shared point — which *is*, precisely and
+literally, the graph-theoretic definition of an interleaved lemniscate (two
+lobes at one joint) or a multi-petaled flower (N lobes at one joint). Every
+case the implementation is checked against is worked out by hand first, the
+same discipline as `fixed-math.ts`'s CORDIC tests: a bare triangle (1 lobe, no
+joint), a bridge chain (0 lobes — a bridge is a stem, not a petal), a bowtie —
+two triangles sharing one vertex — (2 lobes, one joint), three triangles
+sharing one center (3 lobes, one joint of 3), two triangles joined by a
+*bridge* rather than a shared vertex (2 lobes, but correctly **zero** joints —
+the negative control that separates "shares a hierarchy stem" from "actually
+meets at one point"), and — the literal claim, made checkable — **19 petals
+sharing one center: 19 lobes, one joint of 19.**
+
+Reachable through the same door every other structural mode already uses —
+`structureRoute({ mode: 'lobes', edges })`, a router tool, so it can be asked
+of the real memory graph's real edges the same way `invariants`/`signature`/
+`recognize` already are, no new endpoint required.
+
+**What this does not do:** it does not report a number for Elle's actual live
+memory graph. That requires the real Atlas edges at query time, which this
+document — reasoning from the code, not a live connection — does not have.
+The tool is built and verified against known shapes; whether the real graph's
+lobe count is anywhere near 19 is an answer that has to come from actually
+running it against a live snapshot, not from this file.
