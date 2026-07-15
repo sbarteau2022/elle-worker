@@ -338,6 +338,47 @@ function applyCycleBoost(edges: MemEdge[], boost: number): MemEdge[] {
   return edges.map((e) => (onCycle.has(edgeKey(e.src, e.dst)) ? { ...e, weight: Math.max(0, e.weight) * boost } : e));
 }
 
+// ── does "recognition" actually mean "closes a loop between branches"? ──────
+// The hierarchy/derivation kinds are how the graph grows OUTWARD from what a
+// memory came from (a widening tree, root to leaves); the co-recall/
+// co-occurrence/tension kinds are added AFTER the fact, precisely when the
+// system notices two things belong together regardless of which branch they
+// grew on (recordAssociations above is the clearest case: an `assoc` edge is
+// drawn between memories that were merely relevant to the same recall, with
+// no requirement that they share a tree parent). If that story is right, a
+// recognition-kind edge should land on a LOBE (a non-bridge edge — see
+// structure.ts's nonBridgeEdges/lobeStructure) far more often than a
+// derivation-kind edge does, which mostly just extends the tree. This checks
+// the correlation directly instead of assuming it holds.
+const DERIVATION_KINDS: ReadonlySet<EdgeKind> = new Set(['causal', 'derived', 'refines', 'supersedes', 'about', 'tool']);
+const RECOGNITION_KINDS: ReadonlySet<EdgeKind> = new Set(['assoc', 'session', 'contradicts']);
+
+export interface LobeKindCorrelation {
+  recognition_edges: number;
+  recognition_on_lobe_fraction: number;   // of assoc/session/contradicts edges, how many sit on a lobe
+  derivation_edges: number;
+  derivation_on_lobe_fraction: number;    // of causal/derived/refines/supersedes/about/tool edges, how many do
+  confirms_hypothesis: boolean;           // recognition-kind edges land on a lobe strictly more often
+}
+
+export function lobeKindCorrelation(edges: MemEdge[]): LobeKindCorrelation {
+  const onCycle = nonBridgeEdges(edges);
+  let recognitionEdges = 0, recognitionOnLobe = 0, derivationEdges = 0, derivationOnLobe = 0;
+  for (const e of edges) {
+    const onLobe = onCycle.has(edgeKey(e.src, e.dst));
+    if (RECOGNITION_KINDS.has(e.kind)) { recognitionEdges++; if (onLobe) recognitionOnLobe++; }
+    else if (DERIVATION_KINDS.has(e.kind)) { derivationEdges++; if (onLobe) derivationOnLobe++; }
+  }
+  const rFrac = recognitionEdges ? recognitionOnLobe / recognitionEdges : 0;
+  const dFrac = derivationEdges ? derivationOnLobe / derivationEdges : 0;
+  const round4 = (x: number) => Math.round(x * 10000) / 10000;
+  return {
+    recognition_edges: recognitionEdges, recognition_on_lobe_fraction: round4(rFrac),
+    derivation_edges: derivationEdges, derivation_on_lobe_fraction: round4(dFrac),
+    confirms_hypothesis: recognitionEdges > 0 && derivationEdges > 0 && rFrac > dFrac,
+  };
+}
+
 // ── association recording (self-bootstrapping edge formation) ─
 // The set a recall returned is, by definition, a set that was relevant together.
 // Record that as `assoc` edges among the top members so the graph learns the

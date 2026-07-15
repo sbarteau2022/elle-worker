@@ -5,6 +5,7 @@ import {
   graphExpandAB,
   recordAssociations,
   canonicalEndpoints,
+  lobeKindCorrelation,
   CONDUCTANCE,
   type MemEdge,
   type GraphStore,
@@ -205,5 +206,41 @@ describe('recordAssociations', () => {
     const store = new MemoryStore();
     await recordAssociations(store, ['a', 'a', 'b']);
     expect(store.edges.length).toBe(1);
+  });
+});
+
+// ── does "recognition" mean "closes a loop between branches"? ──────────────
+// derived/causal/etc. build a widening tree from what a memory came from;
+// assoc/session/contradicts get added later, when the system notices two
+// things belong together regardless of which branch they grew on. If that
+// story holds, recognition-kind edges should land on a lobe (non-bridge) far
+// more often than derivation-kind edges, which mostly just extend the tree.
+describe('lobeKindCorrelation', () => {
+  const E = (src: string, dst: string, kind: MemEdge['kind']): MemEdge => ({ src, dst, kind, weight: 1 });
+
+  it('a pure derivation tree has nothing on a lobe — no recognition edges to compare against', () => {
+    const edges = [E('root', 'A', 'derived'), E('A', 'A1', 'derived'), E('A', 'A2', 'derived')];
+    const r = lobeKindCorrelation(edges);
+    expect(r.derivation_on_lobe_fraction).toBe(0);
+    expect(r.recognition_edges).toBe(0);
+    expect(r.confirms_hypothesis).toBe(false); // no recognition edges present — nothing to confirm
+  });
+
+  it('a reconnection between two tree branches is exactly what closes a lobe — and most of the tree stays untouched', () => {
+    const edges: MemEdge[] = [
+      // a wide tree — most of this never gets swept into any loop
+      E('root', 'A', 'derived'), E('root', 'B', 'derived'), E('root', 'C', 'derived'), E('root', 'D', 'derived'),
+      E('A', 'A1', 'derived'), E('A', 'A2', 'derived'), E('A', 'A3', 'derived'),
+      E('B', 'B1', 'derived'), E('D', 'D1', 'causal'), E('D1', 'D1a', 'refines'), E('C', 'C1', 'about'),
+      // the recognition edge: A2 and B1 were recalled together though they grew on separate branches
+      E('A2', 'B1', 'assoc'),
+    ];
+    const r = lobeKindCorrelation(edges);
+    expect(r.recognition_edges).toBe(1);
+    expect(r.recognition_on_lobe_fraction).toBe(1); // the assoc edge itself always closes its own loop
+    expect(r.derivation_on_lobe_fraction).toBeGreaterThan(0);  // the path it reconnects (A-A2, root-A, root-B, B-B1) is swept in too
+    expect(r.derivation_on_lobe_fraction).toBeLessThan(1);     // but most of the tree (C, D branches) stays untouched
+    expect(r.recognition_on_lobe_fraction).toBeGreaterThan(r.derivation_on_lobe_fraction);
+    expect(r.confirms_hypothesis).toBe(true);
   });
 });
