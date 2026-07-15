@@ -37,6 +37,7 @@ import {
 } from './security-network';
 import { corosSelfTest } from './helix';
 import { torusSyncSelfTest } from './torus-sync';
+import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -1626,6 +1627,13 @@ export default {
     if (path === '/api/elle-torus-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await torusSyncSelfTest());
+    }
+    // Hyperbolic-geodesic sync self-test — the curvature-warped ("Einstein-
+    // Rosen") variant: proves the Poincaré-disk primitives, a bounded walk,
+    // counter-free round-trip, resync, and the forward-only guard. No secrets.
+    if (path === '/api/elle-hyperbolic-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await hyperbolicSyncSelfTest());
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
