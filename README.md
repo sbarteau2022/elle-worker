@@ -486,5 +486,8 @@ to Elle by construction. `main` auto-deploys via
 | `war-room.ts` | the War Room: SPAR (doctrine Duelist + Autopsy + ladder) · DRILLS · CHAMBERS · X-RAY |
 | `falcon.ts` | the Millennium Falcon: 16-axis, 3-tier product intelligence engine — Material Ground + Observer Reading fire in parallel, Validation + the Rupture (axis 16) fire last, sequentially |
 | `madmind.ts` / `diagnose.ts` / `research.ts` / `widget.ts` | submissions, diagnostics, research cron, embeddable widget |
+| `security-network.ts` | dynamic-adaptive security network: 48L/AOW attacker-tactic taxonomy, decaying per-actor posture, malware/polyglot scan + runtime hash blocklist |
+| `helix.ts` | COROS signal crypto tunnel: AES-256-GCM + φ-corkscrew covertness (length-hiding, whitening) + forward ratchet + constant-rate framing |
 | `corpus/**/*.md` | version-controlled corpus seed documents |
 | `docs/WAR_ROOM_TODO.md` | the paused War Room / Duelist build note |
+| `docs/SECURITY_ARCHITECTURE.md` | the Witness & the Corkscrew — security network + signal crypto tunnel, system-wide |
