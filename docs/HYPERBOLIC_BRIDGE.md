@@ -94,9 +94,13 @@ curvature-warped covertness above.
   cost + replay window; sync hides order/count not cadence (pair with COROS
   constant-rate framing); master-key agreement out of scope.
 - New: the numerical-determinism constraint above.
-- New: "bounded hyperbolic walk," not certified ergodic geodesic flow — the
-  equidistribution/mixing is empirical (tested bounded over 3000 ticks), not a
-  proved Anosov property.
+- New: "bounded hyperbolic walk," not certified ergodic geodesic flow. This is
+  now MEASURED, not asserted (`docs/MIXING_DIAGNOSTICS.md`): the walk shows
+  weak-but-positive sensitive dependence (largest Lyapunov ≈ +0.011/tick, vs.
+  ≈0 for the flat-torus control) and broad-but-non-uniform coverage (~75% of
+  cells, occupancy CV ≈ 0.72). Bounded and exploratory — not a proved Anosov
+  property, and weak sensitivity is deliberately the right operating point (a
+  strongly chaotic walk would amplify the cross-platform ULP divergence above).
 
 ## Where it sits
 
