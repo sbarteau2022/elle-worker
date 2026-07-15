@@ -42,6 +42,7 @@ import { mixingReport } from './hyperbolic-mixing';
 import { coherenceSelfTest } from './coherence-layer';
 import { harmonicSelfTest } from './harmonic-coherence';
 import { scaffoldSelfTest } from './scaffold';
+import { regulatorSelfTest } from './regulator';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1671,6 +1672,16 @@ export default {
     if (path === '/api/elle-scaffold-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(scaffoldSelfTest());
+    }
+    // Free-energy regulator self-test — each invariant made a thermodynamic cost,
+    // the system driven down a free-energy functional F=U−T·S that is a genuine
+    // Lyapunov function (monotone descent, conserved-and-converted to work) to the
+    // balanced-superposition fixed point, anisotropy isotropically suppressed,
+    // dissonance resolved, and a φ-quasiperiodic perturbation escaping a planted
+    // dissonance well — run against the scaffold's own measured invariants.
+    if (path === '/api/elle-regulator-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(regulatorSelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any
