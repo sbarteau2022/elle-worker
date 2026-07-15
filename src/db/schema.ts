@@ -136,6 +136,22 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       what_was_built TEXT, comparison_to_rupture TEXT, founder_notes TEXT,
       created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
     )`,
+    // lattice.ts — The Lattice: 32-axis security deduction engine
+    `CREATE TABLE IF NOT EXISTS lattice_analyses (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,
+      seed_json TEXT NOT NULL, flower_json TEXT NOT NULL, fruit_json TEXT NOT NULL, validation_json TEXT,
+      status TEXT DEFAULT 'complete', created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS lattice_reckonings (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, incident_summary TEXT,
+      reckoning_json TEXT NOT NULL, posture TEXT, action TEXT, breach_reason TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS lattice_reasoning_log (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, step TEXT NOT NULL,
+      chain TEXT NOT NULL, model TEXT, provider TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     // router-idempotency.ts
     `CREATE TABLE IF NOT EXISTS elle_idempotency (
     key         TEXT PRIMARY KEY,

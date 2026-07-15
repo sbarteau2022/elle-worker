@@ -41,6 +41,7 @@ import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { mixingReport } from './hyperbolic-mixing';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
+import { handleLattice, type LatticeEnv } from './lattice';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -1658,6 +1659,17 @@ export default {
     if (path === '/api/elle-signal-collapse-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await signalCollapseSelfTest());
+    }
+    // The Lattice — 32-axis, 3-layer security deduction engine (Seed of Life
+    // 7 + Flower of Life 12 + Fruit of Life 11, then Validation + The
+    // Reckoning). A deliberate, on-demand deep read of one incident, sitting
+    // beside — not instead of — the fast Witness's live scoring. ~32 model
+    // calls per run, so it rides the admin door, same family as the other
+    // security engines above, not a public one.
+    if (path === '/api/elle-lattice') {
+      if (!svc) return err('Unauthorized', 401);
+      const u = await getUser(request, env);
+      return handleLattice(body, env as unknown as LatticeEnv, u?.id || 'service');
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
