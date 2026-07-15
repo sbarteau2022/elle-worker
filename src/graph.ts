@@ -350,8 +350,12 @@ function applyCycleBoost(edges: MemEdge[], boost: number): MemEdge[] {
 // structure.ts's nonBridgeEdges/lobeStructure) far more often than a
 // derivation-kind edge does, which mostly just extends the tree. This checks
 // the correlation directly instead of assuming it holds.
-const DERIVATION_KINDS: ReadonlySet<EdgeKind> = new Set(['causal', 'derived', 'refines', 'supersedes', 'about', 'tool']);
-const RECOGNITION_KINDS: ReadonlySet<EdgeKind> = new Set(['assoc', 'session', 'contradicts']);
+// Exported as the single source of truth for the depth/relational split — the
+// coherence layer (coherence-layer.ts) reads the SAME classification: the
+// derivation kinds build the deep hierarchical substrate; the recognition kinds
+// are the relational coherence shortcut over it.
+export const DERIVATION_KINDS: ReadonlySet<EdgeKind> = new Set(['causal', 'derived', 'refines', 'supersedes', 'about', 'tool']);
+export const RECOGNITION_KINDS: ReadonlySet<EdgeKind> = new Set(['assoc', 'session', 'contradicts']);
 
 export interface LobeKindCorrelation {
   recognition_edges: number;

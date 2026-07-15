@@ -39,6 +39,7 @@ import { corosSelfTest } from './helix';
 import { torusSyncSelfTest } from './torus-sync';
 import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { mixingReport } from './hyperbolic-mixing';
+import { coherenceSelfTest } from './coherence-layer';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1645,6 +1646,13 @@ export default {
     if (path === '/api/elle-mixing-report') {
       if (!svc) return err('Unauthorized', 401);
       return json(mixingReport());
+    }
+    // Coherence-layer self-test — the depth/relational decoupling, measured:
+    // a deep derivation hierarchy plus a core-directed recognition layer, and
+    // the quantified small-world shortcut the coherence edges buy.
+    if (path === '/api/elle-coherence-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(coherenceSelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any
