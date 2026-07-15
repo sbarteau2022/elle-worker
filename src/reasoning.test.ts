@@ -119,3 +119,44 @@ describe('reasonText / textToSegments — the router turn pass (pressure test)',
     expect(r.ok).toBe(false);
   });
 });
+
+describe('reason() with sources — corroboration as the third, independent axis', () => {
+  it('attaches corroboration when sources are supplied, null otherwise', () => {
+    const withoutSources = reason('Lecture', fixture());
+    expect(withoutSources.corroboration).toBeNull();
+
+    const withSources = reason('golden ratio phase', fixture(), { text: true }, {
+      claim: 'the golden ratio governs the phase of the architecture',
+      sources: [
+        { id: 'b1', origin: 'paperB', text: 'the golden ratio sets the phase of this architecture in our analysis' },
+        { id: 'c1', origin: 'paperC', text: 'independently, the phase of the architecture follows the golden ratio' },
+      ],
+    });
+    expect(withSources.corroboration).not.toBeNull();
+    expect(withSources.corroboration?.tier).toBe('corroborated');
+  });
+
+  it('corroboration never inflates the modality-driven grounding ceiling — the two axes stay separate', () => {
+    const r = reason('t', fixture(), { text: true, timing: true }, {
+      claim: 'coherence graph',
+      sources: [
+        { id: 'x1', origin: 'paperX', text: 'coherence graph memory holds together across the whole architecture' },
+        { id: 'y1', origin: 'paperY', text: 'independently, the coherence graph memory holds the architecture together' },
+      ],
+    });
+    expect(r.corroboration?.tier).toBe('corroborated');
+    expect(r.confidence.ceiling).toBe('consistent_only'); // text+timing only — corroboration does NOT raise this
+  });
+
+  it('an echo among sources is reflected honestly, not laundered into corroboration', () => {
+    const echoText = 'coherence graph memory holds together, as established here';
+    const r = reason('t', fixture(), { text: true }, {
+      claim: 'coherence graph',
+      sources: [
+        { id: 'z1', origin: 'paperZ', text: echoText },
+        { id: 'z2', origin: 'paperZ', text: echoText },
+      ],
+    });
+    expect(r.corroboration?.tier).toBe('echoed');
+  });
+});
