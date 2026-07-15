@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   PHI_INV, golden, goldenPad, xorBytes, BLOCK, LEN_PREFIX,
   seal, open, corosSelfTest,
+  ratchetInit, ratchetStep, ratchetSeal, ratchetOpen,
+  packFrames, coverFrame, unpackFrames, FRAME_PAYLOAD,
 } from './helix';
 
 describe('golden — the corkscrew (equidistribution, determinism, non-repeat)', () => {
@@ -89,13 +91,78 @@ describe('seal / open — round-trip and the whole-or-nothing gate', () => {
   });
 });
 
+describe('forward ratchet — REGULATOR 1 (heal, homeostatic)', () => {
+  const master = new Uint8Array(32).fill(11);
+
+  it('sender and receiver walk in lock-step across many messages', async () => {
+    let rs = await ratchetInit(master);
+    let rr = await ratchetInit(master);
+    const td = new TextDecoder();
+    for (const m of ['a', 'bb', 'ccc', 'd'.repeat(300)]) {
+      const s = await ratchetSeal(rs, new TextEncoder().encode(m)); rs = s.next;
+      const o = await ratchetOpen(rr, s.wire); rr = o.next;
+      expect(td.decode(o.plaintext)).toBe(m);
+    }
+  });
+
+  it('advances one-way — each step yields a distinct message key and chain key', async () => {
+    const r0 = await ratchetInit(master);
+    const s1 = await ratchetStep(r0);
+    const s2 = await ratchetStep(s1.next);
+    expect(Array.from(s1.messageKey)).not.toEqual(Array.from(s2.messageKey));
+    expect(Array.from(s1.next.chainKey)).not.toEqual(Array.from(r0.chainKey));
+    expect(s2.next.counter).toBe(2);
+  });
+
+  it('refuses to rewind — a stale counter is rejected (forward secrecy guard)', async () => {
+    let rr = await ratchetInit(master);
+    let rs = await ratchetInit(master);
+    const s0 = await ratchetSeal(rs, new TextEncoder().encode('first')); rs = s0.next;
+    const s1 = await ratchetSeal(rs, new TextEncoder().encode('second'));
+    // receiver consumes message 1 first, advancing past 0
+    const o1 = await ratchetOpen(rr, s1.wire); rr = o1.next;
+    await expect(ratchetOpen(rr, s0.wire)).rejects.toThrow(/stale|rewind/);
+  });
+});
+
+describe('constant-rate framing — REGULATOR 2 (balance, homeostatic)', () => {
+  const master = new Uint8Array(32).fill(5);
+
+  it('carves a payload into fixed-size frames and reassembles it', () => {
+    const payload = new Uint8Array(1500).map((_, i) => i & 0xff);
+    const frames = packFrames(payload);
+    for (const f of frames) expect(f.length).toBe(FRAME_PAYLOAD);
+    expect(Array.from(unpackFrames(frames))).toEqual(Array.from(payload));
+  });
+
+  it('a cover frame carries nothing', () => {
+    expect(unpackFrames([coverFrame()]).length).toBe(0);
+    expect(coverFrame().length).toBe(FRAME_PAYLOAD);
+  });
+
+  it('every data and cover frame seals (exact) to one identical wire size', async () => {
+    const frames = [...packFrames(new Uint8Array(1500)), coverFrame()];
+    const wires = await Promise.all(frames.map(f => seal(master, f, { exact: true })));
+    expect(new Set(wires.map(w => w.length)).size).toBe(1);
+  });
+
+  it('an empty payload still produces one whole frame', () => {
+    const frames = packFrames(new Uint8Array(0));
+    expect(frames.length).toBe(1);
+    expect(frames[0].length).toBe(FRAME_PAYLOAD);
+    expect(unpackFrames(frames).length).toBe(0);
+  });
+});
+
 describe('corosSelfTest — the end-to-end invariant check', () => {
-  it('passes every invariant', async () => {
+  it('passes every invariant, including both regulators', async () => {
     const r = await corosSelfTest();
     expect(r.ok).toBe(true);
     expect(r.roundtrips).toBe(4);
     expect(r.tamper_rejected).toBe(true);
     expect(r.wrong_key_rejected).toBe(true);
     expect(r.wire_band_ok).toBe(true);
+    expect(r.ratchet_ok).toBe(true);
+    expect(r.constant_rate_ok).toBe(true);
   });
 });
