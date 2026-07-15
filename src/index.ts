@@ -38,6 +38,7 @@ import {
 import { corosSelfTest } from './helix';
 import { torusSyncSelfTest } from './torus-sync';
 import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
+import { mixingReport } from './hyperbolic-mixing';
 import { handleMadmind } from './madmind';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
@@ -1634,6 +1635,13 @@ export default {
     if (path === '/api/elle-hyperbolic-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await hyperbolicSyncSelfTest());
+    }
+    // Mixing diagnostics — measured, not asserted: the largest Lyapunov
+    // exponent of the hyperbolic walk vs. the flat-torus control, plus
+    // state-space coverage. Honest numbers behind the "bounded walk" claim.
+    if (path === '/api/elle-mixing-report') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(mixingReport());
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }

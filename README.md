@@ -490,8 +490,10 @@ to Elle by construction. `main` auto-deploys via
 | `helix.ts` | COROS signal crypto tunnel: AES-256-GCM + φ-corkscrew covertness (length-hiding, whitening) + forward ratchet + constant-rate framing |
 | `torus-sync.ts` | counter-free torus-oscillator sync over COROS: free-running golden winding + AEAD-gated forward-search resync (flat spine for the hyperbolic variant) |
 | `hyperbolic-sync.ts` | the hyperbolic-geodesic ("Einstein-Rosen") sync: Poincaré-disk geodesic walk + curvature-warped clock, same spine as torus-sync |
+| `hyperbolic-mixing.ts` | mixing diagnostics: measured Lyapunov exponent (hyperbolic vs. flat-torus control) + state-space coverage — numbers, not adjectives |
 | `corpus/**/*.md` | version-controlled corpus seed documents |
 | `docs/WAR_ROOM_TODO.md` | the paused War Room / Duelist build note |
 | `docs/SECURITY_ARCHITECTURE.md` | the Witness & the Corkscrew — security network + signal crypto tunnel, system-wide |
 | `docs/TORUS_SYNC.md` | counter-free torus-oscillator sync over COROS + the hyperbolic-geodesic next rung |
 | `docs/HYPERBOLIC_BRIDGE.md` | the Einstein-Rosen rung: Poincaré-disk geodesic sync, honest physics, the numerical-determinism caveat |
+| `docs/MIXING_DIAGNOSTICS.md` | measuring the walk: Lyapunov divergence + coverage, with the honest correction of the "empirical mixing" overclaim |
