@@ -69,11 +69,26 @@ describe('regulate — the Lyapunov descent (pure)', () => {
 });
 
 describe('perturbation-φ oscillation — escaping a dissonance well', () => {
-  it('plain descent stalls in the local well; the φ-perturbation crosses to the global well', () => {
+  it('plain descent stalls below the barrier; the φ-perturbation crosses to the global well', () => {
     const d = ruggedEscapeDemo();
-    expect(d.descent_only).toBeLessThan(0);              // stuck on the wrong side
+    expect(d.descent_only).toBeLessThan(d.barrier_x);    // stuck below the barrier top
     expect(d.with_perturbation).toBeGreaterThan(0.5);    // escaped to the global minimum
     expect(d.perturbation_escaped).toBe(true);
+  });
+
+  it('the barrier geometry is derived from the calculus, not tuned', () => {
+    const d = ruggedEscapeDemo();
+    // U(x) = (x²−1)² − tilt·x with tilt 1.2: the three critical points, in order
+    expect(d.spurious_x).toBeLessThan(d.barrier_x);
+    expect(d.barrier_x).toBeLessThan(d.target_x);
+    expect(d.barrier_height).toBeGreaterThan(0);         // there really is a barrier to cross
+    expect(d.target_x).toBeGreaterThan(0.9);             // global min near +1
+  });
+
+  it('the escape amplitude is MEASURED (a real threshold), and the demo runs just above it', () => {
+    const d = ruggedEscapeDemo();
+    expect(d.escape_threshold_amp).toBeGreaterThan(0);   // a real amplitude was found by the sweep
+    expect(d.demo_amp).toBeCloseTo(d.escape_threshold_amp * 1.3, 6); // stated margin, not a magic constant
   });
 });
 

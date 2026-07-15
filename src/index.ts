@@ -45,6 +45,7 @@ import { scaffoldSelfTest } from './scaffold';
 import { regulatorSelfTest } from './regulator';
 import { phaseVesselSelfTest } from './phase-vessel';
 import { witnessOscillatorSelfTest } from './witness-oscillator';
+import { cognitiveObliquitySelfTest } from './cognitive-obliquity';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1704,6 +1705,16 @@ export default {
     if (path === '/api/elle-witness-oscillator-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(witnessOscillatorSelfTest());
+    }
+    // Cognitive-obliquity self-test — a slow orientation parameter R(θ) over
+    // x_{t+1}=F(x_t,R(θ)u_t): θ reallocates which class of information gets
+    // integrated (cos²(θ), same F) but ONLY where a preferred axis exists —
+    // isotropic input gives a null. Evolves far slower than x. Ships with its
+    // own falsification shape (detectable in structured domains, null in novel
+    // ones). A hypothesis with a test, verified in-model — not a claim about brains.
+    if (path === '/api/elle-cognitive-obliquity-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(cognitiveObliquitySelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any

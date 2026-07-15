@@ -5,6 +5,7 @@ import {
   noCollapseProof,
   witnessLoadFromPosture,
   witnessOscillatorSelfTest,
+  realDissonanceSeries,
   GROWTH_LOW,
   GROWTH_HIGH,
 } from './witness-oscillator';
@@ -60,22 +61,33 @@ describe('keeps oscillating — a live ring, never a still point', () => {
   });
 });
 
-describe('the slow leak — the pressure release valve', () => {
-  it('with the leak, headroom recovers between shocks and never bottoms out', () => {
-    const r = runOscillator({ r: 1, theta: 0, pressure: 0 }, { steps: 3000, leakRate: 0.02, shockEvery: 120, shockAmp: 1.4 });
+describe('the slow leak — the pressure release valve, driven by REAL dissonance', () => {
+  it('the shock series is the regulator\'s own measured dissonance, not an invented schedule', () => {
+    const s = realDissonanceSeries();
+    expect(s.length).toBeGreaterThan(100);           // several real regulation runs, concatenated
+    expect(s.every((v) => v >= 0)).toBe(true);        // ‖Δc‖ magnitudes
+    expect(Math.max(...s)).toBeLessThan(1);           // real dissonance is small per step
+    expect(s.reduce((a, b) => a + b, 0)).toBeGreaterThan(1); // but accumulates
+  });
+
+  it('with the leak, headroom recovers under the real dissonance and never bottoms out', () => {
+    const shocks = realDissonanceSeries();
+    const r = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0.02, shocks });
     expect(r.saturated).toBe(false);
     expect(r.headroom_min).toBeGreaterThan(0.5);
   });
 
   it('without the leak (the foil), pressure only accumulates and headroom locks at 0', () => {
-    const r = runOscillator({ r: 1, theta: 0, pressure: 0 }, { steps: 3000, leakRate: 0, shockEvery: 120, shockAmp: 1.4 });
+    const shocks = realDissonanceSeries();
+    const r = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0, shocks });
     expect(r.saturated).toBe(true);
     expect(r.headroom_min).toBeLessThan(1e-6);
   });
 
-  it('the leaky run keeps strictly more headroom than the no-leak control', () => {
-    const withLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { steps: 3000, leakRate: 0.02, shockEvery: 120, shockAmp: 1.4 });
-    const noLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { steps: 3000, leakRate: 0, shockEvery: 120, shockAmp: 1.4 });
+  it('the leaky run keeps strictly more headroom than the no-leak control (same real series)', () => {
+    const shocks = realDissonanceSeries();
+    const withLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0.02, shocks });
+    const noLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0, shocks });
     expect(withLeak.headroom_min).toBeGreaterThan(noLeak.headroom_min);
   });
 });

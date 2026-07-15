@@ -108,3 +108,17 @@ cognition should minimize stays the open bet the PAMI falsification conditions
 exist to test. What is real and checked is the certificate — descent,
 conservation, isotropy, convergence — and where it reaches past that, the code
 says so and stops.
+
+## Addendum — the escape demo is derived, not tuned
+
+An earlier version of `ruggedEscapeDemo()` hard-coded the well shape and the
+perturbation amplitude to values that happened to make the escape assertion pass
+— a tuned constant wearing the costume of a result. That is fixed. Now: the
+barrier geometry (`spurious_x`, `barrier_x`, `target_x`, `barrier_height`) is
+computed from the real roots of `U′(x) = 4x³ − 4x − tilt = 0`; the escape
+amplitude is **measured** by sweeping until crossing actually begins
+(`escape_threshold_amp`); and the demo runs at a stated `1.3×` margin above that
+measured threshold. The only free number left is `tilt` itself, which is an
+honest *shape* parameter (how asymmetric the planted well is), not a value fit to
+the outcome. A test asserts `demo_amp == escape_threshold_amp × 1.3`, so a future
+magic constant would fail.

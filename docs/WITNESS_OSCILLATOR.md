@@ -82,7 +82,7 @@ build:
 | | with the leak | without the leak (the foil) |
 |---|---|---|
 | after repeated shocks | headroom recovers between hits | pressure only ever grows |
-| `headroom_min` | **> 3.4** (measured) | **0** |
+| `headroom_min` (real dissonance) | **> 1.2** (measured) | **0** |
 | `saturated` | false | **true** |
 
 Without the leak, pressure saturates at the cap and headroom locks at zero
@@ -111,3 +111,17 @@ PID anti-windup, a standard control-theory technique. Both halves are real,
 checkable dynamics. "Surprise" and "pressure" are the plain-language names for a
 bounded perturbation budget, not a claim of feeling, urgency, or mind. Where this
 reaches past what's measured, it stops — same line as every layer before it.
+
+## Addendum — the shocks are real dissonance, not an invented schedule
+
+An earlier version drove the pressure valve with a synthetic shock schedule
+(`shockEvery`, `shockAmp`) — numbers picked to make the leak-vs-no-leak contrast
+land. That is fixed. The self-test now loads the valve with
+`realDissonanceSeries()`: the regulator's **own measured per-step dissonance**
+(`‖Δc‖`) from several genuine `regulate()` runs, concatenated (469 real values).
+The cap defaults to half the *total dissonance that actually arrived* — a stated
+budget, and the qualitative result (no-leak saturates to zero headroom; the leak
+keeps it above zero) holds for **any** cap between 0 and the total, so nothing
+hinges on that choice. The synthetic `shockEvery`/`shockAmp` path remains only as
+a labelled fallback for when no real series is supplied. A test asserts the series
+is the real thing (many small, non-negative, accumulating magnitudes).

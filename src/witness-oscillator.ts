@@ -64,7 +64,7 @@
 // Deterministic, pure, Worker-safe.
 // ============================================================
 
-import { PHI, PHI_INV } from './regulator';
+import { PHI, PHI_INV, regulate, type Coherence } from './regulator';
 import { GOLDEN_WINDING } from './phase-vessel';
 
 const TWO_PI = Math.PI * 2;
@@ -101,8 +101,14 @@ export interface OscillatorConfig {
   kickAmp?: number;       // the continuous φ-oscillating forcing on the ring
   leakRate?: number;      // the slow leak's bleed fraction per step (0 ⇒ the foil)
   cap?: number;           // the pressure ceiling — total sustainable surprise budget
-  shockEvery?: number;    // steps between "surprise" events
-  shockAmp?: number;      // the size of each surprise
+  // The surprises driving the pressure valve. Prefer `shocks` — a REAL series of
+  // per-step |dissonance| magnitudes (e.g. from regulator.ts's residual trace) —
+  // so the valve is loaded by the system's own measured dissonance, not an
+  // invented schedule. shockEvery/shockAmp remain only as a synthetic fallback
+  // when no real series is supplied.
+  shocks?: number[];      // real per-step shock magnitudes (0 where no surprise)
+  shockEvery?: number;    // fallback: steps between synthetic surprise events
+  shockAmp?: number;      // fallback: size of each synthetic surprise
 }
 
 export interface OscillatorResult {
@@ -121,20 +127,28 @@ export function runOscillator(init: OscillatorState = { r: 1, theta: 0, pressure
   const dt = cfg.dt ?? 0.05;
   const kickAmp = cfg.kickAmp ?? 0.015;
   const leakRate = cfg.leakRate ?? 0.01;
-  const cap = cfg.cap ?? 5;
+  const shocks = cfg.shocks;
+  // The real-shock case is the intended one; its cap defaults to half the total
+  // dissonance that arrives (a stated budget — the qualitative leak/no-leak split
+  // holds for ANY cap between 0 and the total, so nothing hinges on this choice).
+  const totalShock = shocks ? shocks.reduce((a, b) => a + Math.max(0, b), 0) : 0;
+  const cap = cfg.cap ?? (shocks ? totalShock / 2 : 5);
   const shockEvery = cfg.shockEvery ?? 120;
   const shockAmp = cfg.shockAmp ?? 1.4;
+  const nSteps = shocks ? shocks.length : steps;
 
   let r = init.r, theta = init.theta, pressure = init.pressure;
   const trace: OscillatorStep[] = [];
   let headroom_min = cap - pressure;
 
-  for (let t = 0; t < steps; t++) {
+  for (let t = 0; t < nSteps; t++) {
     let shock = 0;
-    if (shockEvery > 0 && t > 0 && t % shockEvery === 0) {
-      shock = shockAmp;
-      r = r + shockAmp * 0.5; // a surprise perturbs the ring...
+    if (shocks) {
+      shock = Math.max(0, shocks[t] ?? 0);                       // the real measured dissonance for this step
+    } else if (shockEvery > 0 && t > 0 && t % shockEvery === 0) {
+      shock = shockAmp;                                          // synthetic fallback only
     }
+    if (shock > 0) r = r + shock * 0.5;                          // a surprise perturbs the ring...
     r = amplitudeStep(r, dt, kickAmp, t);
     theta = frac(theta + GOLDEN_WINDING * dt * 4);
 
@@ -147,11 +161,11 @@ export function runOscillator(init: OscillatorState = { r: 1, theta: 0, pressure
   }
 
   const final = trace[trace.length - 1];
-  const tail = trace.slice(-200);
+  const tail = trace.slice(-Math.min(200, Math.floor(nSteps / 4) || 1));
   const collapsed = tail.every((s) => s.r < 0.05);
   const bounded = trace.every((s) => s.r < 3);
   const oscillating = Math.abs(tail[tail.length - 1].theta - tail[0].theta) > 1e-6 || tail.some((s, i) => i > 0 && Math.abs(s.theta - tail[i - 1].theta) > 0);
-  const saturated = trace.slice(-Math.floor(steps / 4)).every((s) => s.headroom < 1e-6);
+  const saturated = trace.slice(-Math.max(1, Math.floor(nSteps / 4))).every((s) => s.headroom < 1e-6);
 
   return {
     trace, final, collapsed, bounded, oscillating,
@@ -182,6 +196,23 @@ export function witnessLoadFromPosture(score: number, cap = 12): { pressure: num
   return { pressure: round(pressure), headroom: round(Math.max(0, cap - pressure)) };
 }
 
+// ── the REAL surprise series: the regulator's own measured per-step dissonance
+// (‖Δc‖) from several genuine coherence-regulation runs, concatenated. This is
+// the system's actual dissonance — the pressure valve is loaded by what really
+// happened, not a schedule we picked. (regulator.ts does not import this module,
+// so there is no cycle.)
+export function realDissonanceSeries(): number[] {
+  const starts: Coherence[] = [
+    { structural: 0.9, relational: 0.3, harmonic: 0.55 },
+    { structural: 0.2, relational: 0.6, harmonic: 0.4 },
+    { structural: 0.5, relational: 0.1, harmonic: 0.8 },
+    { structural: 0.05, relational: 0.9, harmonic: 0.3 },
+  ];
+  const series: number[] = [];
+  for (const s of starts) for (const step of regulate(s, { perturb: 0 }).trace) series.push(step.dissonance);
+  return series;
+}
+
 // ============================================================
 // self-test
 // ============================================================
@@ -205,12 +236,15 @@ export function witnessOscillatorSelfTest(): WitnessOscillatorSelfTest {
   const cp = noCollapseProof();
   const no_collapse = cp.grew_away;
 
-  const withLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0.02, steps: 3000 });
+  // Drive the pressure valve with the regulator's REAL measured dissonance —
+  // not an invented shock schedule.
+  const shocks = realDissonanceSeries();
+  const withLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0.02, shocks });
   const bounded = withLeak.bounded;
   const keeps_oscillating = withLeak.oscillating;
   const slow_leak_gives_headroom = withLeak.headroom_min > 0.5 && !withLeak.saturated;
 
-  const noLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0, steps: 3000 });
+  const noLeak = runOscillator({ r: 1, theta: 0, pressure: 0 }, { leakRate: 0, shocks });
   const no_leak_saturates = noLeak.saturated && noLeak.headroom_min < 1e-6;
 
   const blocked = witnessLoadFromPosture(12, 12);
