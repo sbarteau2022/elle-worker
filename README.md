@@ -497,6 +497,7 @@ to Elle by construction. `main` auto-deploys via
 | `hyperbolic-sync-fixed.ts` | the hyperbolic-geodesic sync rebuilt on fixed-math.ts — cross-platform-safe counterpart to hyperbolic-sync.ts |
 | `signal-collapse.ts` | burn-on-breach (observable evidence → immediate lockout, tied to the Witness) + ECDH rekey (real post-compromise recovery) |
 | `coherence-layer.ts` | depth/relational decoupling, measured: derivation edges = deep hierarchy, recognition edges = small-world coherence shortcut; quantifies the path-length gain on a real graph |
+| `harmonic-coherence.ts` | the grounding gate: harmonic (phase-tolerant) coherence + four verdicts that keep self-consistency and correspondence structurally distinct — `grounded` is unreachable without a world-coupled channel |
 | `lattice.ts` | The Lattice: 32-axis, 3-layer security deduction engine — Seed of Life (7) + Flower of Life (12) fire in parallel, Fruit of Life (11) reads both, Validation + The Reckoning (axis 32) fire last, sequentially — a deliberate on-demand deep read, beside the fast Witness, not instead of it |
 | `corpus/**/*.md` | version-controlled corpus seed documents |
 | `docs/WAR_ROOM_TODO.md` | the paused War Room / Duelist build note |
@@ -506,4 +507,5 @@ to Elle by construction. `main` auto-deploys via
 | `docs/MIXING_DIAGNOSTICS.md` | measuring the walk: Lyapunov divergence + coverage, with the honest correction of the "empirical mixing" overclaim |
 | `docs/SIGNAL_COLLAPSE_AND_FIXED_MATH.md` | plain-language: the fixed-point/CORDIC core (+ 3 bugs caught before shipping) and what "the signal collapses on breach" honestly means — burn-on-breach + real key-healing vs. the undetectable-passive-listener line |
 | `docs/THE_COHERENCE_LAYER.md` | the depth/relational decoupling measured: deep derivation hierarchy + small-world recognition shortcut, the coherence gain quantified, and a modeling error the self-test caught |
+| `docs/HARMONIC_GROUNDING.md` | consistency ≠ correspondence: the harmonic grounding gate whose four verdicts keep them distinct, why `grounded` needs a world-coupled channel, and the honest limit on what that grounds |
 | `docs/THE_LATTICE.md` | The Lattice: 32-axis security deduction engine — the Flower-of-Life layer counts explained precisely, the message-passing-GNN analogy, and how The Reckoning speaks the Witness's own vocabulary |

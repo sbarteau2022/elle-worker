@@ -40,6 +40,7 @@ import { torusSyncSelfTest } from './torus-sync';
 import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { mixingReport } from './hyperbolic-mixing';
 import { coherenceSelfTest } from './coherence-layer';
+import { harmonicSelfTest } from './harmonic-coherence';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1653,6 +1654,13 @@ export default {
     if (path === '/api/elle-coherence-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(coherenceSelfTest());
+    }
+    // Harmonic-grounding self-test — the belief-update gate whose four verdicts
+    // keep self-consistency and grounding structurally distinct: `grounded` is
+    // unreachable without a world-coupled external channel.
+    if (path === '/api/elle-grounding-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(harmonicSelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any
