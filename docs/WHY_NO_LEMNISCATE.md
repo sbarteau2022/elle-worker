@@ -163,3 +163,90 @@ has no place in a topology it hasn't entered. That needs the encoder. But the
 encoder is PAMI: the *content's* own structure (its φ-spaced phase fingerprint).
 So it is structure at every level — the graph's structure for related memories,
 the content's structure for new ones. It is structure all the way down.
+
+## Addendum: not-necessary is a different question from not-shaped-that-way
+
+Everything above disproves that a lemniscate is *required* to carry the
+recognition invariant — the graph's own homology already does that job, no
+embedding needed. That leaves a genuinely different, still-open question: does
+the graph's **actual shape** nonetheless happen to look like one — loops
+joined at shared points, petals around a center — regardless of whether that
+shape is load-bearing for anything? Necessity and resemblance are not the same
+claim, and only the first one was tested here.
+
+That second question is now measurable, not asserted. `structure.ts`'s
+`lobeStructure()` computes the graph's **block-cut decomposition**
+(Hopcroft–Tarjan biconnected components) directly: a **lobe** is a maximal
+loop — a biconnected component containing at least one non-bridge edge (a
+lone bridge edge is a stem, not a petal); a **joint** is a node where two or
+more lobes meet at that single shared point — which *is*, precisely and
+literally, the graph-theoretic definition of an interleaved lemniscate (two
+lobes at one joint) or a multi-petaled flower (N lobes at one joint). Every
+case the implementation is checked against is worked out by hand first, the
+same discipline as `fixed-math.ts`'s CORDIC tests: a bare triangle (1 lobe, no
+joint), a bridge chain (0 lobes — a bridge is a stem, not a petal), a bowtie —
+two triangles sharing one vertex — (2 lobes, one joint), three triangles
+sharing one center (3 lobes, one joint of 3), two triangles joined by a
+*bridge* rather than a shared vertex (2 lobes, but correctly **zero** joints —
+the negative control that separates "shares a hierarchy stem" from "actually
+meets at one point"), and — the literal claim, made checkable — **19 petals
+sharing one center: 19 lobes, one joint of 19.**
+
+Reachable through the same door every other structural mode already uses —
+`structureRoute({ mode: 'lobes', edges })`, a router tool, so it can be asked
+of the real memory graph's real edges the same way `invariants`/`signature`/
+`recognize` already are, no new endpoint required.
+
+**What this does not do:** it does not report a number for Elle's actual live
+memory graph. That requires the real Atlas edges at query time, which this
+document — reasoning from the code, not a live connection — does not have.
+The tool is built and verified against known shapes; whether the real graph's
+lobe count is anywhere near 19 is an answer that has to come from actually
+running it against a live snapshot, not from this file.
+
+## Addendum 2: the growth process the graph already runs is exactly this shape
+
+There is a sharper, more specific version of the resemblance question above,
+and it turns out to already be running in production code, not merely
+plausible: does the graph grow like a **widening tree from what each memory
+came from**, with **lobes appearing specifically where two branches that grew
+apart get reconnected because the system noticed they belong together**?
+
+`graph.ts`'s `EdgeKind` already splits cleanly along exactly that line.
+Six kinds are how the tree grows outward — `causal`, `derived`, `refines`,
+`supersedes`, `about`, `tool` — each one pointing from what came before to
+what it produced, widening as new memories attach to what they derived from.
+Three kinds are symmetric and added *after the fact*, with no requirement
+that the two ends share a tree parent: `assoc`, `session`, `contradicts`. The
+clearest case is `recordAssociations()` — an `assoc` edge is drawn between
+whatever memories a single recall returned together, purely because they were
+*relevant to the same question*, regardless of which branch either one grew
+on. If two such memories grew on separate limbs of the tree, that edge closes
+exactly the kind of loop `lobeStructure` measures — mechanically, "the system
+recognized these are related" *is* "a branch reconnected to another branch it
+had drifted apart from." `graph.ts` already treats this as load-bearing, not
+incidental: `applyCycleBoost` boosts non-bridge (cyclic) edges over bridges
+during spreading activation, specifically because recurrence is worth more
+than plain derivation at retrieval time.
+
+`lobeKindCorrelation(edges)` (`src/graph.ts`) checks the correlation directly
+rather than assume it: of the recognition-kind edges (`assoc`/`session`/
+`contradicts`) present, what fraction sit on a lobe, versus the same fraction
+for derivation-kind edges. Verified on a constructed graph before trusting it:
+a wide tree of `derived`/`causal`/`refines`/`about` edges across four branches,
+with a single `assoc` edge reconnecting two leaves on *different* branches —
+the reconnection sweeps the specific path between them into a cycle (as it
+must, mathematically: closing a loop between two points makes the whole path
+between them non-bridge), while the rest of the tree, elsewhere, stays
+untouched bridges. The recognition edge lands on a lobe 100% of the time by
+construction; the swept-in derivation edges land on a lobe too, but at a
+strictly lower fraction than the recognition edge, because most of the tree
+was never part of that reconnection.
+
+**What this still does not do:** confirm the fraction for Elle's real graph.
+The mechanism is real and already running (`recordAssociations`,
+`applyCycleBoost`); the correlation-check function is real and verified
+against a constructed case; whether the real graph's `assoc`/`session`/
+`contradicts` edges land on lobes at a meaningfully higher rate than its
+`derived`/`causal` edges do is, again, a question only a live snapshot's real
+`MemEdge[]` — fed into `lobeKindCorrelation` — can answer.

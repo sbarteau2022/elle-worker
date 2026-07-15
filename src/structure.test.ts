@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   graphInvariants, cycleBasis, homologyClass, sameRecurrenceClass,
-  deltaHyperbolicity, curvatureSignature, nonBridgeEdges, edgeKey, asEdges, type Edge,
+  deltaHyperbolicity, curvatureSignature, nonBridgeEdges, lobeStructure, edgeKey, asEdges, type Edge,
 } from './structure';
 import type { MemEdge } from './graph';
 
@@ -130,5 +130,69 @@ describe('asEdges', () => {
   it('projects MemEdge[] onto the structural edge list', () => {
     const mem: MemEdge[] = [{ src: 'a', dst: 'b', kind: 'assoc', weight: 2 }];
     expect(asEdges(mem)).toEqual([{ src: 'a', dst: 'b' }]);
+  });
+});
+
+// ── lobe structure — does the graph's actual shape decompose into loops
+// joined at single points ("petals around a center", an interleaved
+// lemniscate)? A different question from the recognition-invariant result
+// above: that result shows a lemniscate isn't NECESSARY. This measures
+// whether the graph nonetheless happens to look like one. Every case here is
+// worked out by hand before being asserted — the same discipline as
+// fixed-math.ts's CORDIC tests.
+describe('lobeStructure — block-cut decomposition (Hopcroft–Tarjan)', () => {
+  it('a single triangle is one lobe with no articulation point', () => {
+    const r = lobeStructure([E('A', 'B'), E('B', 'C'), E('C', 'A')]);
+    expect(r.lobes).toBe(1);
+    expect(r.articulation_points).toBe(0);
+    expect(r.joints).toEqual([]);
+  });
+  it('a bare bridge chain has zero lobes — every block is a bridge, not a petal', () => {
+    const r = lobeStructure([E('A', 'B'), E('B', 'C')]);
+    expect(r.lobes).toBe(0);
+    expect(r.bridge_blocks).toBe(2);
+    expect(r.articulation_points).toBe(1); // B cuts the chain
+  });
+  it('a plain tree: every block is a bridge, zero lobes', () => {
+    const r = lobeStructure([E('A', 'B'), E('B', 'C'), E('B', 'D'), E('D', 'E')]);
+    expect(r.lobes).toBe(0);
+    expect(r.bridge_blocks).toBe(4);
+  });
+  it('a bowtie — two triangles sharing one vertex — is the literal graph lemniscate: 2 lobes, one joint', () => {
+    const r = lobeStructure([
+      E('A', 'B'), E('B', 'C'), E('C', 'A'),
+      E('C', 'D'), E('D', 'E'), E('E', 'C'),
+    ]);
+    expect(r.lobes).toBe(2);
+    expect(r.joints).toEqual([{ node: 'C', lobe_count: 2 }]);
+  });
+  it('three triangles sharing one center is a literal 3-petal flower: 3 lobes, one joint of 3', () => {
+    const r = lobeStructure([
+      E('O', 'A'), E('A', 'B'), E('B', 'O'),
+      E('O', 'C'), E('C', 'D'), E('D', 'O'),
+      E('O', 'E'), E('E', 'F'), E('F', 'O'),
+    ]);
+    expect(r.lobes).toBe(3);
+    expect(r.joints).toEqual([{ node: 'O', lobe_count: 3 }]);
+  });
+  it('two triangles joined by a BRIDGE (not sharing a vertex) is NOT a lemniscate joint', () => {
+    const r = lobeStructure([
+      E('A', 'B'), E('B', 'C'), E('C', 'A'),
+      E('C', 'X'), // the bridge
+      E('X', 'D'), E('D', 'E'), E('E', 'X'),
+    ]);
+    expect(r.lobes).toBe(2);
+    expect(r.bridge_blocks).toBe(1);
+    expect(r.joints).toEqual([]); // C and X each touch 1 lobe + 1 bridge — not 2 lobes at one point
+  });
+  it('exactly 19 petals sharing one center: 19 lobes, one joint of 19 — the literal claim, checkable', () => {
+    const edges: Edge[] = [];
+    for (let i = 0; i < 19; i++) {
+      const a = `p${i}a`, b = `p${i}b`;
+      edges.push(E('O', a), E(a, b), E(b, 'O'));
+    }
+    const r = lobeStructure(edges);
+    expect(r.lobes).toBe(19);
+    expect(r.joints).toEqual([{ node: 'O', lobe_count: 19 }]);
   });
 });

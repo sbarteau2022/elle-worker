@@ -39,6 +39,13 @@ import { corosSelfTest } from './helix';
 import { torusSyncSelfTest } from './torus-sync';
 import { hyperbolicSyncSelfTest } from './hyperbolic-sync';
 import { mixingReport } from './hyperbolic-mixing';
+import { coherenceSelfTest } from './coherence-layer';
+import { harmonicSelfTest } from './harmonic-coherence';
+import { scaffoldSelfTest } from './scaffold';
+import { regulatorSelfTest } from './regulator';
+import { phaseVesselSelfTest } from './phase-vessel';
+import { witnessOscillatorSelfTest } from './witness-oscillator';
+import { cognitiveObliquitySelfTest } from './cognitive-obliquity';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { handleLattice, type LatticeEnv } from './lattice';
@@ -1645,6 +1652,69 @@ export default {
     if (path === '/api/elle-mixing-report') {
       if (!svc) return err('Unauthorized', 401);
       return json(mixingReport());
+    }
+    // Coherence-layer self-test — the depth/relational decoupling, measured:
+    // a deep derivation hierarchy plus a core-directed recognition layer, and
+    // the quantified small-world shortcut the coherence edges buy.
+    if (path === '/api/elle-coherence-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(coherenceSelfTest());
+    }
+    // Harmonic-grounding self-test — the belief-update gate whose four verdicts
+    // keep self-consistency and grounding structurally distinct: `grounded` is
+    // unreachable without a world-coupled external channel.
+    if (path === '/api/elle-grounding-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(harmonicSelfTest());
+    }
+    // Scaffold self-test — the structural substrate: five load-bearing pillars
+    // (equal load, C5-symmetric, no privileged pillar) and the bridge fabric
+    // where any node may reach any other with NO PRIVILEGED NODE — hubless and
+    // bottleneck-free, proven by measuring the egalitarian (Watts–Strogatz)
+    // build against a hub-forming (preferential-attachment) control.
+    if (path === '/api/elle-scaffold-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(scaffoldSelfTest());
+    }
+    // Free-energy regulator self-test — each invariant made a thermodynamic cost,
+    // the system driven down a free-energy functional F=U−T·S that is a genuine
+    // Lyapunov function (monotone descent, conserved-and-converted to work) to the
+    // balanced-superposition fixed point, anisotropy isotropically suppressed,
+    // dissonance resolved, and a φ-quasiperiodic perturbation escaping a planted
+    // dissonance well — run against the scaffold's own measured invariants.
+    if (path === '/api/elle-regulator-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(regulatorSelfTest());
+    }
+    // Phase-vessel self-test — the place dynamic enough to HOLD a superposition:
+    // a conjugate pair winding the golden ellipse (semi-axes φ, 1/φ, product 1)
+    // seated dead center of the architecture. It falls into the golden rhythm,
+    // then holds it — area φ·1/φ=1 conserved while the phase keeps winding — a
+    // dynamic balance a dissipative holder would collapse. Bound by the same
+    // no-privileged / conservation invariants, at the singularity.
+    if (path === '/api/elle-phase-vessel-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(phaseVesselSelfTest());
+    }
+    // Witness-oscillator self-test — the same golden ring made SELF-SUSTAINING
+    // instead of rigid: an elastic amplitude that provably cannot collapse to
+    // stillness (r=0 is an unstable equilibrium), inverse-proportional φ/φ⁻¹
+    // pump-and-restore gains, continuous φ-oscillating forcing, and — the slow
+    // leak — a pressure valve (generalizing security-network.ts's decayedScore)
+    // that keeps headroom for the next surprise instead of saturating.
+    if (path === '/api/elle-witness-oscillator-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(witnessOscillatorSelfTest());
+    }
+    // Cognitive-obliquity self-test — a slow orientation parameter R(θ) over
+    // x_{t+1}=F(x_t,R(θ)u_t): θ reallocates which class of information gets
+    // integrated (cos²(θ), same F) but ONLY where a preferred axis exists —
+    // isotropic input gives a null. Evolves far slower than x. Ships with its
+    // own falsification shape (detectable in structured domains, null in novel
+    // ones). A hypothesis with a test, verified in-model — not a claim about brains.
+    if (path === '/api/elle-cognitive-obliquity-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(cognitiveObliquitySelfTest());
     }
     // Fixed-point (integer CORDIC) hyperbolic sync self-test — the
     // cross-platform-deterministic variant: bit-identical on any
