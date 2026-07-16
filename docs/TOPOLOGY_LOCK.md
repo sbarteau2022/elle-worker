@@ -101,14 +101,17 @@ the same honest limit the original single `'primary'` lane always had.
 - `GET /api/elle-sandbox-registry-selftest` — the registry's stability logic,
   proven on constructed job logs (no D1 needed).
 
-## Not yet done — stated plainly
+## Wired into the router
 
-This ships the registry and its stability check as callable HTTP endpoints. It
-does **not** yet add a first-class ReAct tool entry in `router.ts` (a
-`toolAllowed` scope row, a tool description, a dispatch case) — that is a
-further, separate integration, deliberately left for its own careful pass
-rather than folded into this one, the same discipline used when the reasoning
-pass was wired into the router as its own dedicated change.
+The registry is now callable both as HTTP endpoints (above) and as a
+first-class ReAct tool: `sandbox_lane(action,...)` in `router.ts` — `create`,
+`list`, `remove`, `report`, and `stability` passing straight through, and
+`dispatch` deliberately narrowed to CODE execution only (`mode` is hardcoded,
+never `shell`) so the tool can't reach `run_shell`'s denied power through a
+back door in scopes where `run_shell` itself is off (see `SHIP_DENY` in
+`router.ts`). Same scope tier as `sandbox_status`/`sandbox_clone`/
+`sandbox_report` — available in `full` and `cofounder`, absent from
+`member`/`public`/`hospitality`.
 
 ## The boundary, unchanged
 
