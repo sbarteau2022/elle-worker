@@ -1,13 +1,16 @@
-# Lane Envelope — a play on the Rosen bridge, honestly separated from the WebSocket
+# Lane Envelope — a play on the Rosen bridge, now the live envelope over the bus
 
 **"I'm curious about a play on the Rosen bridge instead of a websocket, or use
-the signal sender we built a few turns ago" — the honest answer composes
-both and replaces neither. The WebSocket in `connect-sandbox.ts` stays; what's
-built here is a real, tested envelope that could ride on top of it.**
+the signal sender we built a few turns ago" — the honest answer composes both
+and replaces neither the crypto's own math nor the need for SOME channel. What
+it did replace, in a later pass (`SESSION_BUS.md`): the WebSocket itself, in
+favor of a stateless poll. This module is that poll's envelope, live in
+production, not a proven-in-isolation primitive anymore.**
 
 Code: `src/lane-envelope.ts` · tests (6) · self-test
 `GET /api/elle-lane-envelope-selftest` · builds on `src/helix.ts` (COROS) and
-`src/hyperbolic-sync.ts` (hyperbolic-geodesic sync) · 2026
+`src/hyperbolic-sync.ts` (hyperbolic-geodesic sync) · consumed by
+`src/session-bus.ts` · 2026
 
 ---
 
@@ -17,13 +20,16 @@ Code: `src/lane-envelope.ts` · tests (6) · self-test
 been careful to keep apart everywhere else:
 
 - **Transport** — how bytes actually move between the worker and the
-  laptop. That is, and stays, the WebSocket held by the `SandboxAgent`
-  Durable Object (`connect-sandbox.ts`), over TLS. Nothing in this module
-  moves a bit without that channel — the no-communication theorem holds, as
-  `hyperbolic-sync.ts`'s own header already states plainly.
+  laptop. Originally the WebSocket held by the `SandboxAgent` Durable
+  Object; now a stateless HTTPS poll (`session-bus.ts` — see
+  `SESSION_BUS.md`), over TLS either way. Nothing in this module moves a bit
+  without SOME channel — the no-communication theorem holds, as
+  `hyperbolic-sync.ts`'s own header already states plainly — but which
+  channel carries the sealed bytes changed in a later pass, and this module
+  didn't need to change at all when it did.
 - **Envelope** — what those bytes look like before they're sent, and how the
   keys that seal them are agreed on. This IS a real place to build, and this
-  module builds it.
+  module builds it, unchanged underneath the transport swap.
 
 The "signal sender" (`helix.ts`, COROS) supplies confidentiality and
 covertness: AES-256-GCM, corkscrew-padded, whole-or-nothing. The "Rosen
@@ -70,28 +76,18 @@ Every one of these reuses `hyperbolic-sync.ts`'s already-proven primitives
 this module doesn't reimplement any of that; it only adds the per-lane HKDF
 derivation and the JSON payload framing a dispatch call needs.
 
-## Not yet done — stated plainly
+## Now live — the socket is gone, this envelope is what's left underneath
 
-This seals and opens payloads in isolation, proven against itself. It is
-**not** wired into the live path: `laneDispatch()` in `sandbox-registry.ts`
-still calls `dispatchToLane()`, which still sends plain JSON over the
-WebSocket to the `SandboxAgent` Durable Object, which still forwards it
-verbatim to whatever laptop client is connected. Making the live dispatch
-path actually sealed would require **both** ends to speak this protocol:
-
-- the DO's `dispatch()` in `sandbox-agent.ts` (this repo) would need to
-  accept a sealed job type and forward the wire bytes as-is instead of
-  parsing `mode`/`code` directly, and
-- the laptop client in the `Elle` repo's
-  `electron/native/providers/sandbox-agent.cjs` would need matching
-  `openFromLane()` logic to unwrap a job before executing it.
-
-That is a cross-repo change to a live code-execution path — exactly the kind
-of change this build has held back from making without a dedicated pass and
-explicit scope confirmation, the same discipline applied to the router-tool
-integration and the public preview endpoint earlier in this build. What's
-proven here is that the primitive itself is real and correct; whether to
-wire it onto the live wire is a separate decision.
+This was first proven in isolation, then wired into `session-bus.ts` as the
+production envelope for every cloud<->laptop job (`run_code`/`run_shell`/
+`sandbox_clone`/the local inference lane) once the WebSocket itself came out.
+`laneChannel(root, '${lane}:${direction}')` is called with a *compound* lane
+string now — direction folded into the HKDF info — so `alpha:to_local` and
+`alpha:to_cloud` are two more genuinely distinct geodesics off the same root,
+the same isolation property this module's self-test already proved, reused
+rather than re-derived. See `SESSION_BUS.md` for the durable per-tick state
+(there is no DO to hold it in memory anymore, so it lives in D1) and the
+matching laptop-side port.
 
 ## The boundary, unchanged
 
@@ -101,5 +97,5 @@ makes it. The geodesic sync adds covertness (no counter, no reused key,
 forward-only) on top, the same relationship `hyperbolic-sync.ts` already
 documents for itself. And the "Rosen bridge" framing names a real thing —
 geodesic synchronization in curved space — not a wormhole, not
-faster-than-light signaling, not a substitute for the socket and the TLS
-underneath it.
+faster-than-light signaling, not a substitute for a real channel and the TLS
+underneath it — it's just that the real channel is a poll now, not a socket.

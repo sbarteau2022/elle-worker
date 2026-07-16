@@ -4,10 +4,11 @@
 // sender we built a few turns ago" — both, honestly composed, honestly
 // bounded.
 //
-// The WebSocket carrying sandbox-lane dispatches is NOT replaced. Nothing
-// here moves a bit without a channel — the no-communication theorem holds,
-// same as hyperbolic-sync.ts's own header says. What this module actually
-// composes, for real:
+// A socket does not carry these bytes anymore. Nothing here moves a bit
+// without SOME channel (the no-communication theorem holds, same as
+// hyperbolic-sync.ts's own header says) — but that channel is now a plain
+// HTTPS poll (session-bus.ts), not a held-open WebSocket. What this module
+// actually composes, for real:
 //   • COROS (helix.ts, "the signal sender") — the confidentiality/covertness
 //     ENVELOPE: AES-256-GCM sealed, corkscrew-padded, whole-or-nothing.
 //   • hyperbolic-sync.ts (the "Rosen bridge") — counter-free KEYSTREAM
@@ -17,7 +18,7 @@
 // Composed: a lane-dispatch payload sealed under the hyperbolic-synced key
 // shows an observer uniform noise with no sequence number and no reused key
 // — a real covertness/forward-secrecy gain, cleanly separate from the
-// routing/transport question (still the WebSocket, still TLS underneath)
+// routing/transport question (a stateless poll now, still TLS underneath)
 // that the Rosen framing never touches.
 //
 // EACH LANE GETS ITS OWN GEODESIC: laneChannel() runs the lane name through
@@ -26,15 +27,11 @@
 // leaked or misrouted wire for one lane authenticates against that lane's
 // geodesic only. A test proves cross-lane wires do not open.
 //
-// HONEST BOUNDARY, STATED PLAINLY: this module seals and opens payloads —
-// proven by its own self-test — but it is NOT wired into the live
-// laneDispatch() → SandboxAgent DO → laptop path. Doing that for real needs
-// BOTH ends of the wire to speak the sealed protocol: the DO's dispatch() in
-// sandbox-agent.ts here, AND the laptop client in the Elle repo's
-// electron/native/providers/sandbox-agent.cjs — a cross-repo change to a
-// live execution path, deliberately left for its own reviewed pass rather
-// than folded into this one. What's proven here is that the primitive
-// itself is real, not that the live wire is sealed today.
+// LIVE NOW: session-bus.ts is this module's production home — every
+// run_code/run_shell/sandbox_clone/local-inference job crossing the
+// cloud<->laptop hop is sealed here. See SESSION_BUS.md for the wiring and
+// the matching laptop-side port (Elle repo's
+// electron/native/providers/rosen-bridge.cjs).
 // ============================================================
 
 import {

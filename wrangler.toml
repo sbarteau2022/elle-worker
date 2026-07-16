@@ -87,19 +87,18 @@ index_name = "elle-corpus-vectors"
 # image build at deploy time, and its Dockerfile.sandbox template references a
 # turbo/pnpm monorepo (@repo/sandbox-container) this repo is not — so `wrangler
 # deploy` failed on the image build on EVERY push, blocking ALL deploys. We do
-# not re-enter that trap. Instead of a container that Cloudflare must build,
-# execution happens on the operator's own laptop: the local Electron agent dials
-# a WebSocket UP to the SandboxAgent Durable Object (below), and run_code/
-# run_shell/sandbox_clone reach back DOWN it. No container image, no Containers
-# entitlement, no deploy-time build — just a plain Durable Object holding a
-# socket. See src/sandbox-agent.ts + src/connect-sandbox.ts.
-[[durable_objects.bindings]]
-name = "SANDBOX_AGENT"
-class_name = "SandboxAgent"
+# not re-enter that trap. Execution happens on the operator's own laptop, but
+# there is no Durable Object holding a socket anymore either: the laptop POLLS
+# /api/sandbox-bus/poll for sealed jobs and SUBMITS sealed results back — a
+# stateless event bus (session-bus.ts), COROS sealed under hyperbolic-sync's
+# counter-free keystream. No container image, no Containers entitlement, no
+# deploy-time build, no standing connection. See src/session-bus.ts +
+# src/connect-sandbox.ts.
 
-# Migration history. v1 registered the old (container) Sandbox class; v2 removed
-# it. v3 registers the connect-back SandboxAgent — a plain DO (WebSocket
-# hibernation + storage), NOT a container, so it introduces no image build. The
+# Migration history. v1 registered the old (container) Sandbox class; v2
+# removed it. v3 registered the connect-back SandboxAgent (a plain DO holding
+# a WebSocket); v4 removes it now that the session bus (above) replaces the
+# socket with stateless polling — no DO needed for the sandbox at all. The
 # earlier tags stay listed as already-applied history and are never re-run.
 [[migrations]]
 tag = "v1"
@@ -112,6 +111,10 @@ deleted_classes = ["Sandbox"]
 [[migrations]]
 tag = "v3"
 new_classes = ["SandboxAgent"]
+
+[[migrations]]
+tag = "v4"
+deleted_classes = ["SandboxAgent"]
 
 [[queues.producers]]
 binding = "INGEST_QUEUE"

@@ -70,7 +70,7 @@ One question in plain English → a transparent ReAct loop:
    It may add `{"engine":"code|reasoning|fast|research|conversation|local"}` to
    steer which model tier runs its **next** step — she picks the model like she
    picks the tool. `local` is the sovereign dispatch mode: generation runs on
-   the operator's own laptop over the connect-back sandbox socket (free, no
+   the operator's own laptop over the connect-back sandbox bus (free, no
    provider quota) instead of a hosted provider; a caller can also default a
    whole run to it with `prefer:'local'` (the conductor's exploration lane
    does — see **"Hand off a project"** below). Any local failure, timeout, or
@@ -140,28 +140,35 @@ work belongs (see **"Hand off a project"**), not a single tool call.
 **Real execution** — `run_code` (python/js/ts, real stdout/stderr/exit),
 `run_shell`, `sandbox_clone` (pull a working tree in — laptop or, for a GitHub
 repo, an always-open cloud lane that needs no laptop), `sandbox_status`,
-`sandbox_report`. These are the **connect-back sandbox**: the operator's own
-laptop (the `Elle` workbench) dials a WebSocket UP to a `SandboxAgent` Durable
-Object and holds it open; a tool call POSTs a job down that same socket,
-`child_process` runs it on the real OS, and the result flows back — no
-container image, no Cloudflare Containers entitlement. If the laptop isn't
-connected the tools report "path not open" plainly rather than hanging; run
-`sandbox_status` to check. See **"Getting the sandbox path open"** below, and
-`src/sandbox-agent.ts` + `src/connect-sandbox.ts`.
+`sandbox_report`. These are the **connect-back sandbox**: no socket anymore —
+the worker enqueues a sealed job for a named lane (`src/session-bus.ts`), the
+operator's laptop (the `Elle` workbench) polls `POST /api/sandbox-bus/poll`
+for it on an interval, executes it for real (`child_process`, no container
+image, no Cloudflare Containers entitlement), and submits the sealed result
+back to `POST /api/sandbox-bus/submit`. The envelope is the Rosen bridge
+(`src/lane-envelope.ts`: COROS sealed under hyperbolic-sync's counter-free
+keystream) — real authentication happens at OPEN time, so a forged or
+replayed poll response simply fails to decrypt. If the laptop hasn't polled
+recently the tools report "path not open" plainly rather than hanging; run
+`sandbox_status` to check. See **"Getting the sandbox path open"** below,
+`docs/SESSION_BUS.md`, and `src/session-bus.ts` + `src/connect-sandbox.ts`.
 
 **The lane registry** — `sandbox_lane` (`src/sandbox-registry.ts`), a
-first-class router tool over the same connect-back protocol as the sandbox
-tools above, generalized past the single `primary` lane: `action=create/list/
-remove` names and lists as many lanes as she can manage (free bookkeeping —
-each only gains real execution power once a connect-back client actually
-dials into that name); `action=dispatch{lane,code,language?}` runs CODE on
-one lane by name — `mode` is hardcoded to `'code'`, never `'shell'`, so
-`dispatch` cannot reach `run_shell`'s power through a different tool name;
-`action=stability{lane_a,lane_b}` / `action=report` read the topological
-entanglement check (`src/topology-lock.ts`) off each lane's real dispatch
-history. Because dispatch is code-only by construction, `sandbox_lane` sits
-at the same scope tier as `sandbox_status`/`sandbox_clone`/`sandbox_report` —
-not in `SHIP_DENY`.
+first-class router tool over the same bus as the sandbox tools above,
+generalized past the single `primary` lane: `action=create/list/remove`
+names and lists as many lanes as she can manage (free bookkeeping — each
+only does anything once a laptop actually polls that name);
+`action=dispatch{lane,code,language?}` runs CODE on one lane by name —
+`mode` is hardcoded to `'code'`, never `'shell'`, so `dispatch` cannot reach
+`run_shell`'s power through a different tool name; `action=stability{lane_a,
+lane_b}` / `action=report` read the topological entanglement check
+(`src/topology-lock.ts`) off each lane's real dispatch history. This is real
+end to end: the poll/submit doors are lane-aware (`src/session-bus.ts`), and
+the workbench client (`electron/native/providers/sandbox-agent.cjs` in the
+`Elle` repo) polls however many lane names `ELLE_SANDBOX_LANES` names
+(comma-separated, default `primary`) on its own interval. Because dispatch
+is code-only by construction, `sandbox_lane` sits at the same scope tier as
+`sandbox_status`/`sandbox_clone`/`sandbox_report` — not in `SHIP_DENY`.
 
 **Her codebase & the forge** — `repo_read`/`repo_search` (allowlisted repos),
 `github_read_file`/`github_list_files`/`github_search_code` (ANY repo via the
@@ -322,7 +329,7 @@ work it end-to-end, on her own clock, using her real hands:
 2. **She explores it — local-first, for free.** Every `active` intent's next
    tick runs with `prefer:'local'`: if the sandbox path is open, the
    *reasoning* runs on the operator's own Ollama model over the connect-back
-   socket (§ below) while every **tool call still executes exactly the same
+   bus (§ below) while every **tool call still executes exactly the same
    way** — `sandbox_clone` pulls the project in, `run_shell`/`run_code` build
    and test it on the real box, `repo_read`/`search_corpus` gather context.
    Zero hosted-provider quota spent while she's just figuring it out. If the
@@ -355,23 +362,25 @@ started" needs debugging.
 
 ### Getting the sandbox path open
 
-The whole local-first lane above is inert until the path between the worker
-and a laptop is actually open. Both sides need the **same** secret:
+The whole local-first lane above is inert until a laptop is actually polling.
+No socket, no Durable Object — both sides just need the **same** secret:
 
 1. **Worker**: `wrangler secret put SANDBOX_AGENT_KEY` (a long random value —
-   never commit it; see `wrangler.toml`'s `[[durable_objects.bindings]]` for
-   `SANDBOX_AGENT` and confirm migration `v3` (`new_classes: ["SandboxAgent"]`)
-   has actually been deployed).
+   never commit it; confirm wrangler migration `v4`
+   (`deleted_classes: ["SandboxAgent"]`) has actually been deployed, so there
+   is no stray DO left registered).
 2. **Workbench** (`Elle` repo): put the *same* value in a local, gitignored
    `.env` as `ELLE_SANDBOX_KEY` (copy `.env.example` — it ships only a
-   placeholder on purpose). Launch with `npm run electron:dev`.
-3. **Verify**: the Electron main-process console logs `[sandbox-agent] path
-   open` on connect; the workbench's **sandbox** tab shows path OPEN with the
-   box's host/platform; or ask Elle to run `sandbox_status` from any
-   full-scope conversation.
-4. A closed path fails loud, not silent: every sandbox tool returns "path not
-   open" instead of hanging, and `intent` exploration transparently falls
-   back to a hosted model rather than stalling.
+   placeholder on purpose; `ELLE_SANDBOX_LANES` there, default `primary`, is
+   how you name which lane(s) this laptop polls). Launch with `npm run
+   electron:dev`.
+3. **Verify**: the Electron main-process console logs `polling lane(s)
+   [primary] every 5s → .../api/sandbox-bus/poll`; the workbench's
+   **sandbox** tab shows path OPEN with the box's host/platform; or ask Elle
+   to run `sandbox_status` from any full-scope conversation.
+4. A stale path fails loud, not silent: no poll inside 45s and every sandbox
+   tool returns "path not open" instead of hanging, and `intent` exploration
+   transparently falls back to a hosted model rather than stalling.
 
 ---
 
@@ -455,14 +464,10 @@ Engine/ops: `/api/elle-code-engine`, `/api/diagnose`, `/api/research`,
 - **R2 `DOCUMENTS`** — full paper text.
 - **KV** — `SESSIONS` (rate limits), `AUTH_TOKENS` (JWT revocation), `SCRATCHPAD`.
 - **`GITHUB_TOKEN`** — powers the forge + `github_*` tools.
-- **`SANDBOX_AGENT`** — the connect-back sandbox's Durable Object (holds the
-  laptop's WebSocket; see `sandbox-agent.ts` + `connect-sandbox.ts`).
-  Gated by the `SANDBOX_AGENT_KEY` secret, which must match the workbench's
-  `ELLE_SANDBOX_KEY`.
-- **`ALPACA_*`** — paper/live trading. Live is a **two-key operation**
-  (`src/live-guard.ts`): a non-paper `ALPACA_BASE_URL` is refused everywhere —
-  cron and chat tools alike — unless the `ELLE_LIVE_TRADING` secret is exactly
-  `on`. Repointing the URL alone halts trading loudly instead of going live.
+- **`SANDBOX_AGENT_KEY`** — the connect-back sandbox's shared secret (no
+  Durable Object anymore — see `session-bus.ts` + `connect-sandbox.ts`).
+  Must match the workbench's `ELLE_SANDBOX_KEY`.
+- **`ALPACA_*`** — paper/live trading.
 
 ## GitHub access — the worker token reaches elle-law
 
@@ -505,8 +510,8 @@ to Elle by construction. `main` auto-deploys via
 | `skills.ts` | self-authored skill library |
 | `mcp.ts` | generic MCP client |
 | `rapid.ts` | native hospitality tools |
-| `sandbox-agent.ts` | the `SandboxAgent` DO — holds the laptop's WebSocket, dispatches jobs down it |
-| `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane |
+| `session-bus.ts` | the stateless connect-back bus (replaces the deleted `sandbox-agent.ts` DO): enqueue → laptop polls → executes → submits, sealed by `lane-envelope.ts`, state persisted in D1 since there's no DO to hold it in memory |
+| `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane, now riding `session-bus.ts` |
 | `duplex.ts` | the duplex channel — sovereign (laptop) ↔ cloud, append-only ledger, `/api/duplex` |
 | `deep-research.ts` | `deep_research` tool — chained multi-round web research, local-first gap detection |
 | `github-tools.ts` | read any repo via the worker token |

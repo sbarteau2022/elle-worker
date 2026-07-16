@@ -1,11 +1,16 @@
 // ============================================================
 // ELLE — worker-side face of the connect-back sandbox · src/connect-sandbox.ts
 //
-// The router calls these; they talk to the SandboxAgent Durable Object (which
-// holds the laptop's WebSocket) and turn a tool call into real execution on the
-// box. Every call:
-//   1. checks the path is OPEN (laptop connected + beating) — no silent hangs,
-//   2. dispatches over the socket and awaits the real result,
+// The router calls these; they turn a tool call into real execution on the
+// operator's laptop over the SESSION BUS (session-bus.ts) — a stateless,
+// COROS-sealed event bus (the Rosen bridge wired in for real), NOT a socket.
+// There is no SandboxAgent Durable Object anymore: the cloud ENQUEUES a
+// sealed job for a lane, the laptop POLLS for it and executes, and SUBMITS
+// the sealed result back. Every call here:
+//   1. checks the lane is OPEN (the laptop has polled recently) — no silent
+//      hangs,
+//   2. enqueues the job and awaits the real result (bounded poll-wait, same
+//      synchronous feel the socket used to give, no connection underneath),
 //   3. writes a row to the comprehensive use report (elle_sandbox_runs),
 //   4. for clones, caches a COPY of the pulled code in KV (24h).
 //
@@ -16,7 +21,7 @@
 
 import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
-import type { ExecResult, CloneResult, LlmResult, AgentStatus } from './sandbox-agent';
+import { sessionBusConfigured, busPathOpen, busEnqueueToLocal, busAwaitResult } from './session-bus';
 import { resolveRepo } from './forge';
 
 const CLONE_TTL = 60 * 60 * 24; // a pulled-back copy lives 24h in KV
@@ -28,52 +33,46 @@ const LLM_TIMEOUT_MS = 180_000; // a 4B on laptop hardware can take a while on a
 
 export interface RunCtx { runId?: string; sessionId?: string | null; source?: string; userId?: string }
 
+// ── the wire-protocol shapes a laptop job/result carries — formerly defined
+// in sandbox-agent.ts (the now-removed DO); this module is their sole owner
+// now that the bus, not a DO, is the transport ─────────────────────────────
+export interface ExecJob { id: string; mode: 'code' | 'shell'; code?: string; language?: string; command?: string; cwd?: string; timeout_ms: number }
+export interface CloneJob { id: string; kind: 'path' | 'git'; target: string; timeout_ms: number }
+export interface LlmJob { id: string; system: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; max_tokens: number; timeout_ms: number }
+export interface ExecResult { ok: boolean; stdout: string; stderr: string; exit: number; duration_ms: number; truncated?: boolean; path_open?: boolean }
+export interface CloneResult { ok: boolean; files?: Array<{ path: string; bytes: number }>; bundle?: string; language?: string; error?: string; path_open?: boolean }
+export interface LlmResult { ok: boolean; content?: string; model?: string; error?: string; duration_ms?: number; path_open?: boolean }
+export interface AgentStatus { open: boolean; meta?: { agent?: string; host?: string; platform?: string; root?: string; lastSeen?: number; since?: number } }
+
 function newId(): string { return crypto.randomUUID().replace(/-/g, '').slice(0, 20); }
 
-// Named lanes: a Durable Object namespace mints a distinct instance per string
-// id at no standing cost, so any number of lanes can exist as bookkeeping —
-// each one only gains real execution power once a connect-back client (a
-// laptop, a runner) actually dials into that specific name. Every existing
-// caller omits `lane` and gets today's exact behavior — 'primary', unchanged.
-function stub(env: Env, lane = 'primary') {
-  const ns = env.SANDBOX_AGENT!; // callers guard sandboxConfigured() first
-  return ns.get(ns.idFromName(lane));
-}
-
-export function sandboxConfigured(env: Env): boolean { return !!env.SANDBOX_AGENT; }
+export function sandboxConfigured(env: Env): boolean { return sessionBusConfigured(env); }
 
 export async function pathOpen(env: Env, lane = 'primary'): Promise<AgentStatus> {
-  if (!env.SANDBOX_AGENT) return { open: false };
-  try {
-    const r = await stub(env, lane).fetch('https://sandbox/status');
-    return (await r.json()) as AgentStatus;
-  } catch {
-    return { open: false };
-  }
+  return busPathOpen(env, lane);
 }
 
 // Generic dispatch to a NAMED lane — the hardwired function the registry's
-// tool call routes through. Same wire protocol as the existing primary-lane
-// dispatchers (kind + payload → the DO → the connected client), just callable
-// against any lane name instead of only 'primary'.
+// tool call routes through. Enqueues a sealed job on the bus and awaits its
+// sealed result; any number of lane names are free bookkeeping exactly as
+// before, each only gaining real execution power once a real connect-back
+// client actually polls that specific name.
 export async function dispatchToLane(env: Env, lane: string, kind: string, payload: Record<string, unknown>): Promise<unknown> {
-  const r = await stub(env, lane).fetch('https://sandbox/dispatch', {
-    method: 'POST', body: JSON.stringify({ kind, payload }),
-  });
-  return r.json();
+  const timeoutMs = Math.min(Math.max(Number(payload.timeout_ms) || 120_000, 1_000), 600_000);
+  const jobId = await busEnqueueToLocal(env, lane, kind, payload);
+  const result = await busAwaitResult(env, jobId, timeoutMs);
+  if (result == null) {
+    const msg = `sandbox timeout after ${timeoutMs}ms`;
+    return { ok: false, error: msg, stderr: msg, stdout: '', exit: -1, duration_ms: timeoutMs, path_open: true };
+  }
+  return result;
 }
 
 async function dispatchExec(env: Env, payload: Record<string, unknown>): Promise<ExecResult> {
-  const r = await stub(env).fetch('https://sandbox/dispatch', {
-    method: 'POST', body: JSON.stringify({ kind: 'exec', payload }),
-  });
-  return (await r.json()) as ExecResult;
+  return (await dispatchToLane(env, 'primary', 'exec', payload)) as ExecResult;
 }
 async function dispatchClone(env: Env, payload: Record<string, unknown>): Promise<CloneResult> {
-  const r = await stub(env).fetch('https://sandbox/dispatch', {
-    method: 'POST', body: JSON.stringify({ kind: 'clone', payload }),
-  });
-  return (await r.json()) as CloneResult;
+  return (await dispatchToLane(env, 'primary', 'clone', payload)) as CloneResult;
 }
 
 // ── the sovereign inference lane ────────────────────────────
@@ -93,11 +92,7 @@ export async function sandboxLLM(
   const st = await pathOpen(env);
   if (!st.open) return { ok: false, error: 'sandbox path not open', path_open: false };
   try {
-    const r = await stub(env).fetch('https://sandbox/dispatch', {
-      method: 'POST',
-      body: JSON.stringify({ kind: 'llm', payload: { id: newId(), system, messages, max_tokens: maxTokens, timeout_ms: timeoutMs } }),
-    });
-    return (await r.json()) as LlmResult;
+    return (await dispatchToLane(env, 'primary', 'llm', { id: newId(), system, messages, max_tokens: maxTokens, timeout_ms: timeoutMs })) as LlmResult;
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e), path_open: false };
   }
@@ -134,7 +129,7 @@ async function record(env: Env, ctx: RunCtx, row: RunRow): Promise<void> {
   }
 }
 
-const NOT_CONFIGURED = 'the SANDBOX_AGENT binding is not configured on this worker.';
+const NOT_CONFIGURED = 'the SANDBOX_AGENT_KEY secret is not configured on this worker.';
 const NOT_OPEN =
   'sandbox path not open — your laptop agent is offline. It reconnects when the ' +
   'workbench is running; run sandbox_status to check, then retry.';
@@ -200,8 +195,9 @@ export async function sandboxRunShell(env: Env, command: string, ctx: RunCtx): P
 }
 
 // ── cloud clone: migrate code into the KV cache ANYTIME ─────
-// The laptop lane pulls a working tree up the socket — but the socket only
-// exists while the workbench is running. This is the always-open lane: a
+// The laptop lane pulls a working tree up over the session bus — but that
+// only works while the workbench is running to poll for the job. This is
+// the always-open lane: a
 // GitHub repo ("owner/name" or a github.com URL, optional #ref) is read
 // worker-side via the GitHub API and lands in the SAME clone bundle format,
 // the same SCRATCHPAD keys, the same use-report rows — so everything above
@@ -295,8 +291,8 @@ async function cloudCloneGitHub(env: Env, repo: string, ref: string | undefined,
 
 export async function sandboxClone(env: Env, target: string, kind: 'path' | 'git', ctx: RunCtx, title?: string): Promise<string> {
   if (!target) return 'sandbox_clone: target required (a path on the box, a git repo, or "owner/name" on GitHub)';
-  // The always-open lane: a GitHub-shaped target never needs the socket when
-  // the laptop is closed — "clone or migrate whatever, anytime" holds
+  // The always-open lane: a GitHub-shaped target never needs the laptop
+  // polling when it's closed — "clone or migrate whatever, anytime" holds
   // regardless of which machine is awake. An explicit github.com URL prefers
   // the cloud lane even with the laptop up (it names the source of truth);
   // a bare git target uses the laptop's working tree when it's open (that
