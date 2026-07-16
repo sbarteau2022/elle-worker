@@ -84,13 +84,14 @@ this new use.
 `laneDispatch(env, name, kind, payload, opts)` is fixed, deterministic routing
 code: it records the job (tagging any lanes this job hands off to, which is
 exactly the fact the stability check reads) and then calls
-`dispatchToLane()` — the same wire protocol `connect-sandbox.ts` already speaks
-to the `SandboxAgent` Durable Object. No model-authored branch decides where a
-job goes; the lane name **is** the route. A Durable Object namespace mints a
-distinct instance per string id at no standing cost, so naming any number of
-lanes is free bookkeeping — each lane only gains real execution power once a
-real connect-back client (a laptop, a runner) dials into that specific name,
-the same honest limit the original single `'primary'` lane always had.
+`dispatchToLane()` — the same event-bus protocol `connect-sandbox.ts` already
+speaks (session-bus.ts; see `LANE_ENVELOPE.md` and `SESSION_BUS.md`). No
+model-authored branch decides where a job goes; the lane name **is** the
+route. A lane is a free string key on the bus — no socket, no standing cost
+— so naming any number of lanes is free bookkeeping; each lane only gains
+real execution power once a real connect-back client (a laptop, a runner)
+actually POLLS that specific name, the same honest limit the original single
+`'primary'` lane always had.
 
 ## Endpoints
 

@@ -2,10 +2,10 @@
 // SANDBOX REGISTRY — src/sandbox-registry.ts
 //
 // The sandbox lane registry: Elle names, lists, and dispatches to as many
-// execution lanes as she can manage. A Durable Object namespace mints a
-// distinct instance per string id at no standing cost, so naming N lanes is
-// free bookkeeping — each lane only gains real execution power once a
-// connect-back client (a laptop, a runner) actually dials into that specific
+// execution lanes as she can manage. A lane is just a string key on the
+// session bus (session-bus.ts) — naming N lanes is free bookkeeping, no
+// standing cost — each lane only gains real execution power once a
+// connect-back client (a laptop, a runner) actually POLLS that specific
 // name. This module is the honest form of "as many as she can manage": a
 // real registry over real (if independently provisioned) execution surfaces,
 // not a claim of spawning compute out of nothing.
@@ -100,7 +100,7 @@ export async function laneDispatch(
   env: Env, name: string, kind: string, payload: Record<string, unknown>,
   opts: { dispatchesTo?: string[] } = {}, _ctx: RunCtx = {},
 ): Promise<unknown> {
-  if (!sandboxConfigured(env)) throw new Error('SANDBOX_AGENT is not configured on this worker');
+  if (!sandboxConfigured(env)) throw new Error('SANDBOX_AGENT_KEY is not configured on this worker');
   await ensureSchema(env.DB);
   await env.DB.prepare(
     `INSERT INTO sandbox_lane_jobs (id, lane, kind, dispatches_to, payload_preview) VALUES (?,?,?,?,?)`

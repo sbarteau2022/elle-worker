@@ -57,6 +57,7 @@ import { reasonWithCorpus } from './corpus-reasoning';
 import { topologySelfTest } from './topology-lock';
 import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport, sandboxRegistrySelfTest } from './sandbox-registry';
 import { laneEnvelopeSelfTest } from './lane-envelope';
+import { sessionBusConfigured, busPoll, busSubmit, sessionBusSelfTest } from './session-bus';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
 import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
@@ -82,10 +83,6 @@ import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, delet
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
 import { readAtlasEvents } from './atlas-events';
-
-// The connect-back sandbox Durable Object must be exported from the worker
-// entrypoint so the runtime can instantiate it for the SANDBOX_AGENT binding.
-export { SandboxAgent } from './sandbox-agent';
 
 // ── /privacy — the door's policy, in plain language ──────────────────────────
 const PRIVACY_HTML = `<!doctype html>
@@ -140,13 +137,13 @@ export interface Env extends LLMEnv {
   // tool chain retains findings past the per-observation truncation.
   SCRATCHPAD?:  KVNamespace;
   // Connect-back code sandbox. Elle's mind is in the cloud; her hands are on the
-  // operator's laptop. The local Electron agent dials a WebSocket UP to the
-  // SandboxAgent Durable Object (this binding), which holds the socket; then
-  // run_code/run_shell/sandbox_clone reach back DOWN it to execute on the real
-  // machine. See src/sandbox-agent.ts + src/connect-sandbox.ts. Undefined ⇒ the
-  // tools report "not configured".
-  SANDBOX_AGENT?: DurableObjectNamespace;
-  // Shared secret the laptop agent presents on /api/sandbox-agent/connect.
+  // operator's laptop. No socket: the laptop POLLS /api/sandbox-bus/poll for
+  // sealed jobs (session-bus.ts, COROS sealed under hyperbolic-sync's
+  // counter-free keystream — "the Rosen bridge," wired in for real) and
+  // SUBMITS sealed results back to /api/sandbox-bus/submit. run_code/
+  // run_shell/sandbox_clone/the local inference lane all ride this one bus.
+  // See src/session-bus.ts + src/connect-sandbox.ts. Unset SANDBOX_AGENT_KEY
+  // ⇒ the tools report "not configured" and the poll/submit doors 401.
   // Set as a Worker secret: `wrangler secret put SANDBOX_AGENT_KEY`.
   SANDBOX_AGENT_KEY?: string;
   JWT_SECRET:       string;
@@ -1244,16 +1241,6 @@ export default {
     // a bootstrap hiccup must never take down the request path.
     await ensureAllSchemas(env.DB).catch(() => {});
 
-    // The laptop's sandbox agent dials in here and upgrades to a long-lived
-    // WebSocket. Auth is NOT the admin JWT — the SandboxAgent DO checks the
-    // shared secret (?key=) itself — so this sits ahead of the svc gate. The
-    // worker just forwards the upgrade to the single "primary" DO instance.
-    if (path === '/api/sandbox-agent/connect') {
-      if (!env.SANDBOX_AGENT) return err('sandbox not configured', 503);
-      const id = env.SANDBOX_AGENT.idFromName('primary');
-      return env.SANDBOX_AGENT.get(id).fetch(request);
-    }
-
     // vFAR artifacts — images she resynthesized or generated, straight from
     // R2. Public: the ids are unguessable UUIDs and the artifacts are hers.
     if (path.startsWith('/vfar/') && request.method === 'GET') {
@@ -1672,6 +1659,31 @@ export default {
       if (!svc && !viaAgentKey) return err('Unauthorized', 401);
       return json(await handleDuplex(body as Record<string, unknown>, env, async (prompt) =>
         (await runRouter(prompt, env, routerDeps(), { maxSteps: 4, scope: 'full', sessionId: 'duplex-channel', source: 'duplex' })).answer));
+    }
+    // The session bus — replaces the SandboxAgent WebSocket. The laptop POLLS
+    // here for sealed jobs (run_code/run_shell/sandbox_clone/the local
+    // inference lane) and SUBMITS sealed results back. Same auth shape as
+    // /api/duplex above (the shared secret, not the admin JWT) since this is
+    // the laptop client talking, not the browser workbench.
+    if (path === '/api/sandbox-bus/poll') {
+      if (!sessionBusConfigured(env)) return err('sandbox bus not configured', 503);
+      if (request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      const b = body as { lane?: string; limit?: number; meta?: Record<string, unknown> };
+      const lane = String(b.lane || 'primary');
+      const jobs = await busPoll(env, lane, { limit: b.limit, meta: b.meta });
+      return json({ jobs });
+    }
+    if (path === '/api/sandbox-bus/submit') {
+      if (!sessionBusConfigured(env)) return err('sandbox bus not configured', 503);
+      if (request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      const b = body as { lane?: string; items?: Array<{ kind: string; wire: string; replyTo?: string }> };
+      const lane = String(b.lane || 'primary');
+      const results = await busSubmit(env, lane, Array.isArray(b.items) ? b.items : []);
+      return json({ results });
+    }
+    if (path === '/api/elle-session-bus-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await sessionBusSelfTest());
     }
     // Sandbox path status + the comprehensive use report (elle_sandbox_runs).
     if (path === '/api/elle-sandbox-runs') { if (!svc) return err('Unauthorized', 401);
