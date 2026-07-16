@@ -57,6 +57,15 @@ One question in plain English → a transparent ReAct loop:
 1. The system prompt is assembled live: the selected **voice register**
    (`mind.ts`) + her **κ phase** this session + her **skill index** + the
    **tool catalog for this scope** (+ the D1 schema when `read_sql` is in scope).
+   The catalog itself is a shallow **tree**, not a flat list: `TOOL_TREE` in
+   `router.ts` groups the ~80 tools into ~14 named branches (Mind & memory,
+   World, Real execution, the forge, Signal & geometry engines, …) and
+   `renderCatalog()` walks it scope-filtered, so what she reads each step is
+   chunked by kind of work instead of one undifferentiated list — faster and
+   more reliable tool selection, same one-call-per-step JSON protocol
+   underneath. An import-time check keeps the tree honest: every entry in
+   `TOOL_LINES` must appear in the tree exactly once, or the worker fails to
+   boot rather than silently dropping a tool from what she can see.
 2. Each turn the model emits one JSON object: `{"tool","args"}` or `{"answer"}`.
    It may add `{"engine":"code|reasoning|fast|research|conversation|local"}` to
    steer which model tier runs its **next** step — she picks the model like she
@@ -83,7 +92,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `public` | `/api/chat`, widget (rate-limited, no auth) | read-only mind: corpus, find_document, memory recall, web, code_engine, diagnose, calc |
 | `member` | authenticated standard-tier user | public + their own journal + self_state, remember, skills (read), scratchpad |
 | `full` | service key or admin/superadmin JWT | **everything** — read_sql, trades, forge, MCP, run_code/run_shell, github_*, intents, self-revision |
-| `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr` and `run_shell` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
+| `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr`, `run_shell`, and `delegate_local` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
 
 ### The ~59 tools (full scope)
@@ -125,6 +134,20 @@ container image, no Cloudflare Containers entitlement. If the laptop isn't
 connected the tools report "path not open" plainly rather than hanging; run
 `sandbox_status` to check. See **"Getting the sandbox path open"** below, and
 `src/sandbox-agent.ts` + `src/connect-sandbox.ts`.
+
+**The lane registry** — `sandbox_lane` (`src/sandbox-registry.ts`), a
+first-class router tool over the same connect-back protocol as the sandbox
+tools above, generalized past the single `primary` lane: `action=create/list/
+remove` names and lists as many lanes as she can manage (free bookkeeping —
+each only gains real execution power once a connect-back client actually
+dials into that name); `action=dispatch{lane,code,language?}` runs CODE on
+one lane by name — `mode` is hardcoded to `'code'`, never `'shell'`, so
+`dispatch` cannot reach `run_shell`'s power through a different tool name;
+`action=stability{lane_a,lane_b}` / `action=report` read the topological
+entanglement check (`src/topology-lock.ts`) off each lane's real dispatch
+history. Because dispatch is code-only by construction, `sandbox_lane` sits
+at the same scope tier as `sandbox_status`/`sandbox_clone`/`sandbox_report` —
+not in `SHIP_DENY`.
 
 **Her codebase & the forge** — `repo_read`/`repo_search` (allowlisted repos),
 `github_read_file`/`github_list_files`/`github_search_code` (ANY repo via the
