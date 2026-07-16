@@ -2,9 +2,10 @@
 // ELLE — the second brain · src/local-agent.ts
 //
 // The cloud router (router.ts) is one mind: it reasons on a hosted model and
-// its tools execute worker-side (or, for run_code/run_shell, down the socket to
-// the laptop's box). The "sovereign inference lane" (sandboxLLM) can move that
-// reasoning onto the laptop's Ollama — but it's still ONE loop, the cloud's.
+// its tools execute worker-side (or, for run_code/run_shell, over the session
+// bus to the laptop's box). The "sovereign inference lane" (sandboxLLM) can
+// move that reasoning onto the laptop's Ollama — but it's still ONE loop, the
+// cloud's.
 //
 // This is a SECOND, genuinely separate agent. The cloud brain hands it a GOAL
 // (not a command) via the `delegate_local` tool; this loop then runs on the
@@ -169,7 +170,7 @@ export async function runLoop(goal: string, deps: LocalAgentDeps, maxSteps: numb
 export async function runLocalAgent(env: Env, goal: string, opts: { maxSteps?: number }, ctx: RunCtx): Promise<string> {
   const g = String(goal || '').trim();
   if (!g) return 'delegate_local: goal required — describe what the local brain should accomplish in the box.';
-  if (!sandboxConfigured(env)) return 'delegate_local: the SANDBOX_AGENT binding is not configured on this worker.';
+  if (!sandboxConfigured(env)) return 'delegate_local: the SANDBOX_AGENT_KEY secret is not configured on this worker.';
 
   const st = await pathOpen(env);
   if (!st.open) {

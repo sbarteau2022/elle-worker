@@ -321,7 +321,7 @@ export async function runForge(
   bus('run_start', 'forge', { name: spec.name, goals: spec.goals.length }, `forge "${spec.name}" — ${spec.goals.length} goal(s)`, -1);
 
   if (!sandboxConfigured(env)) {
-    ping({ kind: 'forge_error', message: 'the SANDBOX_AGENT binding is not configured on this worker' });
+    ping({ kind: 'forge_error', message: 'the SANDBOX_AGENT_KEY secret is not configured on this worker' });
     return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: 0, code: '' };
   }
   const path = await pathOpen(env);
