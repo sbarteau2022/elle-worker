@@ -83,6 +83,7 @@ import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, delet
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
 import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
+import { ingestAtlasCsv } from './atlas-ingest';
 import { readAtlasEvents } from './atlas-events';
 
 // ── /privacy — the door's policy, in plain language ──────────────────────────
@@ -1476,6 +1477,27 @@ export default {
       } catch (e) { return err((e as Error).message, 400); }
     }
 
+    // Atlas CSV ingest — the demo data path. A signed-in Atlas client drops
+    // their POS export (daily close or item sales); it's parsed EPHEMERALLY
+    // (raw CSV never stored) and only normalized rows land in rapid2ai-db
+    // under THEIR venue_id, where the rapid_* dashboard tools see them
+    // immediately. Idempotent per day; header mismatches fail loud with the
+    // headers named (see src/atlas-ingest.ts).
+    if (path === '/api/atlas/upload' && request.method === 'POST') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      const venue = await resolveVenueForUser(env, u.id);
+      if (!venue) return err('No Atlas account yet — create your company profile first (POST /api/atlas/profile)', 403);
+      const ab = body as { csv?: string; kind?: string };
+      const csv = typeof ab.csv === 'string' ? ab.csv : '';
+      if (!csv.trim()) return err('csv required (the export file contents, as text)');
+      if (csv.length > 2_000_000) return err('CSV too large (2 MB max per upload — split the export)', 413);
+      try {
+        const out = await ingestAtlasCsv(env, venue, csv, ab.kind);
+        return json(out, 201);
+      } catch (e) { return err(`ingest failed: ${(e as Error).message}`, 400); }
+    }
+
     // RAPID / Atlas consumer door — public, rate-limited, HOSPITALITY-SCOPED.
     // Runs the tool router but only the data tools (query_rapid2ai, web,
     // fetch_url, code_engine). Corpus + journal/phase GEOMETRY are unreachable
@@ -1512,7 +1534,9 @@ export default {
       const envForRun = clientVenue ? { ...env, VENUE_ID: clientVenue } as Env : env;
       const out = await runRouter(q, envForRun, routerDeps(),
         { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: clientVenue ? `atlas:${authed!.id}` : 'atlas', sessionId, source: 'rapid2ai' });
-      return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps });
+      // usage lets the demo surface count questions client-side ("3 of 5")
+      // without a second endpoint; the hard valve stays the 30/hr limiter.
+      return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps, usage: { used: count + 1, limit: 30 } });
     }
 
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env, request);
