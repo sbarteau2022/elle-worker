@@ -326,11 +326,60 @@ const TOOL_LINES: Record<string, string> = {
   consolidate: `consolidate() — run the sleep pass now instead of waiting for 04:00: digest the last 24h (turns, memories, tool errors) into a few durable memories, promote a twice-learned lesson to a skill, record a repeated failure as a scar. Use after an unusually dense day; it refuses nothing but writes only what the material earns.`,
 };
 
+// ── the tool TREE ───────────────────────────────────────────
+// TOOL_LINES is a flat bag of ~80 entries; picking one correctly out of a
+// single undifferentiated list is exactly where a model's tool-selection
+// accuracy degrades and latency creeps up (more tokens to weigh per step).
+// This groups the same catalog into named branches so a step's prompt reads
+// as a shallow tree (category → its tools) instead of one long flat list —
+// same one-call-per-step JSON protocol, same runTool() dispatch, nothing
+// about *how* a tool executes changes. Only how fast and reliably the model
+// can find the right one changes. The categories mirror the README's own
+// "The N tools" breakdown, kept in code so it can never drift from what a
+// caller actually sees.
+const TOOL_TREE: { category: string; tools: string[] }[] = [
+  { category: 'Mind & memory', tools: ['search_corpus', 'find_document', 'fetch_document', 'read_sql', 'recall_memory', 'remember', 'notebook_write', 'self_state', 'scratchpad_read', 'scratchpad_write', 'page_read'] },
+  { category: 'World', tools: ['web_search', 'deep_research', 'fetch_url', 'calc', 'diagnose', 'code_engine'] },
+  { category: 'Real execution (the connect-back sandbox)', tools: ['run_code', 'run_shell', 'sandbox_status', 'sandbox_clone', 'sandbox_report', 'delegate_local', 'sandbox_lane'] },
+  { category: 'Her codebase & the forge', tools: ['repo_read', 'repo_search', 'github_read_file', 'github_list_files', 'github_search_code', 'forge_open', 'forge_write', 'forge_check', 'forge_pr'] },
+  { category: 'Skills', tools: ['skill_list', 'skill_read', 'skill_route', 'skill_write'] },
+  { category: 'MCP', tools: ['mcp_add', 'mcp_tools', 'mcp_call'] },
+  { category: 'Hospitality (RAPID²AI)', tools: ['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu'] },
+  { category: 'Autonomy & standing work', tools: ['idea', 'intent', 'review_runs', 'duplex', 'self_schedule', 'watch', 'dead_drop'] },
+  { category: 'Provenance & self-audit', tools: ['provenance', 'constraint_analyzer', 'fork_replay', 'metabolism'] },
+  { category: 'Signal & geometry engines', tools: ['pfar', 'pami', 'vfar', 'hyper', 'torus', 'recall_ab', 'structure', 'product', 'atlas'] },
+  { category: 'Journal', tools: ['journal_read', 'journal_thread', 'journal_write', 'journal_annotate'] },
+  { category: 'Judgment on retainer', tools: ['predict', 'devil', 'council', 'scar', 'consolidate', 'tool_forge'] },
+  { category: 'Reach', tools: ['reach_out'] },
+  { category: 'Writes / sensitive', tools: ['ingest_paper', 'trigger_dream', 'trade_execute'] },
+];
+
+// Fails loudly at import time, not silently at prompt-render time: every
+// TOOL_LINES key must appear in the tree EXACTLY once, so a new tool can
+// never go uncategorized (and silently vanish from the tree-rendered
+// catalog) or get double-listed. Same discipline as the pressure-test's
+// "parsed straight from source" checks — this is the code-side half of it.
+(function assertToolTreeCoverage() {
+  const allKeys = Object.keys(TOOL_LINES);
+  const seen = new Map<string, number>();
+  for (const { tools } of TOOL_TREE) for (const t of tools) seen.set(t, (seen.get(t) || 0) + 1);
+  const missing = allKeys.filter((k) => !seen.has(k));
+  const duplicated = [...seen.entries()].filter(([, n]) => n > 1).map(([k]) => k);
+  const unknown = [...seen.keys()].filter((k) => !(k in TOOL_LINES));
+  if (missing.length || duplicated.length || unknown.length) {
+    throw new Error(
+      `TOOL_TREE / TOOL_LINES drift — missing: [${missing.join(', ')}], duplicated: [${duplicated.join(', ')}], unknown: [${unknown.join(', ')}]`
+    );
+  }
+})();
+
 function renderCatalog(scope: Scope): string {
-  return Object.entries(TOOL_LINES)
-    .filter(([name]) => toolAllowed(scope, name))
-    .map(([, line]) => line)
-    .join('\n');
+  const sections: string[] = [];
+  for (const { category, tools } of TOOL_TREE) {
+    const lines = tools.filter((name) => toolAllowed(scope, name)).map((name) => TOOL_LINES[name]);
+    if (lines.length) sections.push(`## ${category}\n${lines.join('\n')}`);
+  }
+  return sections.join('\n\n');
 }
 
 function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown): string {

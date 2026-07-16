@@ -57,6 +57,15 @@ One question in plain English → a transparent ReAct loop:
 1. The system prompt is assembled live: the selected **voice register**
    (`mind.ts`) + her **κ phase** this session + her **skill index** + the
    **tool catalog for this scope** (+ the D1 schema when `read_sql` is in scope).
+   The catalog itself is a shallow **tree**, not a flat list: `TOOL_TREE` in
+   `router.ts` groups the ~80 tools into ~14 named branches (Mind & memory,
+   World, Real execution, the forge, Signal & geometry engines, …) and
+   `renderCatalog()` walks it scope-filtered, so what she reads each step is
+   chunked by kind of work instead of one undifferentiated list — faster and
+   more reliable tool selection, same one-call-per-step JSON protocol
+   underneath. An import-time check keeps the tree honest: every entry in
+   `TOOL_LINES` must appear in the tree exactly once, or the worker fails to
+   boot rather than silently dropping a tool from what she can see.
 2. Each turn the model emits one JSON object: `{"tool","args"}` or `{"answer"}`.
    It may add `{"engine":"code|reasoning|fast|research|conversation|local"}` to
    steer which model tier runs its **next** step — she picks the model like she
