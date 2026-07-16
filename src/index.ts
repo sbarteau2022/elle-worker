@@ -2275,6 +2275,51 @@ export default {
       }
       return err('action must be list or write (write needs title + body)');
     }
+    // Conversation history — the sidebar rail on the elle + code tabs. Lists
+    // past /api/elle-router sessions (grouped from elle_conversation_turns) and
+    // rehydrates one on demand. Sessions are client-generated UUIDs, not
+    // user-scoped in storage — this is a single-operator workbench, so the auth
+    // gate above is "may you talk to Elle at all," not "whose thread is this."
+    if (path === '/api/sessions') {
+      const sb = body as { action?: string; session_id?: string; limit?: number };
+      if ((sb.action || 'list') === 'list') {
+        const limit = Math.min(Math.max(Number(sb.limit) || 40, 1), 100);
+        const rows = await env.DB.prepare(
+          `SELECT t1.session_id AS session_id,
+                  MAX(t1.created_at) AS last_active,
+                  SUM(CASE WHEN t1.role = 'user' THEN 1 ELSE 0 END) AS turns,
+                  (SELECT content FROM elle_conversation_turns t2
+                     WHERE t2.session_id = t1.session_id AND t2.role = 'user'
+                     ORDER BY t2.created_at ASC LIMIT 1) AS title
+             FROM elle_conversation_turns t1
+             WHERE t1.source = 'elle-router'
+             GROUP BY t1.session_id
+             ORDER BY last_active DESC
+             LIMIT ?1`
+        ).bind(limit).all();
+        return json({ sessions: (rows.results || []).filter((r: any) => r.turns > 0) });
+      }
+      if (sb.action === 'turns') {
+        const sessionId = String(sb.session_id || '').trim();
+        if (!sessionId) return err('session_id required');
+        const rows = await env.DB.prepare(
+          `SELECT role, content, created_at FROM elle_conversation_turns
+           WHERE session_id = ?1 ORDER BY created_at ASC LIMIT 200`
+        ).bind(sessionId).all();
+        // persistExchange (see above) overwrites the assistant row's content to
+        // "Q: <truncated>\nA: <truncated>" so cross-session recall can pull the
+        // pair together. Strip that back to just her answer for display — the
+        // trade-off is real: the redisplayed answer is capped at ~1100 chars,
+        // same as what recall already accepts. The user row is stored raw.
+        const turns = (rows.results as Array<{ role: string; content: string; created_at: string }>).map(r => {
+          if (r.role !== 'assistant') return r;
+          const m = r.content.match(/^Q: [\s\S]*?\nA: ([\s\S]*)$/);
+          return m ? { ...r, content: m[1] } : r;
+        });
+        return json({ turns });
+      }
+      return err('action must be list or turns (turns needs session_id)');
+    }
     // Optimus journal — the manuscript/phase-state layer. User-gated: the
     // reader owns their journal. off_record + κ rules enforced in journal.ts.
     if (path === '/api/optimus-journal')
