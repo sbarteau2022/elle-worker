@@ -39,6 +39,7 @@ import { reasonText, type ReasoningSummary } from './reasoning';
 import { getProfileByUser, profileBlock } from './profiles';
 import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
+import { resolveAlpacaBase, type LiveGuardEnv } from './live-guard';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
 import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport } from './sandbox-registry';
@@ -529,7 +530,11 @@ async function alpacaOrder(
   const key = (env as any).ALPACA_API_KEY as string | undefined;
   const secret = (env as any).ALPACA_SECRET_KEY as string | undefined;
   if (!key || !secret) return { error: 'Alpaca not configured (ALPACA_API_KEY/SECRET missing)' };
-  const base = ((env as any).ALPACA_BASE_URL as string) || 'https://paper-api.alpaca.markets';
+  // Live URL without ELLE_LIVE_TRADING='on' throws — surface it as this
+  // tool's error observation so the refusal lands in the trace, loudly.
+  let base: string;
+  try { base = resolveAlpacaBase(env as unknown as LiveGuardEnv); }
+  catch (e) { return { error: (e as Error).message }; }
   const headers = { 'APCA-API-KEY-ID': key, 'APCA-API-SECRET-KEY': secret, 'Content-Type': 'application/json' };
   const sym = String(symbol || '').toUpperCase().trim();
   if (!sym) return { error: 'symbol required' };

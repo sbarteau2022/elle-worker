@@ -135,9 +135,17 @@ crons = ["*/1 * * * *"]
 
 [vars]
 ENVIRONMENT = "production"
-# Venue UUID in rapid2ai-db that the rapid_* tools (src/rapid.ts) scope
-# every query to. rapid2ai-db is multi-tenant by venue_id; without this set
-# the rapid_* tools cleanly report "VENUE_ID not configured" rather than
-# guessing. Find the value with:
+# LEGACY/DEMO FALLBACK venue for anonymous /api/atlas callers. Signed-in
+# Atlas clients get their venue PER REQUEST from atlas_clients (self-serve
+# signup, src/atlas-clients.ts) — this var no longer gates the whole product.
+# rapid2ai-db is multi-tenant by venue_id; without this set, anonymous
+# rapid_* calls cleanly report "VENUE_ID not configured" rather than
+# guessing. Find a value with:
 #   wrangler d1 execute rapid2ai-db --remote --command "SELECT DISTINCT venue_id FROM vendor_document_payload LIMIT 5"
 VENUE_ID = ""
+
+# LIVE TRADING is a TWO-KEY operation (src/live-guard.ts): a non-paper
+# ALPACA_BASE_URL is refused everywhere unless the ELLE_LIVE_TRADING secret
+# is exactly 'on'. Arm deliberately with:
+#   wrangler secret put ELLE_LIVE_TRADING   (value: on)
+# Never set it here in [vars] — a committed 'on' would defeat the second key.
