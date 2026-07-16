@@ -56,6 +56,7 @@ import { convergenceSelfTest } from './convergence';
 import { reasonWithCorpus } from './corpus-reasoning';
 import { topologySelfTest } from './topology-lock';
 import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport, sandboxRegistrySelfTest } from './sandbox-registry';
+import { laneEnvelopeSelfTest } from './lane-envelope';
 import { runConductor, handleIntents } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
 import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
@@ -1586,6 +1587,15 @@ export default {
     if (path === '/api/elle-sandbox-registry-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(sandboxRegistrySelfTest());
+    }
+    // The lane envelope — COROS (helix.ts) sealed under hyperbolic-sync's
+    // ("the Rosen bridge") counter-free keystream, one distinct secret
+    // geodesic per lane off one root secret. Proves the composed primitive
+    // round-trips, isolates lanes, and resyncs after loss — NOT that the
+    // live laneDispatch() wire is sealed yet (it isn't; see lane-envelope.ts).
+    if (path === '/api/elle-lane-envelope-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await laneEnvelopeSelfTest());
     }
 
     // External scheduler (GitHub Actions) drives the daemon loops via HTTP,
