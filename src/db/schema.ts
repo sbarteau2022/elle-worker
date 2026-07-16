@@ -271,6 +271,24 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     profile TEXT,
     updated_at INTEGER
   )`,
+    // atlas-clients.ts — self-serve RAPID/Atlas hospitality accounts. One row
+    // per client user; venue_id is the tenant key every rapid_* query scopes
+    // by (rows in rapid2ai-db land under it). UNIQUE so two clients can never
+    // share a venue by accident.
+    `CREATE TABLE IF NOT EXISTS atlas_clients (
+    user_id TEXT PRIMARY KEY,
+    venue_id TEXT NOT NULL UNIQUE,
+    company_name TEXT NOT NULL,
+    venue_name TEXT,
+    pos_provider TEXT,
+    vendors TEXT,
+    contact_phone TEXT,
+    address TEXT,
+    status TEXT DEFAULT 'onboarding',
+    onboarding_intent_id TEXT,
+    created_at INTEGER,
+    updated_at INTEGER
+  )`,
     // push.ts
     `CREATE TABLE IF NOT EXISTS push_devices (
       user_id TEXT NOT NULL,

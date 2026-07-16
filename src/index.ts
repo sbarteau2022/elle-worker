@@ -81,6 +81,7 @@ import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, r
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
+import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
 import { readAtlasEvents } from './atlas-events';
 
 // The connect-back sandbox Durable Object must be exported from the worker
@@ -159,6 +160,10 @@ export interface Env extends LLMEnv {
   ALPACA_API_KEY?:    string;
   ALPACA_SECRET_KEY?: string;
   ALPACA_BASE_URL?: string;  // https://paper-api.alpaca.markets or https://api.alpaca.markets
+  // Live-trading arming flag (src/live-guard.ts). A non-paper ALPACA_BASE_URL
+  // is REFUSED unless this is exactly 'on' — repointing the URL alone must
+  // never silently arm real money.
+  ELLE_LIVE_TRADING?: string;
   // Conviction channel (src/conviction.ts): the ledger + prompt surface run
   // unconditionally; set to 'on' to arm the de-risk-only trim executor.
   ELLE_CONVICTION_ENFORCE?: string;
@@ -967,15 +972,19 @@ async function handleContact(body: Record<string, unknown>, env: Env): Promise<R
 // presents `aud` = the web client ID on Android but can present the iOS
 // client ID on iOS (see src/google-auth.ts) — upserts the user, and mints the
 // same JWT as email/password login. Inert (503) until GOOGLE_CLIENT_ID is set.
-async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Response> {
+// The verification/upsert/mint core, shared by /api/elle-oauth and the Atlas
+// client signup (/api/atlas/signup) so both doors authenticate identically.
+async function oauthAuthenticate(
+  body: Record<string, unknown>, env: Env,
+): Promise<{ error: Response } | { token: string; user: { id: string; email: string; tier: string } }> {
   const credential = typeof body.credential === 'string' ? body.credential : '';
-  if (!credential) return err('credential required');
-  if (!env.GOOGLE_CLIENT_ID) return err('Google sign-in not configured', 503);
+  if (!credential) return { error: err('credential required') };
+  if (!env.GOOGLE_CLIENT_ID) return { error: err('Google sign-in not configured', 503) };
   const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
-  if (!res.ok) return err('Invalid Google credential', 401);
+  if (!res.ok) return { error: err('Invalid Google credential', 401) };
   const info = await res.json() as { aud?: string; email?: string; email_verified?: string; sub?: string };
-  if (!audienceAllowed(info.aud, env.GOOGLE_CLIENT_ID)) return err('Google credential audience mismatch', 401);
-  if (!info.email || info.email_verified !== 'true') return err('Google email not verified', 401);
+  if (!audienceAllowed(info.aud, env.GOOGLE_CLIENT_ID)) return { error: err('Google credential audience mismatch', 401) };
+  if (!info.email || info.email_verified !== 'true') return { error: err('Google email not verified', 401) };
   const emailL = info.email.toLowerCase();
   let user = await env.DB.prepare('SELECT id, email, access_tier FROM users WHERE email = ?').bind(emailL).first() as { id: string; email: string; access_tier: string } | null;
   if (!user) {
@@ -988,7 +997,13 @@ async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Res
   const tier = user.access_tier || 'standard';
   const token = await signJWT({ sub: user.id, email: user.email, tier, jti, exp }, env.JWT_SECRET);
   await env.AUTH_TOKENS.put(`token:${jti}`, user.id, { expirationTtl: 2592000 });
-  return json({ access_token: token, user: { id: user.id, email: user.email, tier } });
+  return { token, user: { id: user.id, email: user.email, tier } };
+}
+
+async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Response> {
+  const r = await oauthAuthenticate(body, env);
+  if ('error' in r) return r.error;
+  return json({ access_token: r.token, user: r.user });
 }
 
 // ── Daemon jobs ─────────────────────────────────────────────
@@ -1445,6 +1460,35 @@ export default {
       return handleMindConversation(body, env, 'widget', 'public', ctx);
     }
 
+    // Atlas client signup — Google sign-in only (same verification and JWT
+    // as /api/elle-oauth), plus the caller's client row so the surface knows
+    // whether to route to the company-profile step or straight in.
+    if (path === '/api/atlas/signup' && request.method === 'POST') {
+      const r = await oauthAuthenticate(body, env);
+      if ('error' in r) return r.error;
+      const client = await getClientByUser(env, r.user.id).catch(() => null);
+      return json({
+        access_token: r.token, user: r.user, client,
+        next: client ? 'atlas' : 'profile',
+      });
+    }
+
+    // Atlas company profile — just enough to stand the account up (company
+    // name; the rest is optional and aggregated later from the doc scrape of
+    // the business backlog). POST creates the venue and AUTO-EXECUTES the
+    // onboarding workflow (active conductor intent); GET resumes.
+    if (path === '/api/atlas/profile') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      if (request.method === 'GET') {
+        return json({ client: await getClientByUser(env, u.id) });
+      }
+      try {
+        const out = await createClientProfile(env, u, body);
+        return json(out, out.created ? 201 : 200);
+      } catch (e) { return err((e as Error).message, 400); }
+    }
+
     // RAPID / Atlas consumer door — public, rate-limited, HOSPITALITY-SCOPED.
     // Runs the tool router but only the data tools (query_rapid2ai, web,
     // fetch_url, code_engine). Corpus + journal/phase GEOMETRY are unreachable
@@ -1452,11 +1496,17 @@ export default {
     // existing widget/Atlas client parses it unchanged.
     if (path === '/api/atlas') {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const actorKey = `ip:${ip}`;
+      // A signed-in Atlas client reaches THEIR venue (per-request tenant
+      // resolution via atlas_clients); anonymous callers keep the global
+      // VENUE_ID demo fallback. Rate limit keys off the account when signed
+      // in so a venue's staff behind one NAT don't share an IP bucket.
+      const authed = await getUser(request, env);
+      const clientVenue = authed ? await resolveVenueForUser(env, authed.id) : null;
+      const actorKey = clientVenue ? `user:${authed!.id}` : `ip:${ip}`;
       if ((await getPosture(env, actorKey).catch(() => ({ posture: 'normal' as const }))).posture === 'blocked') {
         return err('Temporarily blocked — the security network flagged this address', 403);
       }
-      const rlKey = `atlas-rl:${ip}`;
+      const rlKey = clientVenue ? `atlas-rl:user:${authed!.id}` : `atlas-rl:${ip}`;
       const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
       if (count >= 30) {
         await recordThreat(env, { actorKey, source: 'ratelimit', kind: 'ratelimit.exceeded', detail: '/api/atlas' }).catch(() => {});
@@ -1470,8 +1520,11 @@ export default {
       // multi-turn context. The client persists this id and echoes it back;
       // if absent we mint one and return it.
       const sessionId = String(ab.session_id || `atlas:${crypto.randomUUID()}`);
-      const out = await runRouter(q, env, routerDeps(),
-        { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: 'atlas', sessionId, source: 'rapid2ai' });
+      // Scope stays 'hospitality' either way — tenancy changes WHICH venue the
+      // rapid_* tools see (VENUE_ID override), never what the caller can reach.
+      const envForRun = clientVenue ? { ...env, VENUE_ID: clientVenue } as Env : env;
+      const out = await runRouter(q, envForRun, routerDeps(),
+        { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: clientVenue ? `atlas:${authed!.id}` : 'atlas', sessionId, source: 'rapid2ai' });
       return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps });
     }
 

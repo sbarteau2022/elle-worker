@@ -95,6 +95,20 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr`, `run_shell`, and `delegate_local` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
 
+**Atlas client tenancy** (`src/atlas-clients.ts`): the hospitality door is
+multi-client. Signup is self-serve — `POST /api/atlas/signup` (Google
+sign-in, same verification as `/api/elle-oauth`) then
+`POST /api/atlas/profile` with just enough to stand the account up (company
+name; POS/vendors/address optional — the doc scrape of the client's business
+backlog aggregates the rest). Creating the profile mints the client's
+`venue_id` and **auto-executes the onboarding workflow**: an active
+conductor intent that verifies feeds landing in rapid2ai-db, aggregates the
+backlog into a venue brief, and files a first-look report. On `/api/atlas`,
+a signed-in client's requests resolve to *their* venue per request; the
+global `VENUE_ID` var is only the anonymous/demo fallback. Scope stays
+`hospitality` either way — tenancy changes which venue, never what's
+reachable.
+
 ### The ~59 tools (full scope)
 
 **Mind & memory** — `search_corpus`, `find_document` (pull a whole doc by
@@ -413,7 +427,9 @@ Conversation: `/api/elle-router` (full/member; pass `stream:true` for SSE —
 the loop's frames arrive live: each step's thought + tool as she commits to
 it, each observation as it lands, one `done` frame with the full result),
 `/api/elle-conversation`, `/api/chat` (public), `/api/widget-chat`,
-`/api/atlas` (hospitality). `/api/elle-self` — the Mirror: one snapshot of
+`/api/atlas` (hospitality; per-client venue when signed in),
+`/api/atlas/signup` + `/api/atlas/profile` (self-serve Atlas client
+onboarding — see `src/atlas-clients.ts`). `/api/elle-self` — the Mirror: one snapshot of
 the reflexive organs (bets + calibration, scars, watches, drops, metabolism,
 consolidation, self-forged tools).
 Identity/voice: `/api/elle-identity`, `/api/elle-voices`.
@@ -443,7 +459,10 @@ Engine/ops: `/api/elle-code-engine`, `/api/diagnose`, `/api/research`,
   laptop's WebSocket; see `sandbox-agent.ts` + `connect-sandbox.ts`).
   Gated by the `SANDBOX_AGENT_KEY` secret, which must match the workbench's
   `ELLE_SANDBOX_KEY`.
-- **`ALPACA_*`** — paper/live trading.
+- **`ALPACA_*`** — paper/live trading. Live is a **two-key operation**
+  (`src/live-guard.ts`): a non-paper `ALPACA_BASE_URL` is refused everywhere —
+  cron and chat tools alike — unless the `ELLE_LIVE_TRADING` secret is exactly
+  `on`. Repointing the URL alone halts trading loudly instead of going live.
 
 ## GitHub access — the worker token reaches elle-law
 

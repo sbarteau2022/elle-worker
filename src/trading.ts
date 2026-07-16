@@ -12,6 +12,7 @@
 import { backfillTradesExtColumns } from './db/schema';
 import { callLLM } from './llm';
 import type { Env } from './index';
+import { resolveAlpacaBase } from './live-guard';
 import { resolveOptionContract } from './alpaca-options';
 import {
   runConvictionCycle, trimQty, replayBars, ensureReplaySchema, isEquitySymbol,
@@ -148,8 +149,13 @@ function alpacaHeaders(env: Env): Record<string, string> {
   };
 }
 
-function alpacaBase(env: Env): string {
-  return env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets';
+// Exported so live-guard.test.ts can pin that THIS path (the autonomous
+// cron's) refuses a live URL without the arming flag — not just the pure
+// guard in isolation. Throws on live-without-ELLE_LIVE_TRADING; the throw
+// propagates up through runTradingCycle into runJob's error log, so a
+// misconfigured live URL halts trading loudly instead of trading.
+export function alpacaBase(env: Env): string {
+  return resolveAlpacaBase(env);
 }
 
 function alpacaData(env: Env): string {
