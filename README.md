@@ -438,7 +438,9 @@ it, each observation as it lands, one `done` frame with the full result),
 `/api/elle-conversation`, `/api/chat` (public), `/api/widget-chat`,
 `/api/atlas` (hospitality; per-client venue when signed in),
 `/api/atlas/signup` + `/api/atlas/profile` (self-serve Atlas client
-onboarding — see `src/atlas-clients.ts`). `/api/elle-self` — the Mirror: one snapshot of
+onboarding — see `src/atlas-clients.ts`), `/api/atlas/upload` (venue-scoped
+POS CSV ingest, parsed ephemerally into rapid2ai-db — see
+`src/atlas-ingest.ts`). `/api/elle-self` — the Mirror: one snapshot of
 the reflexive organs (bets + calibration, scars, watches, drops, metabolism,
 consolidation, self-forged tools).
 Identity/voice: `/api/elle-identity`, `/api/elle-voices`.
