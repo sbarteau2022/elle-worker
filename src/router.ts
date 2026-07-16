@@ -41,6 +41,7 @@ import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
+import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport } from './sandbox-registry';
 import { runLocalAgent } from './local-agent';
 import { deepResearch } from './deep-research';
 import { resolveOptionContract } from './alpaca-options';
@@ -265,6 +266,7 @@ const TOOL_LINES: Record<string, string> = {
   delegate_local: `delegate_local(goal,max_steps?) — hand a whole GOAL to your SECOND brain: a separate agent running on the laptop's LOCAL model that works autonomously inside the Docker box, deciding its own sequence of run_shell/run_code steps, and reports back what it did and found. Use this to offload a self-contained build/test/investigate task ("get this repo's test suite green", "profile this script and make it 2x faster") so you spend one step-slot while it grinds many. It is boxed and toolless beyond shell/code — it cannot touch the repos, the DB, github, or the network — so give it everything it needs IN the goal. Returns its final summary; the full transcript is logged to the delegations report.`,
   sandbox_clone: `sandbox_clone(target,kind?,title?) — pull a COPY of code into your cloud cache. TWO LANES, one result: a GitHub-shaped target ("owner/name", optional #ref, or a github.com URL) migrates via the CLOUD lane — works ANYTIME, laptop closed or not; a local path or the laptop's working tree (kind='git') rides the socket and needs the box awake. title names what you brought in (shown in the sandbox console). Either way the copy is cached in KV (24h), logged, and surfaced when an idea is selected for scoping. Migrate whatever you need, whenever you need it.`,
   sandbox_report: `sandbox_report(title,body) — surface a report FROM a sandbox session: your findings after building/testing something on the box (what it does, whether it works, whether it's worth keeping). Titled by you. Filed to the sandbox console and flashes its tab until it's read. Use when a sandbox investigation reaches a conclusion worth showing.`,
+  sandbox_lane: `sandbox_lane(action,...) — name and run as many independent execution lanes as you can manage, not just 'primary'. A Durable Object namespace mints a distinct instance per lane name at no standing cost; each only gains real power once a real connect-back client dials into that specific name. action='create'{name,description?}: mint a lane (free bookkeeping). action='list': every lane, active + whether its path is actually open right now. action='remove'{name}: deactivate one. action='dispatch'{lane,code,language?,dispatches_to?}: run CODE on that named lane (same power as run_code, mode is fixed to code — never shell); dispatches_to (lane names this job hands work to, if any) feeds the stability check. action='stability'{lane_a,lane_b}: is this pair provably independent or entangled — reuses topology-lock's proven Hopf-link / disjoint-circle geometry, keyed by a real mutual-dispatch fact, never tuned. action='report': the whole registry — every lane plus pairwise stability. Naming lanes is free; each one still needs a real box to dial in before it can do anything.`,
   github_read_file: `github_read_file(repo,path,ref?) — read one real file from ANY GitHub repo ("owner/name"). For your OWN three repos prefer repo_read (allowlisted, forge-integrated); this is for reading the outside world's code.`,
   github_list_files: `github_list_files(repo,path?,ref?) — list a directory in any GitHub repo.`,
   github_search_code: `github_search_code(repo,query) — search code within any one GitHub repo.`,
@@ -637,6 +639,48 @@ export async function runTool(
         return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx, a.title ? String(a.title) : undefined));
       case 'sandbox_report':
         return await sandboxReport(env, String(a.title || ''), String(a.body || a.findings || ''), sctx);
+      case 'sandbox_lane': {
+        const action = String(a.action || 'list');
+        switch (action) {
+          case 'create': {
+            const name = String(a.name || a.lane || '');
+            if (!name) return 'sandbox_lane create: name required';
+            return JSON.stringify(await laneCreate(env, name, a.description ? String(a.description) : ''));
+          }
+          case 'list':
+            return clip(JSON.stringify(await laneList(env)));
+          case 'remove': {
+            const name = String(a.name || a.lane || '');
+            if (!name) return 'sandbox_lane remove: name required';
+            await laneRemove(env, name);
+            return `lane "${name}" deactivated`;
+          }
+          case 'dispatch': {
+            const lane = String(a.lane || a.name || '');
+            const code = String(a.code || '');
+            if (!lane) return 'sandbox_lane dispatch: lane required';
+            if (!code) return 'sandbox_lane dispatch: code required — this dispatch is CODE-only, mode is fixed and never shell';
+            const language = a.language ? String(a.language) : 'python';
+            const dispatchesTo = Array.isArray(a.dispatches_to) ? a.dispatches_to.map(String) : [];
+            const res = await laneDispatch(
+              env, lane, 'exec',
+              { id: crypto.randomUUID().replace(/-/g, '').slice(0, 20), mode: 'code', code, language, timeout_ms: 120_000 },
+              { dispatchesTo }, sctx,
+            );
+            return clip(JSON.stringify(res));
+          }
+          case 'stability': {
+            const laneA = String(a.lane_a || '');
+            const laneB = String(a.lane_b || '');
+            if (!laneA || !laneB) return 'sandbox_lane stability: lane_a and lane_b required';
+            return JSON.stringify(await laneStability(env, laneA, laneB));
+          }
+          case 'report':
+            return clip(JSON.stringify(await registryReport(env)));
+          default:
+            return `sandbox_lane: unknown action "${action}"`;
+        }
+      }
       case 'github_read_file': {
         if (!env.GITHUB_TOKEN) return 'github_read_file: GITHUB_TOKEN not configured';
         return clip(await githubReadFile(String(a.repo || ''), String(a.path || ''), a.ref ? String(a.ref) : undefined, env.GITHUB_TOKEN), OBS_CAP * 2);
