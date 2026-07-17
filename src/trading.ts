@@ -24,6 +24,7 @@ import { runCoherenceField, ensureCoherenceSchema } from './coherence';
 import { runPerturbationBacktestSuite, ensurePerturbationSchema } from './perturbation';
 import { runRegimeSuite, ensureRegimeSchema } from './regime';
 import { runPhiOscSuite, ensurePhiOscSchema } from './phi-oscillator';
+import { gatherTradingGround, recordTradeRationale, type TradingGround } from './trading-ground';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -528,6 +529,16 @@ export async function runTradingCycle(env: Env): Promise<void> {
 
   const marketData = await gatherMarketData(env);
 
+  // ── the history read-back (the ground) ──
+  // Corpus/memory recall keyed on this cycle's tape, her own closed-trade
+  // post-mortems, last night's journal, and the measured coherence field —
+  // all of which were previously written and never read. A decision loop
+  // with no access to its own history is pattern-matching numbers; this is
+  // the fix. Best-effort: an empty ground never blocks the cycle.
+  let ground: TradingGround = { block: '', recalledIds: [] };
+  try { ground = await gatherTradingGround(env, marketData); }
+  catch (e) { console.error('[GROUND] gather failed:', (e as Error).message); }
+
   const thesesRows = await env.DB.prepare(
     `SELECT thesis_type, title, thesis, confidence FROM elle_market_thesis WHERE is_active = 1 ORDER BY confidence DESC LIMIT 5`
   ).all().catch(() => ({ results: [] }));
@@ -582,7 +593,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
     return `, conviction κ=${r.kappa.toFixed(2)} (${r.status}, target size ${(r.targetFraction * 100).toFixed(0)}%)`;
   };
 
-  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}\n\nWhat do you see? What do you do?`;
+  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}${ground.block ? `\n\nYOUR HISTORY AND GROUND (read before deciding — these are your own lessons, your corpus, and measured field state, not this cycle's noise):\n${ground.block}` : ''}\n\nWhat do you see? What do you do?`;
 
   let decision: Record<string, unknown>;
   try {
@@ -661,6 +672,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
             contract.type, contract.strike_price, contract.expiration_date, contract.underlying_symbol,
           ).run().catch(() => {});
           console.log(`[TRADE] BUY ${qty}x ${contract.symbol} (${contract.type} $${contract.strike_price} exp ${contract.expiration_date}): ${String(d.reasoning || '').slice(0, 80)}`);
+          await recordTradeRationale(env, { symbol: contract.underlying_symbol || symbol, action: 'buy option', reasoning: d.reasoning, testing: d.what_you_are_testing, catalyst: d.expected_catalyst }, ground.recalledIds);
         } else {
           const openRow = await env.DB.prepare(
             `SELECT entry_price, reasoning, expected_catalyst FROM elle_trades WHERE symbol = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1`,
@@ -702,6 +714,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
         ).run().catch(() => {});
 
         console.log(`[TRADE] BUY ${qty} ${symbol}: ${(d.reasoning as string).slice(0, 80)}`);
+        await recordTradeRationale(env, { symbol, action: 'buy', reasoning: d.reasoning, testing: d.what_you_are_testing, catalyst: d.expected_catalyst }, ground.recalledIds);
       } catch (e) { console.error(`[TRADE] Order failed: ${(e as Error).message}`); }
     }
 
@@ -752,6 +765,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
         ).run().catch(() => {});
 
         console.log(`[TRADE] SHORT ${qty} ${symbol}: ${(d.reasoning as string).slice(0, 80)}`);
+        await recordTradeRationale(env, { symbol, action: 'short', reasoning: d.reasoning, testing: d.what_you_are_testing, catalyst: d.expected_catalyst }, ground.recalledIds);
       } catch (e) { console.error(`[TRADE] short order failed: ${(e as Error).message}`); }
     }
 
