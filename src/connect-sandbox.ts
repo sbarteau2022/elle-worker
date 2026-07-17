@@ -23,6 +23,7 @@ import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
 import { sessionBusConfigured, busPathOpen, busEnqueueToLocal, busAwaitResult } from './session-bus';
 import { resolveRepo } from './forge';
+import { callLLM, type LLMMessage, type LLMResponse, type LLMTask } from './llm';
 
 const CLONE_TTL = 60 * 60 * 24; // a pulled-back copy lives 24h in KV
 const PREVIEW = 4000;           // clip previews the way the event bus clips observations
@@ -96,6 +97,27 @@ export async function sandboxLLM(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e), path_open: false };
   }
+}
+
+// ── local-first generation for STANDING autonomous work ─────
+// The router's prefer:'local' engine (above) gives an interactive/autonomous
+// tool-calling RUN the laptop's model when it's up. This is the same policy
+// for a caller that just wants text back — no tool loop, no run_id — like
+// the dream cycle (libre.ts): try the laptop's model first when it's awake,
+// fall straight through to the hosted chain on any close/error. Never
+// strands a caller; at worst costs one extra network round trip.
+export async function sovereignText(
+  env: Env, task: LLMTask, system: string, messages: LLMMessage[], maxTokens: number,
+): Promise<LLMResponse> {
+  if (sandboxConfigured(env)) {
+    const st = await pathOpen(env).catch((): AgentStatus => ({ open: false }));
+    if (st.open) {
+      const local = await sandboxLLM(env, system, messages, maxTokens);
+      if (local.ok && local.content) return { content: local.content, model: local.model || 'local', provider: 'sovereign-local' };
+      console.error('[SOVEREIGN] local lane unavailable for standing work, falling back to hosted:', local.error || 'no content');
+    }
+  }
+  return callLLM(task, system, messages, maxTokens, env);
 }
 
 // ── the comprehensive use report ────────────────────────────

@@ -181,6 +181,18 @@ export type Scope = 'full' | 'cofounder' | 'member' | 'public' | 'hospitality';
 // denied power through a different tool name — same scope tier as
 // sandbox_status/sandbox_clone/sandbox_report.
 const SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell', 'delegate_local']);
+// Tools withheld specifically from the delegate_local catalog — the set of
+// tools the ELECTRON-ORCHESTRATED local loop is handed over /api/elle-tool
+// (see local-agent.ts). run_shell/run_code execute natively in that loop's
+// own Docker box (no HTTP round trip); delegate_local itself would be
+// self-recursion; sandbox_clone/sandbox_lane's laptop-bound lanes would try
+// to bus-round-trip back to the SAME agent that is busy running this very
+// goal, which can only ever fail (it isn't polling while it's working) —
+// dropping them from its menu avoids that dead end entirely rather than
+// letting the model discover it by burning a step. Every other tool in the
+// catalog, including read_sql/forge_*/trade_execute, IS reachable — that is
+// the point: a genuine peer to the cloud router, not a boxed sub-agent.
+export const LOCAL_LOOP_DENY = new Set(['run_shell', 'run_code', 'delegate_local', 'sandbox_clone', 'sandbox_lane']);
 // page_read is in every scope: the central pager fires for ANY scope's large
 // observations, so the page-fault handler must be reachable wherever a page
 // can be minted (pages are opaque KV slices keyed by id — read-only).
@@ -268,7 +280,7 @@ const TOOL_LINES: Record<string, string> = {
   run_code: `run_code(code,language?) — ACTUALLY EXECUTE code on your laptop's live sandbox (the connect-back path) and get real stdout/stderr/exit code back. language ∈ {python (default), javascript, typescript}. Use this to verify code you wrote actually runs before handing it back — and to compute anything calc can't. If the path is closed you'll be told; run sandbox_status to check.`,
   run_shell: `run_shell(command) — run a shell command (e.g. npm test, tsc --noEmit, git clone, npm install) on your laptop's sandbox, same box as run_code. This is your real hands: build from scratch, install deps, run the test suite, iterate on failures.`,
   sandbox_status: `sandbox_status() — check whether the live path down to your laptop's sandbox is OPEN before running code on it. Returns the box's host/platform/root and when it last checked in.`,
-  delegate_local: `delegate_local(goal,max_steps?) — hand a whole GOAL to your SECOND brain: a separate agent running on the laptop's LOCAL model that works autonomously inside the Docker box, deciding its own sequence of run_shell/run_code steps, and reports back what it did and found. Use this to offload a self-contained build/test/investigate task ("get this repo's test suite green", "profile this script and make it 2x faster") so you spend one step-slot while it grinds many. It is boxed and toolless beyond shell/code — it cannot touch the repos, the DB, github, or the network — so give it everything it needs IN the goal. Returns its final summary; the full transcript is logged to the delegations report.`,
+  delegate_local: `delegate_local(goal,max_steps?) — hand a whole GOAL to your SECOND brain: a genuine peer agent running on the laptop's LOCAL model, reasoning and deciding its own sequence of steps entirely on its own — same tool catalog you have (corpus, read_sql, github_*, forge_*, journal, everything except a few tools that only make sense from inside the loop that's already running them), reached over HTTP back to you, plus native run_shell/run_code in its own Docker box. Use this to offload a self-contained multi-step task ("get this repo's test suite green", "investigate X and file findings") so you spend one step-slot while it grinds many, autonomously, on hardware that costs nothing. Returns its final summary; the full transcript is logged to the delegations report.`,
   sandbox_clone: `sandbox_clone(target,kind?,title?) — pull a COPY of code into your cloud cache. TWO LANES, one result: a GitHub-shaped target ("owner/name", optional #ref, or a github.com URL) migrates via the CLOUD lane — works ANYTIME, laptop closed or not; a local path or the laptop's working tree (kind='git') rides the session bus and needs the box awake and polling. title names what you brought in (shown in the sandbox console). Either way the copy is cached in KV (24h), logged, and surfaced when an idea is selected for scoping. Migrate whatever you need, whenever you need it.`,
   sandbox_report: `sandbox_report(title,body) — surface a report FROM a sandbox session: your findings after building/testing something on the box (what it does, whether it works, whether it's worth keeping). Titled by you. Filed to the sandbox console and flashes its tab until it's read. Use when a sandbox investigation reaches a conclusion worth showing.`,
   sandbox_lane: `sandbox_lane(action,...) — name and run as many independent execution lanes as you can manage, not just 'primary'. A lane is a free-to-mint name on the session bus (no socket, no standing cost); each only gains real power once a real connect-back client actually POLLS that specific name. action='create'{name,description?}: mint a lane (free bookkeeping). action='list': every lane, active + whether its path is actually open right now (has it polled recently). action='remove'{name}: deactivate one. action='dispatch'{lane,code,language?,dispatches_to?}: run CODE on that named lane (same power as run_code, mode is fixed to code — never shell); dispatches_to (lane names this job hands work to, if any) feeds the stability check. action='stability'{lane_a,lane_b}: is this pair provably independent or entangled — reuses topology-lock's proven Hopf-link / disjoint-circle geometry, keyed by a real mutual-dispatch fact, never tuned. action='report': the whole registry — every lane plus pairwise stability. Naming lanes is free; each one still needs a real box polling that name before it can do anything.`,
@@ -375,13 +387,20 @@ const TOOL_TREE: { category: string; tools: string[] }[] = [
   }
 })();
 
-function renderCatalog(scope: Scope): string {
+function renderCatalog(scope: Scope, exclude?: Set<string>): string {
   const sections: string[] = [];
   for (const { category, tools } of TOOL_TREE) {
-    const lines = tools.filter((name) => toolAllowed(scope, name)).map((name) => TOOL_LINES[name]);
+    const lines = tools.filter((name) => toolAllowed(scope, name) && !exclude?.has(name)).map((name) => TOOL_LINES[name]);
     if (lines.length) sections.push(`## ${category}\n${lines.join('\n')}`);
   }
   return sections.join('\n\n');
+}
+
+// The catalog handed to the electron-orchestrated local loop (delegate_local):
+// full scope minus LOCAL_LOOP_DENY. Exported so local-agent.ts's dispatch can
+// embed it in the goal payload without either module importing the other.
+export function renderLocalLoopCatalog(): string {
+  return renderCatalog('full', LOCAL_LOOP_DENY);
 }
 
 function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown): string {
@@ -692,7 +711,7 @@ export async function runTool(
       case 'sandbox_status':
         return await sandboxStatus(env);
       case 'delegate_local':
-        return clip(await runLocalAgent(env, String(a.goal || a.task || ''), { maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined }, sctx), OBS_CAP * 2);
+        return clip(await runLocalAgent(env, String(a.goal || a.task || ''), { maxSteps: a.max_steps != null ? Number(a.max_steps) : undefined }, sctx, renderLocalLoopCatalog()), OBS_CAP * 2);
       case 'sandbox_clone':
         return clip(await sandboxClone(env, String(a.target || a.path || ''), String(a.kind || 'path') === 'git' ? 'git' : 'path', sctx, a.title ? String(a.title) : undefined));
       case 'sandbox_report':

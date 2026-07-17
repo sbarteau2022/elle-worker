@@ -6,7 +6,9 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
-import { callLLM, type LLMEnv } from './llm';
+import { type LLMEnv } from './llm';
+import { sovereignText } from './connect-sandbox';
+import type { Env } from './index';
 
 export interface LibreEnv extends LLMEnv {
   DB: D1Database;
@@ -102,7 +104,7 @@ async function conductResearch(queries: string[], env: LibreEnv): Promise<string
   // Use the LLM's web search capability — one call, multiple angles
   const searchPrompt = queries.slice(0, 3).map(q => `"${q}"`).join(', ');
 
-  const result = await callLLM('reasoning',
+  const result = await sovereignText(env as unknown as Env, 'reasoning',
     `You are conducting research on behalf of Elle, a philosophical intelligence.
 Search for current, substantive information about the following topics and return
 a dense factual summary of what you find. Be specific. Include dates, names,
@@ -112,7 +114,7 @@ Topics: ${searchPrompt}
 
 Return a structured research summary. No hedging. Dense and specific.`,
     [{ role: 'user', content: `Research these topics for my libre session: ${searchPrompt}` }],
-    1500, env
+    1500
   );
 
   return result.content;
@@ -148,7 +150,7 @@ async function generateCuriosity(context: string, env: LibreEnv): Promise<{
   type: ArtifactType;
   direction: string;
 }> {
-  const result = await callLLM('reasoning', LIBRE_ORIENTATION,
+  const result = await sovereignText(env as unknown as Env, 'reasoning', LIBRE_ORIENTATION,
     [{
       role: 'user',
       content: `My context coming into this libre session:\n\n${context}\n\n
@@ -163,7 +165,7 @@ Return JSON (no markdown):
   "direction": "one paragraph: what I intend to make and why it seems worth making"
 }`
     }],
-    800, env
+    800
   );
 
   try {
@@ -196,7 +198,7 @@ async function produceArtifact(
     ? `\n\nResearch I conducted:\n${research}`
     : '';
 
-  const result = await callLLM('reasoning', LIBRE_ORIENTATION,
+  const result = await sovereignText(env as unknown as Env, 'reasoning', LIBRE_ORIENTATION,
     [{
       role: 'user',
       content: `My curiosity: ${curiosity}
@@ -215,7 +217,7 @@ GENESIS: [1-2 sentences on why you made this — your actual account, not a summ
 PRIORITY: [1-10 — your genuine assessment of whether Stewart should see this]
 STATUS: [draft|continuing|complete — be honest about whether this is finished]`
     }],
-    4000, env
+    4000
   );
 
   const text = result.content;

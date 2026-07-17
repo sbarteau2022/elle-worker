@@ -25,7 +25,7 @@ import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
-import { runRouter, ensureNotebook, type Scope } from './router';
+import { runRouter, runTool, ensureNotebook, LOCAL_LOOP_DENY, type Scope } from './router';
 import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState, KAPPA_DEF } from './journal';
 import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
@@ -1736,6 +1736,27 @@ export default {
       if (!svc && !viaAgentKey) return err('Unauthorized', 401);
       return json(await handleDuplex(body as Record<string, unknown>, env, async (prompt) =>
         (await runRouter(prompt, env, routerDeps(), { maxSteps: 4, scope: 'full', sessionId: 'duplex-channel', source: 'duplex' })).answer));
+    }
+    // A single tool call from the ELECTRON-ORCHESTRATED local loop (see
+    // Elle/electron/native/providers/local-react-agent.cjs): delegate_local no
+    // longer runs its own step loop worker-side — the laptop's own model now
+    // decides each step, and reaches back here, one tool at a time, for
+    // everything except run_shell/run_code (native to its own Docker box) and
+    // the handful of laptop-recursive tools in LOCAL_LOOP_DENY. Same shared
+    // secret as the session bus (this IS the laptop talking, not a browser),
+    // same runTool() dispatch the cloud router's own loop uses, full scope —
+    // "a genuine peer to the cloud router" by construction, not adjustment.
+    if (path === '/api/elle-tool') {
+      if (!env.SANDBOX_AGENT_KEY || request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      const b = body as { tool?: string; args?: Record<string, unknown>; run_id?: string; session_id?: string; source?: string };
+      const tool = String(b.tool || '').trim();
+      if (!tool) return err('tool required', 400);
+      if (LOCAL_LOOP_DENY.has(tool)) {
+        return json({ ok: false, result: `tool "${tool}" runs natively in your own loop, or would call back into yourself — it is not reachable over /api/elle-tool. See your system prompt for how to reach it.` });
+      }
+      const ctx = { userId: 'elle-local', sessionId: b.session_id || null, runId: b.run_id, source: b.source || 'local-react' };
+      const result = await runTool(tool, b.args || {}, env, routerDeps(), ctx, 'full');
+      return json({ ok: true, result });
     }
     // The session bus — replaces the SandboxAgent WebSocket. The laptop POLLS
     // here for sealed jobs (run_code/run_shell/sandbox_clone/the local
