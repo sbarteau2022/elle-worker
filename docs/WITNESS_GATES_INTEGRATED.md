@@ -168,9 +168,12 @@ the boost formula gated strictly on `fired` rather than continuous `mag`
 does gating the boost on the discrete `fired` event rather than the
 continuous magnitude close the expectancy gap while keeping the drawdown
 improvement?); populating the atlas with genuine market-adjacent memory
-content (e.g., recording each trade's own rationale as a co-recall event)
-so a future run could test it honestly instead of leaving it structurally
-absent.
+content — **now implemented**: `docs/TRADING_GROUND.md` /
+`src/trading-ground.ts` wires the corpus/memory/history read-back into the
+live decision loop and records each trade's rationale as memory + atlas
+co-recall events, so a future run can test the atlas honestly once it has
+accumulated real market-shaped structure (the backtests here still cannot
+use it — a 2025-26 corpus knows how 2013-2018 ended; lookahead).
 
 ---
 
