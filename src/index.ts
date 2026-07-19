@@ -21,6 +21,7 @@ import {
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
 import { handleFalcon, type FalconEnv } from './falcon';
+import { handleObserver, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
@@ -2354,6 +2355,9 @@ export default {
     // Member-gated like the other engines above it; a Falcon run spends
     // ~17 model calls, so it rides the same auth door, not a public one.
     if (path === '/api/falcon')                 return handleFalcon(body, env as unknown as FalconEnv, user.id);
+    // The Observer — Five-Axis structural analysis engine (history/science,
+    // the Falcon's sibling). Member-gated like the Falcon; ~5 model calls.
+    if (path === '/api/observer')               return handleObserver(body, env as unknown as ObserverEnv, user.id);
     // THE SPINE — unified Falcon: three tier-collapses in order, dissent holds
     // (does not collapse), Axis 17 predicts. SHADOW — gates no real decision;
     // κ accrues across runs, the same regulator that sizes a position.

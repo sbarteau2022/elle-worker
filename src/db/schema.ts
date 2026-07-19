@@ -144,6 +144,29 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       status TEXT NOT NULL DEFAULT 'queued', analysis_id TEXT, error TEXT, note TEXT,
       created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
     )`,
+    // observer.ts — The Observer: Five-Axis structural analysis engine (the
+    // historical/scientific sibling of the Falcon). status = complete | held.
+    `CREATE TABLE IF NOT EXISTS observer_analyses (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, subject TEXT NOT NULL, anchor TEXT,
+      dominant_json TEXT NOT NULL, counter_json TEXT NOT NULL, structural_json TEXT NOT NULL,
+      dissent_json TEXT NOT NULL, prediction_json TEXT NOT NULL,
+      status TEXT DEFAULT 'complete', created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS observer_reasoning_log (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, step TEXT NOT NULL,
+      chain TEXT NOT NULL, model TEXT, provider TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS observer_outcomes (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE,
+      what_happened TEXT, comparison_to_prediction TEXT, notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS observer_queue (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, subject TEXT NOT NULL, anchor TEXT,
+      status TEXT NOT NULL DEFAULT 'queued', analysis_id TEXT, error TEXT,
+      created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+    )`,
     // lattice.ts — The Lattice: 32-axis security deduction engine
     `CREATE TABLE IF NOT EXISTS lattice_analyses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,
@@ -449,8 +472,9 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // events.ts
     `CREATE INDEX IF NOT EXISTS idx_events_run ON elle_events(run_id, step_index)`,
     `CREATE INDEX IF NOT EXISTS idx_events_time ON elle_events(created_at DESC)`,
-    // falcon.ts — drain picks the oldest queued row for a user
+    // falcon.ts / observer.ts — drain picks the oldest queued row for a user
     `CREATE INDEX IF NOT EXISTS idx_falcon_queue ON falcon_queue(user_id, status, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_observer_queue ON observer_queue(user_id, status, created_at)`,
     // kappa-memory/schema.ts
     `CREATE INDEX IF NOT EXISTS idx_trace_thread  ON bending_trace(thread_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_trace_reserve ON bending_trace(reserve)`,
