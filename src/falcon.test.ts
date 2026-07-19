@@ -2,7 +2,7 @@
 // numbered 1-16, no gaps or duplicates) and the tolerant JSON extractor that
 // every axis call runs through. No network, no D1.
 import { describe, it, expect } from 'vitest';
-import { TIER1_AXES, TIER2_AXES, parseFirstJson } from './falcon';
+import { TIER1_AXES, TIER2_AXES, parseFirstJson, parseDirections } from './falcon';
 
 describe('falcon · the axis roster', () => {
   it('six axes in Tier 1, nine in Tier 2 — fifteen feeding the Rupture as Axis 16', () => {
@@ -45,5 +45,25 @@ describe('falcon · tolerant JSON extraction', () => {
   it('returns null on unparseable input', () => {
     expect(parseFirstJson('no json here at all')).toBeNull();
     expect(parseFirstJson('')).toBeNull();
+  });
+});
+
+describe('falcon · enqueue input parsing', () => {
+  it('accepts a directions array, trims, drops empties', () => {
+    expect(parseDirections({ directions: ['  Addiction ', '', 'Epilepsy'] })).toEqual(['Addiction', 'Epilepsy']);
+  });
+  it('folds in a lone `direction` alongside the array', () => {
+    expect(parseDirections({ directions: ['Cancer'], direction: 'Alzheimer' })).toEqual(['Cancer', 'Alzheimer']);
+  });
+  it('dedupes exact repeats', () => {
+    expect(parseDirections({ directions: ['Slavery', 'Slavery', 'Dreyfus'] })).toEqual(['Slavery', 'Dreyfus']);
+  });
+  it('caps at 200 directions', () => {
+    const many = Array.from({ length: 250 }, (_, i) => `d${i}`);
+    expect(parseDirections({ directions: many })).toHaveLength(200);
+  });
+  it('returns empty when nothing usable is given', () => {
+    expect(parseDirections({})).toEqual([]);
+    expect(parseDirections({ directions: ['   ', ''] })).toEqual([]);
   });
 });
