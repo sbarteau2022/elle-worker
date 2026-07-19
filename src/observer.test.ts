@@ -1,7 +1,7 @@
 // Pure-logic tests for the Observer: the opening-axis roster and that every
 // axis instructs JSON-only output. No network, no D1.
 import { describe, it, expect } from 'vitest';
-import { OPENING_AXES } from './observer';
+import { OPENING_AXES, axisProse, kappaTrajectory } from './observer';
 
 describe('observer · the opening axes', () => {
   it('two opening axes — Dominant Narrative and Counter-Narrative — feeding the structural reading', () => {
@@ -22,5 +22,27 @@ describe('observer · the opening axes', () => {
       expect(a.system.length).toBeGreaterThan(80);
       expect(a.system).toMatch(/Respond ONLY with valid JSON/);
     }
+  });
+});
+
+describe('observer · the read-only trajectory instrument (Rung 3)', () => {
+  it('axisProse flattens an axis output to its string leaves only, dropping keys/numbers', () => {
+    const data = { structural_analysis: 'beneath both narratives', first_principles: ['scarcity', 'incentive'], signal: 0.9, nested: { note: 'held' } };
+    expect(axisProse(data)).toBe('beneath both narratives scarcity incentive held');
+  });
+  it('kappaTrajectory returns one κ per axis, in order, each in [0,1]', () => {
+    const traj = kappaTrajectory([
+      { axis: 'dominant', data: { t: 'the mainstream account is that the institution acted in good faith' } },
+      { axis: 'structural', data: { t: 'beneath both, the incentive structure generates the same suppression' } },
+    ]);
+    expect(traj.map(t => t.axis)).toEqual(['dominant', 'structural']);
+    for (const t of traj) {
+      expect(t.kappa).toBeGreaterThanOrEqual(0);
+      expect(t.kappa).toBeLessThanOrEqual(1);
+    }
+  });
+  it('is deterministic — same reasoning in gives the same κ out (no I/O, no clock)', () => {
+    const steps = [{ axis: 'x', data: { a: 'grounded structural claim traced to first principles' } }];
+    expect(kappaTrajectory(steps)).toEqual(kappaTrajectory(steps));
   });
 });

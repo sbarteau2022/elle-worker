@@ -34,6 +34,34 @@
 import { ensureAllSchemas } from './db/schema';
 import { callLLM, type LLMEnv } from './llm';
 import { parseFirstJson, parseDirections } from './falcon';
+import { computeKappa, KAPPA_DEF } from './journal';
+
+// ── Rung 3: the read-only trajectory instrument ─────────────────
+// An Observer run is a reasoning trajectory — five axes fired in order. We
+// record the per-axis κ path (the same deterministic lexical κ the router
+// already computes per reasoning step) plus a run-level κ. This is an
+// INSTRUMENT, not a controller: it is tagged provisional and NOTHING ranks,
+// gates, or steers on it (same discipline as the κ seam). It exists so the
+// falsifier (a later rung) has real trajectory data to score against the
+// realized outcome — never to drive a decision on its own.
+
+// Flatten an axis's parsed output to its prose (string leaves only), so κ
+// scores the reasoning, not the JSON keys. Pure — unit-testable.
+export function axisProse(data: unknown): string {
+  const parts: string[] = [];
+  const walk = (v: unknown) => {
+    if (typeof v === 'string') parts.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v as Record<string, unknown>).forEach(walk);
+  };
+  walk(data);
+  return parts.join(' ');
+}
+
+// The per-axis κ path over a run. Deterministic (computeKappa is pure). Pure.
+export function kappaTrajectory(steps: Array<{ axis: string; data: unknown }>): Array<{ axis: string; kappa: number }> {
+  return steps.map(s => ({ axis: s.axis, kappa: computeKappa(axisProse(s.data)) }));
+}
 
 export interface ObserverEnv extends LLMEnv {
   DB: D1Database;
@@ -139,7 +167,11 @@ export async function runAndPersistObserver(
   subject: string,
   anchor: string,
   userId: string,
-): Promise<{ analysisId: string; result: ObserverResult }> {
+): Promise<{
+  analysisId: string;
+  result: ObserverResult;
+  kappa: { run: number; trajectory: Array<{ axis: string; kappa: number }>; def: string; provisional: true };
+}> {
   const result = await runObserverAnalysis(env, subject, anchor);
   const analysisId = id();
 
@@ -168,7 +200,25 @@ export async function runAndPersistObserver(
       .bind(id(), analysisId, r.step, String(r.chain).slice(0, 8000), r.model || null, r.provider || null)
   )).catch(() => {});
 
-  return { analysisId, result };
+  // Rung 3 — record the trajectory. Read-only, provisional, gates nothing.
+  const traj = kappaTrajectory([
+    { axis: 'dominant', data: result.dominant.data },
+    { axis: 'counter', data: result.counter.data },
+    { axis: 'structural', data: result.structural.data },
+    { axis: 'dissent', data: result.dissent.data },
+    { axis: 'prediction', data: result.prediction.data },
+  ]);
+  const kappaRun = traj.find(t => t.axis === 'structural')?.kappa ?? 0; // κ of the load-bearing axis
+  const predConf = String((result.prediction.data as Record<string, unknown>)?.confidence || '') || null;
+  const kappa = { run: kappaRun, trajectory: traj, def: KAPPA_DEF, provisional: true as const };
+  await env.DB.prepare(
+    `INSERT INTO observer_trajectory (id, analysis_id, kappa_traj_json, kappa_run, field_held, prediction_confidence, kappa_def, provisional)
+     VALUES (?,?,?,?,?,?,?,1)`
+  ).bind(
+    id(), analysisId, JSON.stringify(traj), kappaRun, result.status === 'complete' ? 1 : 0, predConf, KAPPA_DEF,
+  ).run().catch(() => {}); // instrument write is best-effort — it must never fail a run
+
+  return { analysisId, result, kappa };
 }
 
 // ── DB bootstrap — guarded, self-healing (house style) ─────────
@@ -190,11 +240,12 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     if (subject.length > 2000) return json({ error: 'subject too long (2000 char max)' }, 400);
     const anchor = String(body.anchor || '').trim();
 
-    const { analysisId, result } = await runAndPersistObserver(env, subject, anchor, userId);
+    const { analysisId, result, kappa } = await runAndPersistObserver(env, subject, anchor, userId);
     return json({
       analysis_id: analysisId, subject, anchor: anchor || null, status: result.status,
       dominant: result.dominant.data, counter: result.counter.data,
       structural: result.structural.data, dissent: result.dissent.data, prediction: result.prediction.data,
+      kappa, // read-only instrument — provisional, ranks/gates nothing
     });
   }
 
@@ -271,11 +322,13 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     const a = await env.DB.prepare(`SELECT * FROM observer_analyses WHERE id = ? AND user_id = ?`).bind(analysisId, userId).first() as Record<string, unknown> | null;
     if (!a) return json({ error: 'not found' }, 404);
     const outcome = await env.DB.prepare(`SELECT * FROM observer_outcomes WHERE analysis_id = ?`).bind(analysisId).first();
+    const traj = await env.DB.prepare(`SELECT kappa_traj_json, kappa_run, field_held, prediction_confidence, kappa_def, provisional FROM observer_trajectory WHERE analysis_id = ?`).bind(analysisId).first() as Record<string, unknown> | null;
     const parse = (s: unknown) => { try { return JSON.parse(String(s || 'null')); } catch { return null; } };
     return json({
       analysis_id: analysisId, subject: a.subject, anchor: a.anchor, status: a.status, created_at: a.created_at,
       dominant: parse(a.dominant_json), counter: parse(a.counter_json), structural: parse(a.structural_json),
       dissent: parse(a.dissent_json), prediction: parse(a.prediction_json), outcome: outcome || null,
+      kappa: traj ? { run: traj.kappa_run, trajectory: parse(traj.kappa_traj_json), field_held: traj.field_held === 1, prediction_confidence: traj.prediction_confidence, def: traj.kappa_def, provisional: traj.provisional === 1 } : null,
     });
   }
 

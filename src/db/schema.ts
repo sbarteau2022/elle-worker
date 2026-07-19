@@ -167,6 +167,15 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       status TEXT NOT NULL DEFAULT 'queued', analysis_id TEXT, error TEXT,
       created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
     )`,
+    // observer.ts (Rung 3) — the read-only trajectory instrument. Per-run κ
+    // path over the five axes. provisional=1 always: nothing ranks or gates on
+    // it (same discipline as the κ seam); it exists for the falsifier to score.
+    `CREATE TABLE IF NOT EXISTS observer_trajectory (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL,
+      kappa_traj_json TEXT NOT NULL, kappa_run REAL, field_held INTEGER,
+      prediction_confidence TEXT, kappa_def TEXT, provisional INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     // lattice.ts — The Lattice: 32-axis security deduction engine
     `CREATE TABLE IF NOT EXISTS lattice_analyses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,
