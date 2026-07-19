@@ -217,6 +217,70 @@ async function runFalconAnalysis(env: FalconEnv, direction: string) {
   };
 }
 
+// Run the full analysis AND persist it — the one shared write path for both
+// the HTTP `run` action and the queue drain, so every caller records a run
+// identically (falcon_analyses + falcon_ruptures + falcon_reasoning_log).
+export async function runAndPersistFalcon(
+  env: FalconEnv,
+  direction: string,
+  userId: string,
+): Promise<{ analysisId: string; ruptureId: string; result: Awaited<ReturnType<typeof runFalconAnalysis>> }> {
+  const result = await runFalconAnalysis(env, direction);
+
+  const analysisId = id();
+  await env.DB.prepare(
+    `INSERT INTO falcon_analyses (id, user_id, direction, tier1_json, tier2_json, validation_json) VALUES (?,?,?,?,?,?)`
+  ).bind(
+    analysisId, userId, direction,
+    JSON.stringify(result.tier1).slice(0, 60000),
+    JSON.stringify(result.tier2).slice(0, 60000),
+    JSON.stringify(result.validation).slice(0, 20000),
+  ).run();
+
+  const ruptureId = id();
+  const ruptureData = result.rupture.data as Record<string, unknown>;
+  await env.DB.prepare(
+    `INSERT INTO falcon_ruptures (id, analysis_id, domain, rupture_json, discomfort_index, first_thing_to_build) VALUES (?,?,?,?,?,?)`
+  ).bind(
+    ruptureId, analysisId, direction.slice(0, 200),
+    JSON.stringify(result.rupture).slice(0, 20000),
+    Number.isFinite(Number(ruptureData?.discomfort_index)) ? Number(ruptureData.discomfort_index) : null,
+    ruptureData?.first_thing_to_build ? String(ruptureData.first_thing_to_build).slice(0, 500) : null,
+  ).run();
+
+  // Reasoning log — every axis + validation + rupture, factual chain (spec VI).
+  const logRows = [
+    ...result.tier1.map(r => ({ step: `axis:${r.id}`, chain: JSON.stringify(r.data), model: r.model, provider: r.provider })),
+    ...result.tier2.map(r => ({ step: `axis:${r.id}`, chain: JSON.stringify(r.data), model: r.model, provider: r.provider })),
+    { step: 'validation', chain: JSON.stringify(result.validation.data), model: result.validation.model, provider: result.validation.provider },
+    { step: 'rupture', chain: JSON.stringify(result.rupture.data), model: result.rupture.model, provider: result.rupture.provider },
+  ];
+  await env.DB.batch(logRows.map(r =>
+    env.DB.prepare(`INSERT INTO falcon_reasoning_log (id, analysis_id, step, chain, model, provider) VALUES (?,?,?,?,?,?)`)
+      .bind(id(), analysisId, r.step, String(r.chain).slice(0, 8000), r.model || null, r.provider || null)
+  )).catch(() => {});
+
+  return { analysisId, ruptureId, result };
+}
+
+// Parse enqueue input: accept `directions: string[]` and/or a single
+// `direction`; trim, drop empties, dedupe, cap length (2000) and count (200).
+// Pure — no I/O, so it's unit-testable without D1.
+export function parseDirections(body: Record<string, unknown>): string[] {
+  const raw: unknown[] = Array.isArray(body.directions) ? [...body.directions] : [];
+  if (body.direction) raw.push(body.direction);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of raw) {
+    const s = String(d ?? '').trim().slice(0, 2000);
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+
 // ── DB bootstrap — guarded, self-healing (house style, war-room.ts) ────────
 let falconReady = false;
 async function ensureFalconSchema(env: FalconEnv): Promise<void> {
@@ -235,47 +299,73 @@ export async function handleFalcon(body: Record<string, unknown>, env: FalconEnv
     if (!direction) return json({ error: 'direction required — point the ship at a market, problem, domain, or idea' }, 400);
     if (direction.length > 2000) return json({ error: 'direction too long (2000 char max)' }, 400);
 
-    const result = await runFalconAnalysis(env, direction);
-
-    const analysisId = id();
-    await env.DB.prepare(
-      `INSERT INTO falcon_analyses (id, user_id, direction, tier1_json, tier2_json, validation_json) VALUES (?,?,?,?,?,?)`
-    ).bind(
-      analysisId, userId, direction,
-      JSON.stringify(result.tier1).slice(0, 60000),
-      JSON.stringify(result.tier2).slice(0, 60000),
-      JSON.stringify(result.validation).slice(0, 20000),
-    ).run();
-
-    const ruptureId = id();
-    const ruptureData = result.rupture.data as Record<string, unknown>;
-    await env.DB.prepare(
-      `INSERT INTO falcon_ruptures (id, analysis_id, domain, rupture_json, discomfort_index, first_thing_to_build) VALUES (?,?,?,?,?,?)`
-    ).bind(
-      ruptureId, analysisId, direction.slice(0, 200),
-      JSON.stringify(result.rupture).slice(0, 20000),
-      Number.isFinite(Number(ruptureData?.discomfort_index)) ? Number(ruptureData.discomfort_index) : null,
-      ruptureData?.first_thing_to_build ? String(ruptureData.first_thing_to_build).slice(0, 500) : null,
-    ).run();
-
-    // Reasoning log — every axis + validation + rupture, factual chain,
-    // logged completely before the response is returned (spec VI).
-    const logRows = [
-      ...result.tier1.map(r => ({ step: `axis:${r.id}`, chain: JSON.stringify(r.data), model: r.model, provider: r.provider })),
-      ...result.tier2.map(r => ({ step: `axis:${r.id}`, chain: JSON.stringify(r.data), model: r.model, provider: r.provider })),
-      { step: 'validation', chain: JSON.stringify(result.validation.data), model: result.validation.model, provider: result.validation.provider },
-      { step: 'rupture', chain: JSON.stringify(result.rupture.data), model: result.rupture.model, provider: result.rupture.provider },
-    ];
-    await env.DB.batch(logRows.map(r =>
-      env.DB.prepare(`INSERT INTO falcon_reasoning_log (id, analysis_id, step, chain, model, provider) VALUES (?,?,?,?,?,?)`)
-        .bind(id(), analysisId, r.step, String(r.chain).slice(0, 8000), r.model || null, r.provider || null)
-    )).catch(() => {});
-
+    const { analysisId, ruptureId, result } = await runAndPersistFalcon(env, direction, userId);
     return json({
       analysis_id: analysisId, rupture_id: ruptureId, direction,
       tier1: result.tier1, tier2: result.tier2,
       validation: result.validation.data, rupture: result.rupture.data,
     });
+  }
+
+  // ── enqueue — stage directions for later runs. Cheap: no LLM call, just
+  //    rows in falcon_queue. Point the whole run-queue at it in one request.
+  if (action === 'enqueue') {
+    const directions = parseDirections(body);
+    if (!directions.length) return json({ error: 'directions (array) or direction (string) required' }, 400);
+    const note = body.note ? String(body.note).slice(0, 200) : null;
+    await env.DB.batch(directions.map(d =>
+      env.DB.prepare(`INSERT INTO falcon_queue (id, user_id, direction, note) VALUES (?,?,?,?)`)
+        .bind(id(), userId, d, note)
+    ));
+    return json({ enqueued: directions.length });
+  }
+
+  // ── drain — run up to N queued directions and persist each. Default 1,
+  //    capped at 3: one run is ~17 LLM calls, so the cap keeps a single
+  //    invocation inside Worker subrequest/CPU limits. Call again (or wire a
+  //    cron — a later rung) to keep the queue draining. Each row is claimed
+  //    atomically so concurrent drains don't double-run it.
+  if (action === 'drain') {
+    const n = Math.min(Math.max(Number(body.n) || 1, 1), 3);
+    const processed: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < n; i++) {
+      const next = await env.DB.prepare(
+        `SELECT id, direction FROM falcon_queue WHERE user_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1`
+      ).bind(userId).first() as { id: string; direction: string } | null;
+      if (!next) break;
+      const claim = await env.DB.prepare(
+        `UPDATE falcon_queue SET status = 'running', updated_at = datetime('now') WHERE id = ? AND status = 'queued'`
+      ).bind(next.id).run();
+      if (!claim.meta?.changes) continue; // another drain claimed it first
+      try {
+        const { analysisId, ruptureId } = await runAndPersistFalcon(env, next.direction, userId);
+        await env.DB.prepare(
+          `UPDATE falcon_queue SET status = 'done', analysis_id = ?, updated_at = datetime('now') WHERE id = ?`
+        ).bind(analysisId, next.id).run();
+        processed.push({ queue_id: next.id, direction: next.direction, analysis_id: analysisId, rupture_id: ruptureId, status: 'done' });
+      } catch (e) {
+        const msg = String((e as Error)?.message || e).slice(0, 500);
+        await env.DB.prepare(
+          `UPDATE falcon_queue SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`
+        ).bind(msg, next.id).run();
+        processed.push({ queue_id: next.id, direction: next.direction, status: 'error', error: msg });
+      }
+    }
+    const remaining = await env.DB.prepare(
+      `SELECT COUNT(*) AS c FROM falcon_queue WHERE user_id = ? AND status = 'queued'`
+    ).bind(userId).first() as { c: number } | null;
+    return json({ processed, remaining: remaining?.c ?? 0 });
+  }
+
+  // ── queue_status — counts by state + the 20 most recent rows.
+  if (action === 'queue_status') {
+    const counts = await env.DB.prepare(
+      `SELECT status, COUNT(*) AS c FROM falcon_queue WHERE user_id = ? GROUP BY status`
+    ).bind(userId).all().catch(() => ({ results: [] }));
+    const recent = await env.DB.prepare(
+      `SELECT id, direction, status, analysis_id, error, created_at, updated_at FROM falcon_queue WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`
+    ).bind(userId).all().catch(() => ({ results: [] }));
+    return json({ counts: counts.results || [], recent: recent.results || [] });
   }
 
   if (action === 'list') {
@@ -325,5 +415,5 @@ export async function handleFalcon(body: Record<string, unknown>, env: FalconEnv
     return json({ success: true });
   }
 
-  return json({ error: `unknown action "${action}" (run|list|get|outcome)` }, 400);
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|list|get|outcome)` }, 400);
 }

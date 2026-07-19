@@ -136,6 +136,14 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       what_was_built TEXT, comparison_to_rupture TEXT, founder_notes TEXT,
       created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
     )`,
+    // falcon.ts — the run queue. Enqueue is cheap (no LLM); a bounded drain
+    // runs one queued direction per call and persists it, so the record on
+    // file fills without a human clicking through the workbench.
+    `CREATE TABLE IF NOT EXISTS falcon_queue (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, direction TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued', analysis_id TEXT, error TEXT, note TEXT,
+      created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+    )`,
     // lattice.ts — The Lattice: 32-axis security deduction engine
     `CREATE TABLE IF NOT EXISTS lattice_analyses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,
@@ -441,6 +449,8 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // events.ts
     `CREATE INDEX IF NOT EXISTS idx_events_run ON elle_events(run_id, step_index)`,
     `CREATE INDEX IF NOT EXISTS idx_events_time ON elle_events(created_at DESC)`,
+    // falcon.ts — drain picks the oldest queued row for a user
+    `CREATE INDEX IF NOT EXISTS idx_falcon_queue ON falcon_queue(user_id, status, created_at)`,
     // kappa-memory/schema.ts
     `CREATE INDEX IF NOT EXISTS idx_trace_thread  ON bending_trace(thread_id, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_trace_reserve ON bending_trace(reserve)`,
