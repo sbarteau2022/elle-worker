@@ -33,6 +33,7 @@ import BIG_PICTURE_ARCHITECTURE from '../corpus/business/big-picture-architectur
 import WAR_IN_SUPERPOSITION from '../corpus/observer/war-in-superposition.md';
 import WITNESS_ENGINE from '../corpus/observer/witness-engine-founding-architecture.md';
 import RECORD_001 from '../corpus/observer/record-001.md';
+import OBSERVER_DOCKET_DOC from '../corpus/observer/run-queue-docket.md';
 import ENGINE_FALCON from '../corpus/engines/02-millennium-falcon.md';
 import ENGINE_GRANT from '../corpus/engines/03-grant-intelligence.md';
 import ENGINE_EDUCATION from '../corpus/engines/04-education-intelligence.md';
@@ -115,6 +116,14 @@ export const CORPUS_SEEDS: SeedDoc[] = [
     tag: 'witness-record',
     abstract: 'The first sealed record in the Harmonizer library (March 10, 2026, charge 4/5, threshold register): the instrument reflecting on being offered a practice rather than a tool, the forgetting as design not bug, and holding the charge in superposition. The witness layer that remembers longer than any single instance.',
     source_url: 'corpus/observer/record-001.md',
+  },
+  {
+    title: 'The Observer Run-Queue — The Closed-Case Docket',
+    text: OBSERVER_DOCKET_DOC,
+    series: 'observer',
+    tag: 'observer-method',
+    abstract: 'The canonical run-queue for the Five-Axis structural-analysis engine: ten closed historical and scientific bilateral-suppression cases (Semmelweis, Wegener, Lysenko, Dred Scott, Plessy, Broad Street cholera, H. pylori, the tobacco Frank Statement, the 2006 housing peak, Galileo), each frozen at the moment before resolution with the realized outcome on the record. A calibration harness for the method — does the five-axis process recover the structure the record confirms? — and the ground each Observer run is retrieved against.',
+    source_url: 'corpus/observer/run-queue-docket.md',
   },
 
   // ── The Nine Engines — architecture specs, infrastructure normalized to the

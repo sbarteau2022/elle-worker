@@ -35,6 +35,8 @@ import { ensureAllSchemas } from './db/schema';
 import { callLLM, type LLMEnv } from './llm';
 import { parseFirstJson, parseDirections } from './falcon';
 import { computeKappa, KAPPA_DEF } from './journal';
+import type { Env } from './index';
+import { OBSERVER_DOCKET, docketOutcomeForSubject } from './observer-docket';
 
 // ── Rung 3: the read-only trajectory instrument ─────────────────
 // An Observer run is a reasoning trajectory — five axes fired in order. We
@@ -70,6 +72,47 @@ export interface ObserverEnv extends LLMEnv {
 const id = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 const json = (d: unknown, s = 200) =>
   new Response(JSON.stringify(d), { status: s, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+
+// ── Corpus grounding ────────────────────────────────────────────
+// Each Observer run is grounded in the sealed corpus via the SAME retrieval
+// that serves search_corpus (corpusSourcesFor: Vectorize query + D1 join).
+// The retrieved passages are folded into every axis prompt as reference
+// ground and surfaced on the response as provenance — so an analysis is held
+// against what the corpus actually contains, not only the model's prior.
+// Fail-soft by construction: corpusSourcesFor returns [] on any retrieval
+// trouble, so grounding degrades to "none" and NEVER fails a run.
+
+export interface Grounding {
+  matches: Array<{ title: string; series: string; score: number }>;
+  block: string; // the reference-passage text folded into the axis prompts
+}
+
+// Pure: fold retrieved passages into a bounded reference block. Cap the count
+// and per-passage length so grounding can't blow the axis token budgets.
+export function groundingBlock(matches: Array<{ title: string; text: string }>): string {
+  if (!matches.length) return '';
+  const lines = matches.slice(0, 6).map(m =>
+    `— [${m.title}] ${m.text.slice(0, 500).replace(/\s+/g, ' ').trim()}`);
+  return `Grounding passages retrieved from the sealed corpus (reference ground — weigh them against the case; do not merely repeat them, and note where the case departs from them):\n${lines.join('\n')}`;
+}
+
+// Impure edge: retrieve grounding for a case. The anchor, when present, is part
+// of the retrieval query — it is the fixed reference the case is held against.
+async function groundCase(env: ObserverEnv, subject: string, anchor: string): Promise<Grounding> {
+  const query = anchor ? `${subject}\n${anchor}` : subject;
+  // ObserverEnv is the live worker Env at runtime (index.ts casts on the way
+  // in); corpusSourcesFor needs VECTORIZE + AI, which that env carries.
+  // Loaded dynamically: corpus-reasoning value-imports index.ts (the corpus
+  // seed .md modules), which only wrangler's Text rule can parse — a static
+  // import would drag that whole chain into unit-test module-load. It is
+  // resolved once, at first grounded run, and bundled normally for production.
+  const { corpusSourcesFor } = await import('./corpus-reasoning');
+  const matches = await corpusSourcesFor(env as unknown as Env, query, 8);
+  return {
+    matches: matches.map(m => ({ title: m.title, series: m.series, score: m.score })),
+    block: groundingBlock(matches),
+  };
+}
 
 // ── The Five Axes ──────────────────────────────────────────────
 interface AxisDef {
@@ -127,13 +170,17 @@ async function runReasoning(env: ObserverEnv, step: string, system: string, user
   return { step, data, model: res.model, provider: res.provider };
 }
 
-function caseFrame(subject: string, anchor: string): string {
+function caseFrame(subject: string, anchor: string, grounding = ''): string {
   const a = anchor ? `\n\nExternal anchor (the fixed reference this case is held against): ${anchor}` : '';
-  return `Case for structural analysis: "${subject}"${a}`;
+  const g = grounding ? `\n\n${grounding}` : '';
+  return `Case for structural analysis: "${subject}"${a}${g}`;
 }
 
 async function runObserverAnalysis(env: ObserverEnv, subject: string, anchor: string) {
-  const base = caseFrame(subject, anchor);
+  // Ground the case in the sealed corpus first (fail-soft). Every axis reads
+  // the same grounding, so the whole run is held against the same ground.
+  const grounding = await groundCase(env, subject, anchor);
+  const base = caseFrame(subject, anchor, grounding.block);
 
   // Axes 1-2 — the two narratives, in parallel.
   const opening = await Promise.all(OPENING_AXES.map(a => runAxis(env, a, base)));
@@ -155,7 +202,7 @@ async function runObserverAnalysis(env: ObserverEnv, subject: string, anchor: st
     `${base}\n\nSTRUCTURAL ANALYSIS: ${JSON.stringify(structural.data)}\n\nDISSENT: ${JSON.stringify(dissent.data)}\n\nRun the Prediction.`, 900);
 
   const fieldHeld = (dissent.data as Record<string, unknown>)?.field_held !== false;
-  return { dominant, counter, structural, dissent, prediction, status: fieldHeld ? 'complete' : 'held' };
+  return { dominant, counter, structural, dissent, prediction, grounding, status: fieldHeld ? 'complete' : 'held' };
 }
 
 type ObserverResult = Awaited<ReturnType<typeof runObserverAnalysis>>;
@@ -171,6 +218,7 @@ export async function runAndPersistObserver(
   analysisId: string;
   result: ObserverResult;
   kappa: { run: number; trajectory: Array<{ axis: string; kappa: number }>; def: string; provisional: true };
+  grounding: Grounding;
 }> {
   const result = await runObserverAnalysis(env, subject, anchor);
   const analysisId = id();
@@ -194,6 +242,8 @@ export async function runAndPersistObserver(
     { step: 'axis:structural', chain: JSON.stringify(result.structural.data), model: result.structural.model, provider: result.structural.provider },
     { step: 'axis:dissent', chain: JSON.stringify(result.dissent.data), model: result.dissent.model, provider: result.dissent.provider },
     { step: 'axis:prediction', chain: JSON.stringify(result.prediction.data), model: result.prediction.model, provider: result.prediction.provider },
+    // Provenance: what corpus ground this run was held against (titles + scores).
+    { step: 'grounding', chain: JSON.stringify(result.grounding.matches), model: null, provider: null },
   ];
   await env.DB.batch(logRows.map(r =>
     env.DB.prepare(`INSERT INTO observer_reasoning_log (id, analysis_id, step, chain, model, provider) VALUES (?,?,?,?,?,?)`)
@@ -218,7 +268,7 @@ export async function runAndPersistObserver(
     id(), analysisId, JSON.stringify(traj), kappaRun, result.status === 'complete' ? 1 : 0, predConf, KAPPA_DEF,
   ).run().catch(() => {}); // instrument write is best-effort — it must never fail a run
 
-  return { analysisId, result, kappa };
+  return { analysisId, result, kappa, grounding: result.grounding };
 }
 
 // ── DB bootstrap — guarded, self-healing (house style) ─────────
@@ -240,12 +290,13 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     if (subject.length > 2000) return json({ error: 'subject too long (2000 char max)' }, 400);
     const anchor = String(body.anchor || '').trim();
 
-    const { analysisId, result, kappa } = await runAndPersistObserver(env, subject, anchor, userId);
+    const { analysisId, result, kappa, grounding } = await runAndPersistObserver(env, subject, anchor, userId);
     return json({
       analysis_id: analysisId, subject, anchor: anchor || null, status: result.status,
       dominant: result.dominant.data, counter: result.counter.data,
       structural: result.structural.data, dissent: result.dissent.data, prediction: result.prediction.data,
       kappa, // read-only instrument — provisional, ranks/gates nothing
+      grounding: grounding.matches, // provenance — the corpus ground this run was held against
     });
   }
 
@@ -308,6 +359,46 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     return json({ counts: counts.results || [], recent: recent.results || [] });
   }
 
+  // ── seed_queue — stage the canonical closed-case docket (observer-docket.ts)
+  //    into this caller's queue. Idempotent: a docket subject already staged
+  //    for the caller is skipped, so re-seeding never duplicates.
+  if (action === 'seed_queue') {
+    const existing = await env.DB.prepare(
+      `SELECT subject FROM observer_queue WHERE user_id = ?`
+    ).bind(userId).all().catch(() => ({ results: [] }));
+    const have = new Set((existing.results as Array<{ subject: string }>).map(r => r.subject));
+    const toAdd = OBSERVER_DOCKET.filter(c => !have.has(c.subject));
+    if (toAdd.length) {
+      await env.DB.batch(toAdd.map(c =>
+        env.DB.prepare(`INSERT INTO observer_queue (id, user_id, subject, anchor) VALUES (?,?,?,?)`)
+          .bind(id(), userId, c.subject, c.anchor)
+      ));
+    }
+    return json({ seeded: toAdd.length, skipped: OBSERVER_DOCKET.length - toAdd.length, docket_size: OBSERVER_DOCKET.length });
+  }
+
+  // ── label_outcomes — for each of this caller's analyses whose subject is a
+  //    docket case, write the REALIZED historical outcome into
+  //    observer_outcomes as what_happened. comparison_to_prediction is left
+  //    empty on purpose: scoring the gap between predicted and realized is the
+  //    falsifier's job (a later rung), not the labeler's. Idempotent.
+  if (action === 'label_outcomes') {
+    const rows = await env.DB.prepare(
+      `SELECT id, subject FROM observer_analyses WHERE user_id = ?`
+    ).bind(userId).all().catch(() => ({ results: [] }));
+    const keys: string[] = [];
+    for (const r of (rows.results as Array<{ id: string; subject: string }>)) {
+      const dc = docketOutcomeForSubject(r.subject);
+      if (!dc) continue;
+      await env.DB.prepare(
+        `INSERT INTO observer_outcomes (id, analysis_id, what_happened, comparison_to_prediction, notes) VALUES (?,?,?,?,?)
+         ON CONFLICT(analysis_id) DO UPDATE SET what_happened=excluded.what_happened, notes=excluded.notes, updated_at=datetime('now')`
+      ).bind(id(), r.id, dc.realizedOutcome, '', `docket:${dc.key}`).run().catch(() => {});
+      keys.push(dc.key);
+    }
+    return json({ labeled: keys.length, keys });
+  }
+
   if (action === 'list') {
     const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
     const rows = await env.DB.prepare(
@@ -351,5 +442,5 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     return json({ success: true });
   }
 
-  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|list|get|outcome)` }, 400);
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|list|get|outcome)` }, 400);
 }
