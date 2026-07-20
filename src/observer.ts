@@ -291,6 +291,28 @@ async function ensureObserverSchema(env: ObserverEnv): Promise<void> {
 }
 
 // ── The handler — /api/observer ─────────────────────────────────
+// Stage the canonical closed-case docket into a user's queue. Idempotent: a
+// docket subject already present for the user (any status, including 'done') is
+// skipped, so re-seeding never duplicates and a drained docket never re-runs.
+// Cheap — one SELECT plus at most one INSERT batch, no model calls. Shared by
+// the `seed_queue` action and the auto-drain cron (which self-seeds when armed).
+export async function seedObserverDocket(
+  env: ObserverEnv, userId: string,
+): Promise<{ seeded: number; skipped: number; docket_size: number }> {
+  const existing = await env.DB.prepare(
+    `SELECT subject FROM observer_queue WHERE user_id = ?`
+  ).bind(userId).all().catch(() => ({ results: [] }));
+  const have = new Set((existing.results as Array<{ subject: string }>).map(r => r.subject));
+  const toAdd = OBSERVER_DOCKET.filter(c => !have.has(c.subject));
+  if (toAdd.length) {
+    await env.DB.batch(toAdd.map(c =>
+      env.DB.prepare(`INSERT INTO observer_queue (id, user_id, subject, anchor) VALUES (?,?,?,?)`)
+        .bind(id(), userId, c.subject, c.anchor)
+    ));
+  }
+  return { seeded: toAdd.length, skipped: OBSERVER_DOCKET.length - toAdd.length, docket_size: OBSERVER_DOCKET.length };
+}
+
 // Drain up to N queued cases (default 1, cap 3 — one run is ~5 model calls),
 // running and persisting each. Rows are claimed atomically so concurrent drains
 // (an HTTP call and the cron) never double-run a case. Returns immediately with
@@ -386,18 +408,7 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
   //    into this caller's queue. Idempotent: a docket subject already staged
   //    for the caller is skipped, so re-seeding never duplicates.
   if (action === 'seed_queue') {
-    const existing = await env.DB.prepare(
-      `SELECT subject FROM observer_queue WHERE user_id = ?`
-    ).bind(userId).all().catch(() => ({ results: [] }));
-    const have = new Set((existing.results as Array<{ subject: string }>).map(r => r.subject));
-    const toAdd = OBSERVER_DOCKET.filter(c => !have.has(c.subject));
-    if (toAdd.length) {
-      await env.DB.batch(toAdd.map(c =>
-        env.DB.prepare(`INSERT INTO observer_queue (id, user_id, subject, anchor) VALUES (?,?,?,?)`)
-          .bind(id(), userId, c.subject, c.anchor)
-      ));
-    }
-    return json({ seeded: toAdd.length, skipped: OBSERVER_DOCKET.length - toAdd.length, docket_size: OBSERVER_DOCKET.length });
+    return json(await seedObserverDocket(env, userId));
   }
 
   // ── label_outcomes — for each of this caller's analyses whose subject is a

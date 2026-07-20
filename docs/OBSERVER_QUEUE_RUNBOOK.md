@@ -93,19 +93,27 @@ signal.
 
 ## C. Auto-drain (let the corpus run itself)
 
-Off by default. To have the queue drain itself, set the Worker var to the owner
-user id whose `observer_queue` should run:
+Off by default. One switch arms it: set `OBSERVER_AUTODRAIN_USER` in
+`wrangler.toml` `[vars]` (or as a Worker secret) to the owner user id whose
+`observer_queue` should run.
 
-```
-wrangler secret put OBSERVER_AUTODRAIN_USER      # value = the owner user id
-```
+Once armed, the `scheduled()` cron (`observer_drain`, every 5 minutes, offset to
+:04/:09/…) does two things per tick:
 
-Once set, the `scheduled()` cron runs **one** queued case every 5 minutes
-(`observer_drain`, offset to :04/:09/…), then idles the moment the queue empties
-— an empty queue makes zero model calls. Seed/enqueue first (steps A1 / B1), arm
-the var, and the docket + any staged open cases run themselves, ~12 cases/hour
-max, bounded. Unset the var to stop. This is the one deliberate
+1. **Self-seeds the docket** — ensures the ten closed cases are staged for that
+   user. Idempotent: a docket subject already present (any status, including a
+   drained `done`) is skipped, so the docket seeds once and never re-runs.
+2. **Drains one case** — runs and persists a single queued case, then idles the
+   moment the queue empties (an empty queue makes zero model calls).
+
+So arming the var alone is enough to run the closed docket end to end — no manual
+`seed_queue` needed. ~12 cases/hour max, bounded. Any **open** cases you stage
+(step B1) also drain on the same clock. Blank the var to stop. Each case spends
+~5 model calls, so this is the one deliberate, visible
 "spend-budget-to-run-the-history-corpus" switch; the code never flips it for you.
+
+After the docket drains, run `label_outcomes` once (step A4) so `falsify` can
+read the calibration segment — the cron does not label outcomes for you.
 
 ---
 
