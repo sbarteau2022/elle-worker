@@ -21,7 +21,7 @@ import {
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
 import { handleFalcon, type FalconEnv } from './falcon';
-import { handleObserver, drainObserverQueue, type ObserverEnv } from './observer';
+import { handleObserver, drainObserverQueue, seedObserverDocket, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
@@ -1094,15 +1094,18 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     case 'conductor_explore':
       return await runConductor(env, runRouter, routerDeps(), { mode: 'explore' });
     case 'observer_drain': {
-      // Env-gated (OBSERVER_AUTODRAIN_USER). Runs ONE queued Observer case per
-      // tick for the named owner, then idles when the queue empties (an empty
-      // queue makes zero model calls). This is how the docket/open-case history
-      // corpus "runs itself" once the human flips the switch — bounded, opt-in,
-      // and silent when there is nothing to do.
+      // Env-gated (OBSERVER_AUTODRAIN_USER). When the var names an owner, this
+      // makes the history corpus run itself with ONE switch: it ensures the
+      // closed-case docket is staged (idempotent — a drained docket never
+      // re-runs), then runs ONE queued case per tick and idles once the queue
+      // empties (an empty queue makes zero model calls). Bounded, opt-in, silent
+      // when there is nothing to do.
       const owner = env.OBSERVER_AUTODRAIN_USER;
       if (!owner) return { ran: 'observer_drain (disabled — OBSERVER_AUTODRAIN_USER unset)' };
-      const out = await drainObserverQueue(env as unknown as ObserverEnv, owner, 1);
-      return { ran: `observer_drain (processed ${out.processed.length}, remaining ${out.remaining})` };
+      const oenv = env as unknown as ObserverEnv;
+      const seed = await seedObserverDocket(oenv, owner);
+      const out = await drainObserverQueue(oenv, owner, 1);
+      return { ran: `observer_drain (seeded ${seed.seeded}, processed ${out.processed.length}, remaining ${out.remaining})` };
     }
     case 'consolidate': return { ran: await runConsolidation(env, embed) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };

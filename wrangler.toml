@@ -144,6 +144,15 @@ ENVIRONMENT = "production"
 #   wrangler d1 execute rapid2ai-db --remote --command "SELECT DISTINCT venue_id FROM vendor_document_payload LIMIT 5"
 VENUE_ID = ""
 
+# OBSERVER AUTO-DRAIN (src/observer.ts + the observer_drain cron). Naming an
+# owner user id here ARMS the history corpus to run itself: every 5 minutes the
+# scheduled handler ensures the closed-case docket is staged for this user
+# (idempotent — a drained docket never re-runs) and runs ONE queued case, then
+# idles once the queue empties (an empty queue makes zero model calls). Each
+# case spends ~5 model calls, so this is deliberate, visible, and bounded.
+# Blank ⇒ the cron is a no-op. Owner set on request ("just let it self drain").
+OBSERVER_AUTODRAIN_USER = "28430abe976eab8599b5103d58bf4192"
+
 # LIVE TRADING is a TWO-KEY operation (src/live-guard.ts): a non-paper
 # ALPACA_BASE_URL is refused everywhere unless the ELLE_LIVE_TRADING secret
 # is exactly 'on'. Arm deliberately with:
