@@ -37,6 +37,7 @@ import { parseFirstJson, parseDirections } from './falcon';
 import { computeKappa, KAPPA_DEF } from './journal';
 import type { Env } from './index';
 import { OBSERVER_DOCKET, docketOutcomeForSubject } from './observer-docket';
+import { falsify, overlapMatch } from './observer-falsifier';
 
 // ── Rung 3: the read-only trajectory instrument ─────────────────
 // An Observer run is a reasoning trajectory — five axes fired in order. We
@@ -442,5 +443,44 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     return json({ success: true });
   }
 
-  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|list|get|outcome)` }, 400);
+  // ── falsify — the NULL-able gate (observer-falsifier.ts). Scores, over the
+  //    caller's docket-labeled runs, whether trajectory κ predicts how well the
+  //    Prediction matched the realized outcome, against a permutation null.
+  //    Records the per-run match into comparison_to_prediction (the field the
+  //    labeler left for the falsifier). READ-ONLY as to behaviour: it ranks and
+  //    gates NOTHING. Returns UNDERPOWERED until enough real runs exist (the
+  //    docket is only 10 cases) — never dressing thin data as a verdict.
+  if (action === 'falsify') {
+    const rows = await env.DB.prepare(
+      `SELECT a.id AS analysis_id, a.prediction_json, t.kappa_run, o.what_happened, o.notes
+       FROM observer_analyses a
+       JOIN observer_trajectory t ON t.analysis_id = a.id
+       JOIN observer_outcomes o ON o.analysis_id = a.id
+       WHERE a.user_id = ? AND o.notes LIKE 'docket:%' AND t.kappa_run IS NOT NULL`
+    ).bind(userId).all().catch(() => ({ results: [] }));
+
+    const cases: Array<{ analysis_id: string; docket: string; coherence: number; match: number }> = [];
+    for (const r of (rows.results as Array<Record<string, unknown>>)) {
+      let predText = '';
+      try { predText = axisProse(JSON.parse(String(r.prediction_json || 'null'))); } catch { /* leave empty */ }
+      const match = overlapMatch(predText, String(r.what_happened || ''));
+      const coherence = Number(r.kappa_run);
+      cases.push({ analysis_id: String(r.analysis_id), docket: String(r.notes || '').replace(/^docket:/, ''), coherence, match });
+      // Record the measurement the labeler deferred to the falsifier.
+      await env.DB.prepare(
+        `UPDATE observer_outcomes SET comparison_to_prediction = ?, updated_at = datetime('now') WHERE analysis_id = ?`
+      ).bind(JSON.stringify({ match, method: 'lexical-overlap-proxy' }), String(r.analysis_id)).run().catch(() => {});
+    }
+
+    const result = falsify(cases.map(c => ({ coherence: c.coherence, match: c.match })), { seed: 1 });
+    return json({
+      ...result,
+      claim: 'trajectory κ predicts prediction↔outcome match (one-sided; permutation null)',
+      match_method: 'lexical-overlap-proxy (deterministic stand-in for an LLM/human judge)',
+      provisional: true,
+      cases: cases.map(c => ({ docket: c.docket, kappa: c.coherence, match: Number(c.match.toFixed(4)) })),
+    });
+  }
+
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|falsify|list|get|outcome)` }, 400);
 }
