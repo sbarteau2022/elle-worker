@@ -21,7 +21,7 @@ import {
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
 import { handleFalcon, type FalconEnv } from './falcon';
-import { handleObserver, type ObserverEnv } from './observer';
+import { handleObserver, drainObserverQueue, seedObserverDocket, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
@@ -79,6 +79,7 @@ import { sseDoor, memberDonePayload } from './stream';
 import { handleArrival } from './arrival';
 import { memWrite, memRecall, assembleContext, memVectorBackfill, type MemEnv } from './memory';
 import { parseIntake } from './mem-intake';
+import { parseMultimodalIntake, encodeParts, assembleDocument, transcriptStats, type AIRun } from './multimodal-intake';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
@@ -173,6 +174,15 @@ export interface Env extends LLMEnv {
   // voice continuity; when falsy it conditions on extracted threads ALONE and
   // omits prior prose entirely. Default (unset) = include single recent entry.
   JOURNAL_INCLUDE_PRIOR_PROSE?: string;
+  // Observer auto-drain (src/observer.ts). OFF by default: the docket/open-case
+  // queue only runs when a human explicitly drains it (POST /api/observer
+  // {action:'drain'}), because each case spends ~5 model calls. Set this to the
+  // OWNER USER ID whose observer_queue the cron should drain, and the scheduled
+  // handler will run ONE queued case every 5 minutes until the queue is empty,
+  // then idle (an empty queue costs zero model calls). Unset ⇒ the cron is a
+  // no-op. This is the deliberate "spend budget to run the history corpus"
+  // switch — nothing runs itself until this names a user.
+  OBSERVER_AUTODRAIN_USER?: string;
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -572,6 +582,43 @@ async function handleIngest(body: Record<string, string>, env: Env): Promise<Res
   } catch (e) { errors.push((e as Error).message); }
   await env.INGEST_QUEUE.send({ type: 'paper_ingested', paper_id: paperId, title, series, tag, chunks_count: embedded }).catch(() => {});
   return json({ success: true, ingested: true, paper_id: paperId, chunks_total: chunks.length, chunks_embedded: embedded, gate: gate ? { passed: true, checks: gate.checks } : { skipped: true }, errors: errors.length ? errors : undefined });
+}
+
+// Multimodal corpus intake (src/multimodal-intake.ts). Turn image/audio parts
+// into one assembled text via Workers AI, then reuse handleIngest so the text
+// runs the identical gate → chunk → embed → Vectorize path as any paper. The
+// eye is worker-side and additive: nothing about the text lane changes.
+async function handleIngestMultimodal(body: unknown, env: Env): Promise<Response> {
+  const parsed = parseMultimodalIntake(body);
+  if (parsed.error || !parsed.doc) return err(parsed.error || 'invalid multimodal intake', 400);
+  const d = parsed.doc;
+
+  const run: AIRun = (model, inputs) => env.AI.run(model, inputs);
+  const transcripts = await encodeParts(d.parts, {
+    run,
+    visionModel: d.visionModel,
+    audioModel: d.audioModel,
+    visionPrompt: d.visionPrompt,
+    getFromR2: async (key) => (await env.DOCUMENTS.get(key))?.arrayBuffer() ?? null,
+  });
+  const stats = transcriptStats(transcripts);
+  // Nothing readable came back — don't ingest an empty husk; report why.
+  if (stats.withText === 0) {
+    return json({ success: false, ingested: false, reason: 'no text extracted from any part', stats, transcripts }, 422);
+  }
+
+  const text = assembleDocument(d.title, transcripts, d.visionModel, d.audioModel);
+  // Reuse the paper pipeline verbatim (gate on by default; caller may trust).
+  // skip_verification must be a real boolean — handleIngest checks `=== true`.
+  const ingestBody: Record<string, unknown> = {
+    title: d.title, text, series: d.series, tag: d.tag,
+    abstract: d.abstract || '', source_url: d.source_url || '',
+  };
+  if (d.trusted) ingestBody.skip_verification = true;
+  const ingestRes = await handleIngest(ingestBody as Record<string, string>, env);
+  // Fold the transcription stats onto the ingest result so the caller sees both.
+  const ingestJson = await ingestRes.json().catch(() => ({}));
+  return json({ ...(ingestJson as Record<string, unknown>), multimodal: { stats, transcripts: transcripts.map(t => ({ index: t.index, kind: t.kind, label: t.label, chars: t.text.length, error: t.error })) } }, ingestRes.status);
 }
 
 // ── Persistent memory helpers ─────────────────────────────────
@@ -1084,6 +1131,20 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     // sentry), and runs prefer:'local' — so a faster clock costs nothing.
     case 'conductor_explore':
       return await runConductor(env, runRouter, routerDeps(), { mode: 'explore' });
+    case 'observer_drain': {
+      // Env-gated (OBSERVER_AUTODRAIN_USER). When the var names an owner, this
+      // makes the history corpus run itself with ONE switch: it ensures the
+      // closed-case docket is staged (idempotent — a drained docket never
+      // re-runs), then runs ONE queued case per tick and idles once the queue
+      // empties (an empty queue makes zero model calls). Bounded, opt-in, silent
+      // when there is nothing to do.
+      const owner = env.OBSERVER_AUTODRAIN_USER;
+      if (!owner) return { ran: 'observer_drain (disabled — OBSERVER_AUTODRAIN_USER unset)' };
+      const oenv = env as unknown as ObserverEnv;
+      const seed = await seedObserverDocket(oenv, owner);
+      const out = await drainObserverQueue(oenv, owner, 1);
+      return { ran: `observer_drain (seeded ${seed.seeded}, processed ${out.processed.length}, remaining ${out.remaining})` };
+    }
     case 'consolidate': return { ran: await runConsolidation(env, embed) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
@@ -1954,6 +2015,10 @@ export default {
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
+    // Multimodal corpus intake — the worker-side eye. Images/audio → Workers AI
+    // (vision + whisper) → one assembled text → the SAME ingest pipeline above.
+    // Video = caller-supplied keyframes (image parts) + audio track (audio part).
+    if (path === '/api/ingest-multimodal') { if (!svc) return err('Unauthorized', 401); return handleIngestMultimodal(body, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/research')          { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
@@ -2411,6 +2476,12 @@ export default {
     // laptop's sandbox path is open, and then generation runs on the local
     // model. Cloud-spending lanes stay on the :30 tick above, ~1 run/hour max.
     if (m % 10 === 2) fire('conductor_explore'); // :02 :12 :22 :32 :42 :52
+    // Observer auto-drain — env-gated (OBSERVER_AUTODRAIN_USER). Every 5 min on
+    // the :04/:09/... offset so it never stacks on trading/explore/the full
+    // tick. A no-op (zero model calls) unless the env var names an owner AND
+    // that owner has queued cases — so it costs nothing until deliberately armed
+    // and idles the moment the history-corpus queue drains.
+    if (m % 5 === 4) fire('observer_drain'); // :04 :09 :14 … — bounded, opt-in
     // The expressive acts are no longer FORCED by the clock. The old 03:00
     // dream and 20:00 journal jobs still exist (on demand via /api/cron), but
     // the clock now rings a VOLITION tick hourly at :45 instead — a free

@@ -166,7 +166,7 @@ export const CORPUS_SEEDS: SeedDoc[] = [
     text: OBSERVER_DOCKET_DOC,
     series: 'observer',
     tag: 'observer-method',
-    abstract: 'The canonical run-queue for the Five-Axis structural-analysis engine: ten closed historical and scientific bilateral-suppression cases (Semmelweis, Wegener, Lysenko, Dred Scott, Plessy, Broad Street cholera, H. pylori, the tobacco Frank Statement, the 2006 housing peak, Galileo), each frozen at the moment before resolution with the realized outcome on the record. A calibration harness for the method — does the five-axis process recover the structure the record confirms? — and the ground each Observer run is retrieved against.',
+    abstract: 'The canonical run-queue for the Five-Axis structural-analysis engine: thirty closed historical and scientific bilateral-suppression cases spanning medicine, geology, genetics, physics, astronomy, law, public health, environment, and finance (Semmelweis, Wegener, Lysenko, Dred Scott, Plessy, Broad Street cholera, H. pylori, the tobacco Frank Statement, the 2006 housing peak, Galileo, Mendel, Boltzmann, Goldberger, McClintock, Margulis, Prusiner, Chandrasekhar, the Alvarez impact, the CFC–ozone hypothesis, Silent Spring, leaded gasoline, thalidomide, Dreyfus, Lochner, Buck v. Bell, Olmstead, Korematsu, LTCM, Enron, Madoff), each frozen at the moment before resolution with the realized outcome on the record. A calibration harness for the method — does the five-axis process recover the structure the record confirms? — sized so the falsifier has the statistical power to return a verdict, and the ground each Observer run is retrieved against.',
     source_url: 'corpus/observer/run-queue-docket.md',
   },
 

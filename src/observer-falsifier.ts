@@ -18,7 +18,9 @@
 //   PASS         — p < alpha AND rho > 0  (coherence predicts accuracy)
 //   NULL         — otherwise               (the honest empty result)
 //   UNDERPOWERED — fewer than POWER_FLOOR pairs (no verdict; never dress
-//                  sampling noise as signal — the docket is only 10 cases)
+//                  sampling noise as signal). The docket was expanded from 10
+//                  to 30 closed cases (observer-docket.ts) precisely so a real
+//                  effect can clear the floor and the p<alpha bar on power.
 //
 // It RANKS AND GATES NOTHING. It is a verdict readout. Whether κ ever earns the
 // right to inform, let alone steer, reasoning stays gated behind this returning
