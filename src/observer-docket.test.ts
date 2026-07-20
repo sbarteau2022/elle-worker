@@ -3,15 +3,22 @@
 import { describe, it, expect } from 'vitest';
 import { OBSERVER_DOCKET, docketOutcomeForSubject } from './observer-docket';
 import { groundingBlock } from './observer';
+import { POWER_FLOOR } from './observer-falsifier';
 
 describe('observer docket · the closed-case run-queue', () => {
-  it('holds ten cases, each with a non-empty subject, anchor, and realized outcome', () => {
-    expect(OBSERVER_DOCKET.length).toBe(10);
+  it('holds thirty cases, each with a non-empty subject, anchor, and realized outcome', () => {
+    expect(OBSERVER_DOCKET.length).toBe(30);
     for (const c of OBSERVER_DOCKET) {
       expect(c.subject.trim().length).toBeGreaterThan(40);
       expect(c.anchor.trim().length).toBeGreaterThan(10);
       expect(c.realizedOutcome.trim().length).toBeGreaterThan(40);
     }
+  });
+
+  it('is large enough to clear the falsifier power floor with margin — the reason for the expansion', () => {
+    // A ten-case docket cannot escape UNDERPOWERED (POWER_FLOOR = 8) once any
+    // run drops; thirty leaves real headroom for drops and for a Spearman test.
+    expect(OBSERVER_DOCKET.length).toBeGreaterThanOrEqual(POWER_FLOOR * 3);
   });
 
   it('every case key is unique — the join key between queue, analysis, and outcome', () => {
