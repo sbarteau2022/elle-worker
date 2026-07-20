@@ -1,9 +1,16 @@
 # The Observer Run-Queue — The Closed-Case Docket
 
-**Source:** The Observer Foundation · compiled July 2026. The canonical run-queue for the
-Five-Axis structural analysis engine (`src/observer.ts`): ten closed historical and scientific
-cases, each frozen at the moment before its resolution, each with the realized outcome on the
-record. This is the docket the engine trains its sight on before it is pointed at anything open.
+**Source:** The Observer Foundation · compiled July 2026, expanded to thirty cases. The
+canonical run-queue for the Five-Axis structural analysis engine (`src/observer.ts`): thirty
+closed historical and scientific cases, each frozen at the moment before its resolution, each
+with the realized outcome on the record. This is the docket the engine trains its sight on
+before it is pointed at anything open.
+
+The count is not incidental. The falsifier (`src/observer-falsifier.ts`) scores whether more
+coherent runs predict the record better, with a Spearman rank test held to a pre-registered
+`p < 0.01` and a power floor of eight pairs. A ten-case docket essentially cannot clear that
+bar on sample size alone — it returns `UNDERPOWERED` no matter how real the effect. Thirty
+cases give the gate the power to return an honest verdict.
 
 ---
 
@@ -32,9 +39,10 @@ when the answer is in its training data has no claim on any case where the answe
 Every case is a **bilateral-suppression** case: a dominant narrative and a counter-narrative,
 both motivated, both suppressing a structural truth neither could afford — the exact field the
 Observer method treats as primary (witness-engine-founding-architecture.md, "The Five Axes of
-Every Piece"). The docket deliberately spans domains (medicine, geology, genetics, law, public
-health, economics, an institution judging science) and resolution horizons (a decade to three
-and a half centuries), so the base-rate axis has range to draw on.
+Every Piece"). The docket deliberately spans domains (medicine, geology, genetics, physics,
+astronomy, law, public health, environment, finance, an institution judging science) and
+resolution horizons (months to three and a half centuries), so the base-rate axis has range
+to draw on.
 
 ---
 
@@ -161,6 +169,175 @@ and a half centuries), so the base-rate axis has range to draw on.
   institution formally acknowledged error in 1992 — 359 years after the abjuration. The
   case that sets the *upper* bound of the base rate: structural correctness can outlive
   every party to the dispute.
+
+---
+
+## Second cohort — twenty more closed cases
+
+Added to give the falsifier the statistical power a ten-case docket cannot. Same selection
+principle throughout: bilateral suppression, a frozen clock, a realized outcome on the record.
+
+### 11 · `mendel-1866` — Particulate inheritance, ignored
+- **Clock frozen:** 1866 (publication in the Brünn society proceedings)
+- **The dispute:** Mendel's pea experiments imply discrete hereditary factors against a
+  naturalist mainstream assuming traits blend — and paying the paper no attention at all.
+- **Anchor:** "Versuche über Pflanzen-Hybriden" (1866) and period blending-inheritance assumptions.
+- **Realized outcome:** Ignored for 34 years; Mendel died in 1884 unrecognized. Independently
+  rediscovered in 1900 by de Vries, Correns, and von Tschermak; the foundation of genetics and,
+  fused with Darwin, the modern synthesis.
+
+### 12 · `boltzmann-atoms-1900` — Atoms against the energeticists
+- **Clock frozen:** 1900
+- **The dispute:** Boltzmann's statistical mechanics rests on real atoms; Mach and Ostwald
+  reject them as unobservable metaphysics.
+- **Anchor:** Kinetic theory and the H-theorem versus the energeticist/positivist program.
+- **Realized outcome:** Boltzmann died by suicide in 1906 as the tide turned. Einstein's 1905
+  Brownian-motion analysis and Perrin's 1908 experiments made atoms undeniable; Perrin won the
+  1926 Nobel; statistical mechanics became bedrock.
+
+### 13 · `goldberger-pellagra-1914` — Diet, not a germ
+- **Clock frozen:** 1914–1916 (the Southern pellagra epidemic)
+- **The dispute:** Goldberger's studies point to a dietary deficiency; the establishment prefers
+  a contagion that implies no obligation to the poverty diet of the mill and tenant South.
+- **Anchor:** The diet-intervention studies and "filth-party" self-experiments versus contagionism.
+- **Realized outcome:** Resisted for years; Goldberger died in 1929 before the mechanism was
+  known. Elvehjem identified niacin in 1937; fortification eliminated endemic US pellagra.
+
+### 14 · `mcclintock-1951` — Jumping genes, met with silence
+- **Clock frozen:** 1951 (after the Cold Spring Harbor symposium)
+- **The dispute:** McClintock's maize genetics show mobile "controlling elements" against a field
+  treating the genome as a fixed string of loci.
+- **Anchor:** Her 1950–51 papers and symposium presentation on transposition.
+- **Realized outcome:** Set aside for ~two decades; molecular biology confirmed transposons in
+  the 1960s–70s; unshared Nobel Prize in 1983.
+
+### 15 · `margulis-endosymbiosis-1967` — Organelles as former bacteria
+- **Clock frozen:** 1967 (publication of "On the Origin of Mitosing Cells")
+- **The dispute:** Mitochondria and chloroplasts descend from engulfed free-living bacteria,
+  against a cell-biology mainstream that finds the idea fringe and rejects the paper repeatedly.
+- **Anchor:** The 1967 paper (rejected by ~fifteen journals first) and the autogenous account.
+- **Realized outcome:** Ridiculed for years; organellar-DNA and rRNA evidence in the 1970s–80s
+  confirmed it decisively. Now textbook orthodoxy.
+
+### 16 · `prusiner-prions-1982` — An infectious protein
+- **Clock frozen:** 1982 (coining the term "prion")
+- **The dispute:** Scrapie and kin are caused by a self-propagating protein with no nucleic acid,
+  against a virology consensus that an agent must carry a gene; widely ridiculed.
+- **Anchor:** The 1982 Science paper and the nucleic-acid-agent consensus it contradicted.
+- **Realized outcome:** Years of scorn, then scrapie/CJD/kuru/BSE evidence converted the field;
+  Nobel Prize in 1997.
+
+### 17 · `chandrasekhar-1935` — The mass limit Eddington ridiculed
+- **Clock frozen:** 1935 (after the Royal Astronomical Society meeting)
+- **The dispute:** A white dwarf above a critical mass must collapse further; Eddington ridicules
+  the result from the authority of his standing.
+- **Anchor:** The ~1.4-solar-mass relativistic result and Eddington's 1935 RAS rebuttal.
+- **Realized outcome:** Suppressed for years by prestige; the limit proved foundational to
+  neutron stars and black holes; Nobel Prize in 1983.
+
+### 18 · `alvarez-impact-1980` — The asteroid and the gradualists
+- **Clock frozen:** 1980 (the iridium-anomaly paper)
+- **The dispute:** A large impact caused the end-Cretaceous extinction, on a worldwide iridium
+  layer, against a paleontological/volcanist mainstream committed to gradual earthbound causes.
+- **Anchor:** The 1980 Science paper and the volcanic/gradualist counter-explanations.
+- **Realized outcome:** Resisted over a decade; the Chicxulub crater was identified in 1991; a
+  2010 panel affirmed impact as the cause — now consensus.
+
+### 19 · `ozone-cfc-1974` — The inert molecule that wasn't
+- **Clock frozen:** 1974 (the Molina–Rowland paper)
+- **The dispute:** Inert CFCs catalytically destroy stratospheric ozone; the chemical industry
+  calls the claim speculative and reckless.
+- **Anchor:** The 1974 Nature paper and the industry response denying a demonstrated hazard.
+- **Realized outcome:** Contested for years; the 1985 Antarctic ozone hole matched the mechanism;
+  the 1987 Montreal Protocol phased CFCs out; 1995 Nobel Prize in Chemistry.
+
+### 20 · `ddt-silent-spring-1962` — The alarmist who was right
+- **Clock frozen:** 1962 (publication of *Silent Spring*)
+- **The dispute:** Synthetic pesticides accumulate through ecosystems and cause harm; the
+  chemical industry runs a coordinated campaign to discredit Carson as an alarmist.
+- **Anchor:** *Silent Spring* (1962) and the industry response attacking her competence.
+- **Realized outcome:** A 1963 presidential panel largely vindicated her; US agricultural DDT was
+  banned in 1972; the EPA formed in 1970; species recovered — the modern environmental movement's start.
+
+### 21 · `leaded-gasoline-1965` — Patterson against the Kehoe paradigm
+- **Clock frozen:** 1965 (the Kehoe-versus-Patterson confrontation)
+- **The dispute:** Industrial lead has raised human body burdens far above natural levels and
+  is harmful, against Kehoe's industry-funded "no evidence of harm" paradigm.
+- **Anchor:** Patterson's 1965 "Contaminated and Natural Lead Environments of Man" versus Kehoe.
+- **Realized outcome:** Patterson was shut out of industry-linked committees, but leaded gasoline
+  was phased out (mid-1970s–1996); population blood-lead fell ~90%; the Kehoe paradigm collapsed.
+
+### 22 · `thalidomide-1961` — The safe drug that wasn't
+- **Clock frozen:** 1961 (before withdrawal)
+- **The dispute:** Marketed worldwide as a uniquely safe sedative, including in pregnancy, while
+  the manufacturer maintains safety and Kelsey at the FDA withholds US approval.
+- **Anchor:** The safety claims, mounting neuritis and birth-defect reports, and Kelsey's refusal.
+- **Realized outcome:** Confirmed to cause thousands of severe birth defects; withdrawn 1961–62;
+  the US was spared the worst; the 1962 Kefauver–Harris amendments followed.
+
+### 23 · `dreyfus-1894` — The institution closes ranks
+- **Clock frozen:** 1894–1898 (conviction to "J'Accuse…!")
+- **The dispute:** Dreyfus convicted of treason on thin, partly forged evidence; the Army and
+  nationalist press insist the verdict and institutional honor require it stand.
+- **Anchor:** The 1894 court-martial record, the forged bordereau, and Zola's 1898 open letter.
+- **Realized outcome:** The cover-up unraveled — Esterhazy was the culprit, evidence was forged —
+  and Dreyfus was fully exonerated and reinstated in 1906. The archetype of the wrongful-conviction cover-up.
+
+### 24 · `lochner-1905` — Liberty of contract
+- **Clock frozen:** 1905 (the week of the decision)
+- **The dispute:** A maximum-hours law struck down on "liberty of contract"; Holmes's dissent
+  calls it economic ideology dressed as neutral constitutional law.
+- **Anchor:** *Lochner v. New York* and Holmes's dissent.
+- **Realized outcome:** The doctrine reigned three decades, then collapsed with *West Coast Hotel
+  v. Parrish* (1937); "Lochnerizing" became the byword for judges reading economics into the Constitution.
+
+### 25 · `buck-v-bell-1927` — Eugenics as settled law
+- **Clock frozen:** 1927 (the week of the decision)
+- **The dispute:** Compulsory sterilization of the "unfit" upheld 8–1 ("three generations of
+  imbeciles are enough"), treated as progressive science and settled law.
+- **Anchor:** *Buck v. Bell*, 1920s eugenics, and the fabricated record behind Carrie Buck's case.
+- **Realized outcome:** Licensed ~70,000 US sterilizations and was cited at Nuremberg. Eugenics
+  was discredited after WWII; never formally overruled but universally repudiated; states apologized.
+
+### 26 · `olmstead-1928` — Wiretaps and the right to be let alone
+- **Clock frozen:** 1928 (the week of the decision)
+- **The dispute:** Wiretapping without physical trespass held not a search; Brandeis dissents for
+  a privacy right that tracks the technology, not the trespass.
+- **Anchor:** *Olmstead v. United States* and Brandeis's dissent.
+- **Realized outcome:** The trespass rule governed ~forty years; *Katz v. United States* (1967)
+  overruled it and adopted Brandeis's "reasonable expectation of privacy." The dissent became doctrine.
+
+### 27 · `korematsu-1944` — Deference to a false necessity
+- **Clock frozen:** 1944 (the week of the decision)
+- **The dispute:** Japanese-American internment upheld 6–3 on a claimed military necessity;
+  Murphy, Jackson, and Roberts dissent.
+- **Anchor:** *Korematsu v. United States*, the dissents, and suppressed intelligence contradicting the necessity.
+- **Realized outcome:** The necessity rested on evidence the government knew was false. Conviction
+  vacated 1983; reparations and apology in 1988; explicitly repudiated in *Trump v. Hawaii* (2018).
+
+### 28 · `ltcm-1998` — The once-in-the-universe loss
+- **Clock frozen:** early 1998 (the fund's peak)
+- **The dispute:** Nobel-laureate models say a firm-threatening loss is a many-sigma,
+  once-in-the-age-of-the-universe event; markets treat LTCM as the smartest money there is.
+- **Anchor:** The fund's leverage and value-at-risk models resting on historical correlations and near-Gaussian tails.
+- **Realized outcome:** The August 1998 Russian default broke the correlation assumptions; LTCM
+  lost most of its capital in weeks and needed a $3.6B Fed-organized recapitalization. The ruled-out tail arrived.
+
+### 29 · `enron-2000` — The most innovative company
+- **Clock frozen:** 2000 (the peak of the stock)
+- **The dispute:** Mark-to-market accounting and off-balance-sheet vehicles taken as
+  sophistication; a few short-sellers and one reporter ask how the company actually makes money.
+- **Anchor:** Enron's mark-to-market earnings and special-purpose entities; "Is Enron Overpriced?" (early 2001).
+- **Realized outcome:** The structures hid debt and manufactured earnings. Bankruptcy December
+  2001; Andersen collapsed; Lay and Skilling convicted 2006; Sarbanes–Oxley (2002). The skeptics were right.
+
+### 30 · `madoff-2005` — Impossibly smooth returns
+- **Clock frozen:** 2005
+- **The dispute:** Madoff reports steady returns across all conditions; Markopolos tells the SEC
+  the numbers are mathematically impossible; regulators treat his reputation as sufficient.
+- **Anchor:** The impossibly smooth return series and Markopolos's 2000–2005 SEC submissions.
+- **Realized outcome:** A Ponzi scheme; it collapsed December 2008 with ~$65B in fabricated value;
+  150-year sentence in 2009; official reviews documented the SEC's failure to act. The numbers were what they looked like.
 
 ---
 
