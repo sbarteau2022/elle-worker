@@ -21,7 +21,7 @@ import {
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
 import { handleFalcon, type FalconEnv } from './falcon';
-import { handleObserver, type ObserverEnv } from './observer';
+import { handleObserver, drainObserverQueue, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
@@ -173,6 +173,15 @@ export interface Env extends LLMEnv {
   // voice continuity; when falsy it conditions on extracted threads ALONE and
   // omits prior prose entirely. Default (unset) = include single recent entry.
   JOURNAL_INCLUDE_PRIOR_PROSE?: string;
+  // Observer auto-drain (src/observer.ts). OFF by default: the docket/open-case
+  // queue only runs when a human explicitly drains it (POST /api/observer
+  // {action:'drain'}), because each case spends ~5 model calls. Set this to the
+  // OWNER USER ID whose observer_queue the cron should drain, and the scheduled
+  // handler will run ONE queued case every 5 minutes until the queue is empty,
+  // then idle (an empty queue costs zero model calls). Unset ⇒ the cron is a
+  // no-op. This is the deliberate "spend budget to run the history corpus"
+  // switch — nothing runs itself until this names a user.
+  OBSERVER_AUTODRAIN_USER?: string;
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -1084,6 +1093,17 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     // sentry), and runs prefer:'local' — so a faster clock costs nothing.
     case 'conductor_explore':
       return await runConductor(env, runRouter, routerDeps(), { mode: 'explore' });
+    case 'observer_drain': {
+      // Env-gated (OBSERVER_AUTODRAIN_USER). Runs ONE queued Observer case per
+      // tick for the named owner, then idles when the queue empties (an empty
+      // queue makes zero model calls). This is how the docket/open-case history
+      // corpus "runs itself" once the human flips the switch — bounded, opt-in,
+      // and silent when there is nothing to do.
+      const owner = env.OBSERVER_AUTODRAIN_USER;
+      if (!owner) return { ran: 'observer_drain (disabled — OBSERVER_AUTODRAIN_USER unset)' };
+      const out = await drainObserverQueue(env as unknown as ObserverEnv, owner, 1);
+      return { ran: `observer_drain (processed ${out.processed.length}, remaining ${out.remaining})` };
+    }
     case 'consolidate': return { ran: await runConsolidation(env, embed) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
@@ -2411,6 +2431,12 @@ export default {
     // laptop's sandbox path is open, and then generation runs on the local
     // model. Cloud-spending lanes stay on the :30 tick above, ~1 run/hour max.
     if (m % 10 === 2) fire('conductor_explore'); // :02 :12 :22 :32 :42 :52
+    // Observer auto-drain — env-gated (OBSERVER_AUTODRAIN_USER). Every 5 min on
+    // the :04/:09/... offset so it never stacks on trading/explore/the full
+    // tick. A no-op (zero model calls) unless the env var names an owner AND
+    // that owner has queued cases — so it costs nothing until deliberately armed
+    // and idles the moment the history-corpus queue drains.
+    if (m % 5 === 4) fire('observer_drain'); // :04 :09 :14 … — bounded, opt-in
     // The expressive acts are no longer FORCED by the clock. The old 03:00
     // dream and 20:00 journal jobs still exist (on demand via /api/cron), but
     // the clock now rings a VOLITION tick hourly at :45 instead — a free
