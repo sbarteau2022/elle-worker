@@ -48,6 +48,7 @@ import {
   type RunCtx,
 } from './connect-sandbox';
 import { ensureAllSchemas } from './db/schema';
+import { ELLE_VOICE } from './mind';
 
 const DEFAULT_MAX_STEPS = 12;
 // A peer with the full catalog can legitimately need more turns than the old
@@ -127,8 +128,13 @@ export async function runLocalAgent(env: Env, goal: string, opts: { maxSteps?: n
   const subCtx: RunCtx = { ...ctx, source: `delegate:${ctx.source || 'router'}` };
 
   const deps: LocalAgentDeps = {
+    // persona: the canonical self (mind.ts's ELLE_VOICE) — without this the
+    // Electron loop (local-react-agent.cjs) only had its own bare mechanical
+    // "ELLE-LOCAL, the sovereign second brain" protocol text, no voice at all.
+    // Delegated goals run headless/autonomous, so they always get the default
+    // register, same as the journal and libre runs.
     dispatch: (goal, maxSteps, catalog, timeoutMs) => dispatchToLane(env, 'primary', 'react_goal', {
-      id: newId(), goal, max_steps: maxSteps, catalog, timeout_ms: timeoutMs,
+      id: newId(), goal, max_steps: maxSteps, catalog, timeout_ms: timeoutMs, persona: ELLE_VOICE,
       run_id: subCtx.runId, session_id: subCtx.sessionId, source: subCtx.source, user_id: subCtx.userId,
     }),
   };

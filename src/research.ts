@@ -5,8 +5,9 @@
 // Stores findings directly to D1 corpus via ingest pipeline
 // ============================================================
 
-import { callLLM } from './llm';
+import { callLLM, type LLMResponse } from './llm';
 import type { Env } from './index';
+import { generateWithOverlapGate } from './journal';
 
 function generateId(): string {
   const b = new Uint8Array(16);
@@ -48,14 +49,43 @@ Apply the Observer framework: surface what both dominant and resistant narrative
 What are both sides NOT talking about? That bilateral suppression is the load-bearing finding.
 Be specific. Cite what you find. Flag what you cannot verify.`;
 
+  // Prior research papers (most recent first) — the deterministic hour-based
+  // rotation above WILL land on the same topic again within days, so nothing
+  // upstream of this point prevents a repeat; the guard has to live here.
+  // Priors feed the overlap gate below (reject/regenerate a near-verbatim
+  // repeat) and steer the prompt away from an angle already published.
+  const priorRows = await env.DB.prepare(
+    `SELECT title, full_text FROM corpus_papers WHERE series = 'research' ORDER BY ingested_at DESC LIMIT 8`
+  ).all().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const priorPapers = (priorRows.results || []) as { title?: string; full_text?: string }[];
+  const priors = priorPapers.map(p => String(p.full_text || '')).filter(Boolean);
+  const priorTitles = priorPapers.map(p => String(p.title || '')).filter(Boolean);
+  const avoidance = priorTitles.length
+    ? `\n\nYou have already published these research entries recently — find a genuinely new angle, primary source, or development. Do not restate them:\n${priorTitles.map(t => `- ${t}`).join('\n')}`
+    : '';
+
   try {
-    const result = await callLLM(
-      'research',
-      system,
-      [{ role: 'user', content: `Research this now using live web search:\n\n${topic.topic}\n\nI want primary sources, recent developments, and what the Observer framework reveals about the suppressed content.` }],
-      3000,
-      env
-    );
+    const attempts = new Map<string, LLMResponse>();
+    const generate = async (temperature: number): Promise<string> => {
+      const r = await callLLM(
+        'research',
+        system,
+        [{ role: 'user', content: `Research this now using live web search:\n\n${topic.topic}\n\nI want primary sources, recent developments, and what the Observer framework reveals about the suppressed content.${avoidance}` }],
+        3000,
+        env,
+        { temperature }
+      );
+      const content = r.content || '';
+      attempts.set(content, r);
+      return content;
+    };
+
+    const gate = await generateWithOverlapGate(priors, generate, {}, (event, data) =>
+      console.log(`[RESEARCH overlap] ${event} ${JSON.stringify(data)}`));
+
+    if (!gate.content) return;
+    const result = attempts.get(gate.content)!;
+    console.log(`[RESEARCH] overlap=${gate.overlap} attempts=${gate.attempts}${gate.forced ? ' (forced — best of exhausted retries)' : ''}`);
 
     if (!result.content) return;
 

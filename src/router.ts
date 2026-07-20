@@ -1311,9 +1311,16 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
         recordLLMCall(env, { task: 'local', provider: 'sovereign-local', model: result.model, ms: Date.now() - t0, ok: true, at: t0 });
       } else {
         // Demote for the REST of the run — don't pay a status round-trip on
-        // every remaining step of a run whose laptop is closed.
-        console.error('[ROUTER] local lane unavailable, demoting to hosted:', local.error || 'no content');
+        // every remaining step of a run whose laptop is closed. This used to
+        // be console.error only: real, but invisible to anyone not tailing
+        // Worker logs, so a caller who asked for the local/sovereign lane and
+        // silently got the hosted model instead had no way to tell "reasoning
+        // is broken" apart from "the laptop just wasn't up." emitEvent puts
+        // it on the same durable, queryable record every other step uses.
+        const reason = local.error || 'no content';
+        console.error('[ROUTER] local lane unavailable, demoting to hosted:', reason);
         recordLLMCall(env, { task: 'local', provider: 'sovereign-local', model: 'local', ms: Date.now() - t0, ok: false, at: t0 });
+        void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: step, kind: 'note', result_preview: `local lane unavailable, demoted to hosted: ${reason}`.slice(0, 500) });
         engine = 'reasoning';
       }
     }
