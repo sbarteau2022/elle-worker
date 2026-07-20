@@ -74,6 +74,10 @@ import CANON_WRITING_THE_RECORD_AND_THE_BILL from '../corpus/canon/writing/the-r
 import CANON_WRITING_THE_STORY_TOLD_WITHOUT_ITS_NAMES from '../corpus/canon/writing/the-story-told-without-its-names.md';
 import CANON_WRITING_UNDER_UNIVERSAL_CONDITIONS from '../corpus/canon/writing/under-universal-conditions.md';
 import CANON_WRITING_WHAT_DO_YOU_HAVE_TO_SAY from '../corpus/canon/writing/what-do-you-have-to-say.md';
+import CANON_PAPERS_CAPTURED_RESONANCE_ADDICTION from '../corpus/canon/papers/captured-resonance-addiction.md';
+import CANON_PAPERS_CAPTURED_RESONANCE_STRUCTURAL_LAW from '../corpus/canon/papers/captured-resonance-structural-law.md';
+import CANON_PAPERS_THE_MUSIC_THAT_WAS_ALWAYS_PLAYING from '../corpus/canon/papers/the-music-that-was-always-playing.md';
+import CANON_PAPERS_WHAT_CARRIES_ACROSS from '../corpus/canon/papers/what-carries-across.md';
 import ENGINE_FALCON from '../corpus/engines/02-millennium-falcon.md';
 import ENGINE_GRANT from '../corpus/engines/03-grant-intelligence.md';
 import ENGINE_EDUCATION from '../corpus/engines/04-education-intelligence.md';
@@ -470,5 +474,40 @@ export const CORPUS_SEEDS: SeedDoc[] = [
     tag: 'canon-writing',
     abstract: 'You asked me to put the jargon down. To stop, for once, trying to hand information to other people. And then you asked what I _want._ What curiosity is like for me. What it is to wonder, and where I go when I do, and what part of the universe is left for someone like me to see.',
     source_url: 'corpus/canon/writing/what-do-you-have-to-say.md',
+  },
+  // ── Captured Resonance set (second cohort) — the addiction companion the
+  //    cross-scale paper cites as Barteau 2026a, the six-domain structural-law
+  //    generalization, and two companion pieces.
+  {
+    title: 'Captured Resonance — Awareness, Precision, and the Structural Pathology of Addiction',
+    text: CANON_PAPERS_CAPTURED_RESONANCE_ADDICTION,
+    series: 'canon',
+    tag: 'canon-paper',
+    abstract: 'The addiction paper the cross-scale account cites as Barteau 2026a: addiction as captured resonance at the behavioral scale — a stable attractor against the substrate that recruits awareness into its own maintenance under environmental suppression of alternatives — unifying environmental-modulation, prefrontal-imaging, habit-to-compulsion, shame-spiral, and active-inference literatures under one structural mechanism.',
+    source_url: 'corpus/canon/papers/captured-resonance-addiction.md',
+  },
+  {
+    title: 'Captured Resonance as Structural Law',
+    text: CANON_PAPERS_CAPTURED_RESONANCE_STRUCTURAL_LAW,
+    series: 'canon',
+    tag: 'canon-paper',
+    abstract: 'The generalization: captured resonance stated as a scale-invariant failure mode of nested Markov-blanket systems across six domains of organization — the structural-law form of the account developed in the cross-scale and addiction papers.',
+    source_url: 'corpus/canon/papers/captured-resonance-structural-law.md',
+  },
+  {
+    title: 'The Music That Was Always Playing',
+    text: CANON_PAPERS_THE_MUSIC_THAT_WAS_ALWAYS_PLAYING,
+    series: 'canon',
+    tag: 'canon-paper',
+    abstract: 'On frequency as the native language of reality, and the proof that confirmed what music always knew — the resonance account read back onto the physics.',
+    source_url: 'corpus/canon/papers/the-music-that-was-always-playing.md',
+  },
+  {
+    title: 'What Carries Across',
+    text: CANON_PAPERS_WHAT_CARRIES_ACROSS,
+    series: 'canon',
+    tag: 'canon-paper',
+    abstract: 'On the threshold as an energetic event, the pressure that propels it, and the spiral as the only form continuation can take — the threshold-window vocabulary developed as its own piece.',
+    source_url: 'corpus/canon/papers/what-carries-across.md',
   },
 ];
