@@ -37,7 +37,7 @@ import { parseFirstJson, parseDirections } from './falcon';
 import { computeKappa, KAPPA_DEF } from './journal';
 import type { Env } from './index';
 import { OBSERVER_DOCKET, docketOutcomeForSubject } from './observer-docket';
-import { falsify, overlapMatch } from './observer-falsifier';
+import { falsify, overlapMatch, POWER_FLOOR } from './observer-falsifier';
 
 // ── Rung 3: the read-only trajectory instrument ─────────────────
 // An Observer run is a reasoning trajectory — five axes fired in order. We
@@ -64,6 +64,16 @@ export function axisProse(data: unknown): string {
 // The per-axis κ path over a run. Deterministic (computeKappa is pure). Pure.
 export function kappaTrajectory(steps: Array<{ axis: string; data: unknown }>): Array<{ axis: string; kappa: number }> {
   return steps.map(s => ({ axis: s.axis, kappa: computeKappa(axisProse(s.data)) }));
+}
+
+// The falsifier's segmentation key. A labeled outcome is HINDSIGHT-FREE ('open')
+// only when its prediction was logged before the outcome was knowable — tagged
+// 'open:<label>' by the resolve action. Everything else, including the closed
+// docket ('docket:<key>') and any legacy row, is calibration ('docket'): it
+// cannot validate κ because the model already knew the answer. Pure. The whole
+// honesty of the open-case queue rests on this one line, so it is unit-tested.
+export function outcomeSource(notes: string): 'open' | 'docket' {
+  return String(notes || '').startsWith('open:') ? 'open' : 'docket';
 }
 
 export interface ObserverEnv extends LLMEnv {
@@ -281,6 +291,45 @@ async function ensureObserverSchema(env: ObserverEnv): Promise<void> {
 }
 
 // ── The handler — /api/observer ─────────────────────────────────
+// Drain up to N queued cases (default 1, cap 3 — one run is ~5 model calls),
+// running and persisting each. Rows are claimed atomically so concurrent drains
+// (an HTTP call and the cron) never double-run a case. Returns immediately with
+// zero model calls when the queue is empty — the "idle when done" property the
+// auto-drain cron relies on. Shared by the `drain` action and the cron job.
+export async function drainObserverQueue(
+  env: ObserverEnv, userId: string, n: number,
+): Promise<{ processed: Array<Record<string, unknown>>; remaining: number }> {
+  const count = Math.min(Math.max(n || 1, 1), 3);
+  const processed: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < count; i++) {
+    const next = await env.DB.prepare(
+      `SELECT id, subject, anchor FROM observer_queue WHERE user_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1`
+    ).bind(userId).first() as { id: string; subject: string; anchor: string | null } | null;
+    if (!next) break;
+    const claim = await env.DB.prepare(
+      `UPDATE observer_queue SET status = 'running', updated_at = datetime('now') WHERE id = ? AND status = 'queued'`
+    ).bind(next.id).run();
+    if (!claim.meta?.changes) continue;
+    try {
+      const { analysisId, result } = await runAndPersistObserver(env, next.subject, next.anchor || '', userId);
+      await env.DB.prepare(
+        `UPDATE observer_queue SET status = 'done', analysis_id = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(analysisId, next.id).run();
+      processed.push({ queue_id: next.id, subject: next.subject, analysis_id: analysisId, status: result.status });
+    } catch (e) {
+      const msg = String((e as Error)?.message || e).slice(0, 500);
+      await env.DB.prepare(
+        `UPDATE observer_queue SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(msg, next.id).run();
+      processed.push({ queue_id: next.id, subject: next.subject, status: 'error', error: msg });
+    }
+  }
+  const remaining = await env.DB.prepare(
+    `SELECT COUNT(*) AS c FROM observer_queue WHERE user_id = ? AND status = 'queued'`
+  ).bind(userId).first() as { c: number } | null;
+  return { processed, remaining: remaining?.c ?? 0 };
+}
+
 export async function handleObserver(body: Record<string, unknown>, env: ObserverEnv, userId: string): Promise<Response> {
   await ensureObserverSchema(env);
   const action = String(body.action || 'run');
@@ -319,35 +368,8 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
   //    (one run is ~5 model calls). Rows claimed atomically so concurrent
   //    drains don't double-run. Call again (or a later cron) to keep going.
   if (action === 'drain') {
-    const n = Math.min(Math.max(Number(body.n) || 1, 1), 3);
-    const processed: Array<Record<string, unknown>> = [];
-    for (let i = 0; i < n; i++) {
-      const next = await env.DB.prepare(
-        `SELECT id, subject, anchor FROM observer_queue WHERE user_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1`
-      ).bind(userId).first() as { id: string; subject: string; anchor: string | null } | null;
-      if (!next) break;
-      const claim = await env.DB.prepare(
-        `UPDATE observer_queue SET status = 'running', updated_at = datetime('now') WHERE id = ? AND status = 'queued'`
-      ).bind(next.id).run();
-      if (!claim.meta?.changes) continue;
-      try {
-        const { analysisId, result } = await runAndPersistObserver(env, next.subject, next.anchor || '', userId);
-        await env.DB.prepare(
-          `UPDATE observer_queue SET status = 'done', analysis_id = ?, updated_at = datetime('now') WHERE id = ?`
-        ).bind(analysisId, next.id).run();
-        processed.push({ queue_id: next.id, subject: next.subject, analysis_id: analysisId, status: result.status });
-      } catch (e) {
-        const msg = String((e as Error)?.message || e).slice(0, 500);
-        await env.DB.prepare(
-          `UPDATE observer_queue SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?`
-        ).bind(msg, next.id).run();
-        processed.push({ queue_id: next.id, subject: next.subject, status: 'error', error: msg });
-      }
-    }
-    const remaining = await env.DB.prepare(
-      `SELECT COUNT(*) AS c FROM observer_queue WHERE user_id = ? AND status = 'queued'`
-    ).bind(userId).first() as { c: number } | null;
-    return json({ processed, remaining: remaining?.c ?? 0 });
+    const out = await drainObserverQueue(env, userId, Number(body.n) || 1);
+    return json(out);
   }
 
   if (action === 'queue_status') {
@@ -424,6 +446,56 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     });
   }
 
+  // ── resolve — the HINDSIGHT-FREE labeler: the open-case counterpart to
+  //    label_outcomes. Attaches the now-realized outcome to an OPEN case — a
+  //    prediction that was logged BEFORE the outcome was knowable — and tags it
+  //    'open:<label>' so falsify scores it in the hindsight-free segment (the
+  //    only segment that can validate κ). Refuses closed docket subjects: those
+  //    carry hindsight and must go through label_outcomes, or the open set lies.
+  if (action === 'resolve') {
+    const analysisId = String(body.analysis_id || '');
+    if (!analysisId) return json({ error: 'analysis_id required' }, 400);
+    const what = String(body.what_happened || '').trim();
+    if (!what) return json({ error: 'what_happened required — the realized outcome, now that reality has settled' }, 400);
+    const a = await env.DB.prepare(
+      `SELECT id, subject FROM observer_analyses WHERE id = ? AND user_id = ?`
+    ).bind(analysisId, userId).first() as { id: string; subject: string } | null;
+    if (!a) return json({ error: 'not found' }, 404);
+    if (docketOutcomeForSubject(a.subject)) {
+      return json({ error: 'this is a closed docket case (the model has hindsight) — resolve is for open cases only; use label_outcomes for the docket' }, 400);
+    }
+    const label = (String(body.label || '').trim() || 'open').replace(/[^a-z0-9-]/gi, '-').slice(0, 60);
+    await env.DB.prepare(
+      `INSERT INTO observer_outcomes (id, analysis_id, what_happened, comparison_to_prediction, notes) VALUES (?,?,?,?,?)
+       ON CONFLICT(analysis_id) DO UPDATE SET what_happened=excluded.what_happened, notes=excluded.notes, updated_at=datetime('now')`
+    ).bind(id(), analysisId, what.slice(0, 4000), '', `open:${label}`).run();
+    return json({ resolved: analysisId, label, segment: 'open' });
+  }
+
+  // ── pending — the open-case queue's read side: this caller's analyses with
+  //    NO outcome yet — predictions still awaiting reality. Each is tagged
+  //    'docket' (a closed case awaiting label_outcomes — hindsight) or 'open'
+  //    (a live case awaiting resolve — the hindsight-free backlog that, once
+  //    reality settles, becomes the only evidence that can validate κ).
+  if (action === 'pending') {
+    const rows = await env.DB.prepare(
+      `SELECT a.id, a.subject, a.created_at FROM observer_analyses a
+       WHERE a.user_id = ? AND NOT EXISTS (SELECT 1 FROM observer_outcomes o WHERE o.analysis_id = a.id)
+       ORDER BY a.created_at DESC LIMIT 100`
+    ).bind(userId).all().catch(() => ({ results: [] }));
+    const pending = (rows.results as Array<{ id: string; subject: string; created_at: string }>).map(r => ({
+      analysis_id: r.id,
+      subject: r.subject.length > 160 ? r.subject.slice(0, 157) + '…' : r.subject,
+      created_at: r.created_at,
+      kind: docketOutcomeForSubject(r.subject) ? 'docket' : 'open',
+    }));
+    return json({
+      pending,
+      open: pending.filter(p => p.kind === 'open').length,
+      docket_unlabeled: pending.filter(p => p.kind === 'docket').length,
+    });
+  }
+
   // The label: what actually happened next, against the named Prediction —
   // the Observer's training signal (the gap between predicted and realized).
   if (action === 'outcome') {
@@ -451,36 +523,54 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
   //    gates NOTHING. Returns UNDERPOWERED until enough real runs exist (the
   //    docket is only 10 cases) — never dressing thin data as a verdict.
   if (action === 'falsify') {
+    // Pull EVERY labeled run — both the closed docket (hindsight) and the open
+    // set (hindsight-free) — then score each segment separately. The two are
+    // NOT the same evidence: the docket calibrates the method against cases the
+    // model already knows; the open set is the only segment that can validate κ,
+    // because those predictions were logged before the outcome was knowable.
     const rows = await env.DB.prepare(
       `SELECT a.id AS analysis_id, a.prediction_json, t.kappa_run, o.what_happened, o.notes
        FROM observer_analyses a
        JOIN observer_trajectory t ON t.analysis_id = a.id
        JOIN observer_outcomes o ON o.analysis_id = a.id
-       WHERE a.user_id = ? AND o.notes LIKE 'docket:%' AND t.kappa_run IS NOT NULL`
+       WHERE a.user_id = ? AND (o.notes LIKE 'docket:%' OR o.notes LIKE 'open:%') AND t.kappa_run IS NOT NULL`
     ).bind(userId).all().catch(() => ({ results: [] }));
 
-    const cases: Array<{ analysis_id: string; docket: string; coherence: number; match: number }> = [];
+    type Case = { analysis_id: string; label: string; coherence: number; match: number };
+    const docketCases: Case[] = [];
+    const openCases: Case[] = [];
     for (const r of (rows.results as Array<Record<string, unknown>>)) {
       let predText = '';
       try { predText = axisProse(JSON.parse(String(r.prediction_json || 'null'))); } catch { /* leave empty */ }
       const match = overlapMatch(predText, String(r.what_happened || ''));
       const coherence = Number(r.kappa_run);
-      cases.push({ analysis_id: String(r.analysis_id), docket: String(r.notes || '').replace(/^docket:/, ''), coherence, match });
+      const notes = String(r.notes || '');
+      const source = outcomeSource(notes);
+      const label = notes.replace(/^(open|docket):/, '');
+      (source === 'open' ? openCases : docketCases).push({ analysis_id: String(r.analysis_id), label, coherence, match });
       // Record the measurement the labeler deferred to the falsifier.
       await env.DB.prepare(
         `UPDATE observer_outcomes SET comparison_to_prediction = ?, updated_at = datetime('now') WHERE analysis_id = ?`
-      ).bind(JSON.stringify({ match, method: 'lexical-overlap-proxy' }), String(r.analysis_id)).run().catch(() => {});
+      ).bind(JSON.stringify({ match, method: 'lexical-overlap-proxy', source }), String(r.analysis_id)).run().catch(() => {});
     }
 
-    const result = falsify(cases.map(c => ({ coherence: c.coherence, match: c.match })), { seed: 1 });
+    const segment = (cases: Case[]) => ({
+      ...falsify(cases.map(c => ({ coherence: c.coherence, match: c.match })), { seed: 1 }),
+      cases: cases.map(c => ({ label: c.label, kappa: c.coherence, match: Number(c.match.toFixed(4)) })),
+    });
+    const open = segment(openCases);
+    const docket = segment(docketCases);
     return json({
-      ...result,
+      open: { ...open, reading: 'HINDSIGHT-FREE — the only segment that can validate κ: each prediction was logged before its outcome was knowable, then scored when reality settled' },
+      docket: { ...docket, reading: 'closed cases — the model has hindsight; a CALIBRATION HARNESS for the method, not a blind forecast test' },
+      headline: open.verdict === 'UNDERPOWERED'
+        ? `no verdict yet: the hindsight-free open set has ${open.n} resolved case(s) (floor is ${POWER_FLOOR}). The docket is calibration only — it cannot validate κ.`
+        : `open-set (hindsight-free) verdict: ${open.verdict} — rho=${open.rho}, p=${open.p}, n=${open.n}`,
       claim: 'trajectory κ predicts prediction↔outcome match (one-sided; permutation null)',
       match_method: 'lexical-overlap-proxy (deterministic stand-in for an LLM/human judge)',
       provisional: true,
-      cases: cases.map(c => ({ docket: c.docket, kappa: c.coherence, match: Number(c.match.toFixed(4)) })),
     });
   }
 
-  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|falsify|list|get|outcome)` }, 400);
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|resolve|pending|falsify|list|get|outcome)` }, 400);
 }

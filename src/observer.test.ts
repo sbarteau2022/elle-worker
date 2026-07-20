@@ -1,7 +1,7 @@
 // Pure-logic tests for the Observer: the opening-axis roster and that every
 // axis instructs JSON-only output. No network, no D1.
 import { describe, it, expect } from 'vitest';
-import { OPENING_AXES, axisProse, kappaTrajectory } from './observer';
+import { OPENING_AXES, axisProse, kappaTrajectory, outcomeSource } from './observer';
 
 describe('observer · the opening axes', () => {
   it('two opening axes — Dominant Narrative and Counter-Narrative — feeding the structural reading', () => {
@@ -44,5 +44,21 @@ describe('observer · the read-only trajectory instrument (Rung 3)', () => {
   it('is deterministic — same reasoning in gives the same κ out (no I/O, no clock)', () => {
     const steps = [{ axis: 'x', data: { a: 'grounded structural claim traced to first principles' } }];
     expect(kappaTrajectory(steps)).toEqual(kappaTrajectory(steps));
+  });
+});
+
+describe('observer · the open-case segmentation (hindsight-free vs calibration)', () => {
+  it('only an open:-tagged outcome is hindsight-free', () => {
+    expect(outcomeSource('open:fed-2026')).toBe('open');
+    expect(outcomeSource('open:')).toBe('open');
+  });
+  it('the closed docket is calibration, never hindsight-free', () => {
+    expect(outcomeSource('docket:semmelweis-1848')).toBe('docket');
+  });
+  it('a legacy or untagged row is treated as calibration — it cannot validate κ', () => {
+    expect(outcomeSource('')).toBe('docket');
+    expect(outcomeSource('some free-text note')).toBe('docket');
+    // Defensive: a non-string never throws and never counts as open.
+    expect(outcomeSource(undefined as unknown as string)).toBe('docket');
   });
 });
