@@ -79,6 +79,7 @@ import { sseDoor, memberDonePayload } from './stream';
 import { handleArrival } from './arrival';
 import { memWrite, memRecall, assembleContext, memVectorBackfill, type MemEnv } from './memory';
 import { parseIntake } from './mem-intake';
+import { parseMultimodalIntake, encodeParts, assembleDocument, transcriptStats, type AIRun } from './multimodal-intake';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
@@ -581,6 +582,43 @@ async function handleIngest(body: Record<string, string>, env: Env): Promise<Res
   } catch (e) { errors.push((e as Error).message); }
   await env.INGEST_QUEUE.send({ type: 'paper_ingested', paper_id: paperId, title, series, tag, chunks_count: embedded }).catch(() => {});
   return json({ success: true, ingested: true, paper_id: paperId, chunks_total: chunks.length, chunks_embedded: embedded, gate: gate ? { passed: true, checks: gate.checks } : { skipped: true }, errors: errors.length ? errors : undefined });
+}
+
+// Multimodal corpus intake (src/multimodal-intake.ts). Turn image/audio parts
+// into one assembled text via Workers AI, then reuse handleIngest so the text
+// runs the identical gate → chunk → embed → Vectorize path as any paper. The
+// eye is worker-side and additive: nothing about the text lane changes.
+async function handleIngestMultimodal(body: unknown, env: Env): Promise<Response> {
+  const parsed = parseMultimodalIntake(body);
+  if (parsed.error || !parsed.doc) return err(parsed.error || 'invalid multimodal intake', 400);
+  const d = parsed.doc;
+
+  const run: AIRun = (model, inputs) => env.AI.run(model, inputs);
+  const transcripts = await encodeParts(d.parts, {
+    run,
+    visionModel: d.visionModel,
+    audioModel: d.audioModel,
+    visionPrompt: d.visionPrompt,
+    getFromR2: async (key) => (await env.DOCUMENTS.get(key))?.arrayBuffer() ?? null,
+  });
+  const stats = transcriptStats(transcripts);
+  // Nothing readable came back — don't ingest an empty husk; report why.
+  if (stats.withText === 0) {
+    return json({ success: false, ingested: false, reason: 'no text extracted from any part', stats, transcripts }, 422);
+  }
+
+  const text = assembleDocument(d.title, transcripts, d.visionModel, d.audioModel);
+  // Reuse the paper pipeline verbatim (gate on by default; caller may trust).
+  // skip_verification must be a real boolean — handleIngest checks `=== true`.
+  const ingestBody: Record<string, unknown> = {
+    title: d.title, text, series: d.series, tag: d.tag,
+    abstract: d.abstract || '', source_url: d.source_url || '',
+  };
+  if (d.trusted) ingestBody.skip_verification = true;
+  const ingestRes = await handleIngest(ingestBody as Record<string, string>, env);
+  // Fold the transcription stats onto the ingest result so the caller sees both.
+  const ingestJson = await ingestRes.json().catch(() => ({}));
+  return json({ ...(ingestJson as Record<string, unknown>), multimodal: { stats, transcripts: transcripts.map(t => ({ index: t.index, kind: t.kind, label: t.label, chars: t.text.length, error: t.error })) } }, ingestRes.status);
 }
 
 // ── Persistent memory helpers ─────────────────────────────────
@@ -1977,6 +2015,10 @@ export default {
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
+    // Multimodal corpus intake — the worker-side eye. Images/audio → Workers AI
+    // (vision + whisper) → one assembled text → the SAME ingest pipeline above.
+    // Video = caller-supplied keyframes (image parts) + audio track (audio part).
+    if (path === '/api/ingest-multimodal') { if (!svc) return err('Unauthorized', 401); return handleIngestMultimodal(body, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/research')          { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
