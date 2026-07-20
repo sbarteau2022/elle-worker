@@ -108,16 +108,24 @@ export async function sandboxLLM(
 // strands a caller; at worst costs one extra network round trip.
 export async function sovereignText(
   env: Env, task: LLMTask, system: string, messages: LLMMessage[], maxTokens: number,
+  opts: { temperature?: number } = {},
 ): Promise<LLMResponse> {
   if (sandboxConfigured(env)) {
     const st = await pathOpen(env).catch((): AgentStatus => ({ open: false }));
     if (st.open) {
-      const local = await sandboxLLM(env, system, messages, maxTokens);
-      if (local.ok && local.content) return { content: local.content, model: local.model || 'local', provider: 'sovereign-local' };
-      console.error('[SOVEREIGN] local lane unavailable for standing work, falling back to hosted:', local.error || 'no content');
+      // The local lane has no temperature knob (Ollama job payload carries none),
+      // so a caller asking for a specific temperature (e.g. an overlap-gate retry
+      // that needs a genuinely different candidate) falls straight to hosted,
+      // where opts.temperature actually does something, rather than silently
+      // returning the same local candidate every retry.
+      if (opts.temperature == null) {
+        const local = await sandboxLLM(env, system, messages, maxTokens);
+        if (local.ok && local.content) return { content: local.content, model: local.model || 'local', provider: 'sovereign-local' };
+        console.error('[SOVEREIGN] local lane unavailable for standing work, falling back to hosted:', local.error || 'no content');
+      }
     }
   }
-  return callLLM(task, system, messages, maxTokens, env);
+  return callLLM(task, system, messages, maxTokens, env, { temperature: opts.temperature });
 }
 
 // ── the comprehensive use report ────────────────────────────

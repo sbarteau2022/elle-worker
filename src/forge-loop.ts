@@ -303,6 +303,15 @@ export interface ForgeResult {
   forge_id: string; run_id: string; name: string;
   status: ForgeStatus; iterations: number;
   code: string; review_notes?: string; pr_number?: number; pr_url?: string;
+  // Set on every non-passing outcome. The streaming door already tells the
+  // caller why via forge_error/forge_done SSE events, but the plain-JSON
+  // path (fb.stream falsy — this is what the tool_forge/idea{op:forge}
+  // router tool actually calls) only ever saw this struct: a bare
+  // status:'failed' with no reason, indistinguishable from "nothing
+  // happened." That was the mechanism behind "she's not making any tools" —
+  // the sandbox being unconfigured/closed produced a silent no-op from the
+  // caller's point of view even though the SSE panel would have shown it.
+  message?: string;
 }
 
 export async function runForge(
@@ -321,13 +330,17 @@ export async function runForge(
   bus('run_start', 'forge', { name: spec.name, goals: spec.goals.length }, `forge "${spec.name}" — ${spec.goals.length} goal(s)`, -1);
 
   if (!sandboxConfigured(env)) {
-    ping({ kind: 'forge_error', message: 'the SANDBOX_AGENT_KEY secret is not configured on this worker' });
-    return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: 0, code: '' };
+    const message = 'the SANDBOX_AGENT_KEY secret is not configured on this worker';
+    ping({ kind: 'forge_error', message });
+    await persistForge(env, spec, '', 'failed', { iterations: 0, run_id: runId });
+    return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: 0, code: '', message };
   }
   const path = await pathOpen(env);
   if (!path.open) {
-    ping({ kind: 'forge_error', message: 'sandbox path not open — start the workbench so the laptop agent connects, then forge' });
-    return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: 0, code: '' };
+    const message = 'sandbox path not open — start the workbench (and Docker/Ollama on it) so the laptop agent connects, then forge';
+    ping({ kind: 'forge_error', message });
+    await persistForge(env, spec, '', 'failed', { iterations: 0, run_id: runId });
+    return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: 0, code: '', message };
   }
 
   let code = '';
@@ -372,9 +385,10 @@ export async function runForge(
       // A closed path mid-run is terminal — nothing further can execute.
       if (res.path_open === false) {
         await persistForge(env, spec, code, 'failed', { iterations: iter, run_id: runId });
-        ping({ kind: 'forge_error', message: 'sandbox path closed mid-forge' });
-        ping({ kind: 'forge_done', forge_id: forgeId, status: 'failed', iterations: iter, note: 'the box went offline mid-run' });
-        return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: iter, code };
+        const message = 'sandbox path closed mid-forge — the box went offline mid-run';
+        ping({ kind: 'forge_error', message });
+        ping({ kind: 'forge_done', forge_id: forgeId, status: 'failed', iterations: iter, note: message });
+        return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: iter, code, message };
       }
     }
     const passed = results.filter(r => r.pass).length;
@@ -391,8 +405,9 @@ export async function runForge(
 
   if (status !== 'passing') {
     await persistForge(env, spec, code, 'failed', { iterations: iter, run_id: runId });
-    ping({ kind: 'forge_done', forge_id: forgeId, status: 'failed', iterations: iter, note: `goals did not all pass within ${MAX_ITERATIONS} iterations` });
-    return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: iter, code };
+    const message = `goals did not all pass within ${MAX_ITERATIONS} iterations`;
+    ping({ kind: 'forge_done', forge_id: forgeId, status: 'failed', iterations: iter, note: message });
+    return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'failed', iterations: iter, code, message };
   }
 
   // 3. REVIEW — hosted heavy model. A single revise sends us back into the loop
@@ -412,8 +427,9 @@ export async function runForge(
     if (second.passing) { code = second.code; status = 'passing'; }
     else {
       await persistForge(env, spec, second.code || code, 'rejected', { iterations: iter, review_notes: review.notes, run_id: runId });
-      ping({ kind: 'forge_done', forge_id: forgeId, status: 'rejected', iterations: iter, note: 'revision from review did not pass the goals' });
-      return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'rejected', iterations: iter, code: second.code || code, review_notes: review.notes };
+      const message = 'revision from review did not pass the goals';
+      ping({ kind: 'forge_done', forge_id: forgeId, status: 'rejected', iterations: iter, note: message });
+      return { forge_id: forgeId, run_id: runId, name: spec.name, status: 'rejected', iterations: iter, code: second.code || code, review_notes: review.notes, message };
     }
   }
 

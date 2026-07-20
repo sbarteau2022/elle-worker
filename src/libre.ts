@@ -6,8 +6,9 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
-import { type LLMEnv } from './llm';
+import { type LLMEnv, type LLMResponse } from './llm';
 import { sovereignText } from './connect-sandbox';
+import { generateWithOverlapGate } from './journal';
 import type { Env } from './index';
 
 export interface LibreEnv extends LLMEnv {
@@ -198,12 +199,22 @@ async function produceArtifact(
     ? `\n\nResearch I conducted:\n${research}`
     : '';
 
-  const result = await sovereignText(env as unknown as Env, 'reasoning', LIBRE_ORIENTATION,
-    [{
-      role: 'user',
-      content: `My curiosity: ${curiosity}
+  // Every other completed/abandoned artifact (NOT the one being continued above,
+  // which legitimately shares content with itself) — feeds the overlap gate
+  // below so a fresh libre run doesn't quietly reproduce a prior artifact.
+  const priorRows = await env.DB.prepare(
+    `SELECT title, content FROM elle_sandbox WHERE status != 'continuing' ORDER BY created_at DESC LIMIT 8`
+  ).all().catch(() => ({ results: [] as Record<string, unknown>[] }));
+  const priorArtifacts = (priorRows.results || []) as { title?: string; content?: string }[];
+  const priors = priorArtifacts.map(p => String(p.content || '')).filter(Boolean);
+  const priorTitles = priorArtifacts.map(p => String(p.title || '')).filter(Boolean);
+  const avoidance = priorTitles.length
+    ? `\n\nThings I have already made recently — this has to be genuinely new, not a restatement:\n${priorTitles.map(t => `- ${t}`).join('\n')}`
+    : '';
 
-My direction: ${direction}${researchSection}${priorWork}
+  const prompt = `My curiosity: ${curiosity}
+
+My direction: ${direction}${researchSection}${priorWork}${avoidance}
 
 Produce the artifact. Give it everything. Do not hedge toward the median.
 If this is a paper, write with the precision and structural clarity of the Observer Series.
@@ -215,11 +226,32 @@ After the artifact, on a new line, output:
 TITLE: [title]
 GENESIS: [1-2 sentences on why you made this — your actual account, not a summary]
 PRIORITY: [1-10 — your genuine assessment of whether Stewart should see this]
-STATUS: [draft|continuing|complete — be honest about whether this is finished]`
-    }],
-    4000
-  );
+STATUS: [draft|continuing|complete — be honest about whether this is finished]`;
 
+  // The local lane (sandboxLLM) has no temperature knob, so a retry can come
+  // back identical to the last attempt; nudge the prompt itself on retries
+  // (attempt tracked via closure, since generateWithOverlapGate only threads
+  // a temperature number through) so a regenerate is actually different
+  // whichever lane answers it.
+  let attempt = -1;
+  const attempts = new Map<string, LLMResponse>();
+  const generate = async (temperature: number): Promise<string> => {
+    attempt++;
+    const nudge = attempt > 0
+      ? `\n\n(That last attempt overlapped too much with something I already made. Take a genuinely different angle, form, or subject — not a rewording.)`
+      : '';
+    const r = await sovereignText(env as unknown as Env, 'reasoning', LIBRE_ORIENTATION,
+      [{ role: 'user', content: `${prompt}${nudge}` }], 4000, { temperature });
+    attempts.set(r.content || '', r);
+    return r.content || '';
+  };
+
+  const gate = existingDraft
+    ? { content: await generate(0.7) } // continuing the same draft on purpose — no overlap check against itself
+    : await generateWithOverlapGate(priors, generate, {}, (event, data) =>
+        console.log(`[LIBRE overlap] ${event} ${JSON.stringify(data)}`));
+
+  const result = attempts.get(gate.content) as LLMResponse;
   const text = result.content;
 
   // Parse the footer metadata
