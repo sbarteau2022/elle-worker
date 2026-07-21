@@ -80,6 +80,7 @@ import { handleArrival } from './arrival';
 import { memWrite, memRecall, assembleContext, memVectorBackfill, type MemEnv } from './memory';
 import { parseIntake } from './mem-intake';
 import { parseMultimodalIntake, encodeParts, assembleDocument, transcriptStats, type AIRun } from './multimodal-intake';
+import { parseTTS, synthesizeSpeech } from './tts';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
@@ -1508,6 +1509,48 @@ export default {
       }
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
       return handleMindConversation(body, env, 'widget', 'public', ctx);
+    }
+
+    // Elle's own voice — public TTS for the atlas chat (src/tts.ts). Same
+    // IP rate-limit posture as widget-chat; returns audio/mpeg the browser
+    // plays. On any failure the caller (the atlas page) falls back to the
+    // device's own speech engine, so a TTS hiccup never goes silent.
+    if (path === '/api/tts') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' } });
+      }
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const actorKey = `ip:${ip}`;
+      if ((await getPosture(env, actorKey).catch(() => ({ posture: 'normal' as const }))).posture === 'blocked') {
+        return err('Temporarily blocked — the security network flagged this address', 403);
+      }
+      const rlKey = `tts-rl:${ip}`;
+      const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+      if (count >= 150) {
+        await recordThreat(env, { actorKey, source: 'ratelimit', kind: 'ratelimit.exceeded', detail: '/api/tts' }).catch(() => {});
+        return err('Rate limit reached — try again in an hour', 429);
+      }
+      await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
+      const p = parseTTS(body);
+      if (p.error || !p.text) return err(p.error || 'invalid tts request', 400);
+      try {
+        const b64 = await synthesizeSpeech(
+          (m, i) => env.AI.run(m as Parameters<Env['AI']['run']>[0], i),
+          p.text,
+          p.lang || 'EN'
+        );
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        return new Response(bytes, {
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=86400',
+          },
+        });
+      } catch (e) {
+        // 502 with an error body — the page reads this and speaks locally instead.
+        return json({ error: String((e as Error)?.message || e).slice(0, 200) }, 502);
+      }
     }
 
     // Atlas client signup — Google sign-in only (same verification and JWT
