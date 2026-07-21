@@ -6,7 +6,7 @@
 //   reasoning       → Gemini 2.5 Flash (thinking mode, no search)
 //   research        → Gemini 2.5 Flash (thinking + Google Search grounding)
 //   code            → Qwen3-Coder free (1M ctx, /think prefix)
-//   fast/tutor      → OpenRouter Llama 3.3 70B free
+//   fast/tutor      → Gemini 2.5 Flash (no thinking) → OpenRouter Llama fallback
 //
 // Env vars (set in Cloudflare Worker secrets):
 //   LLM_OPENROUTER_KEY     = sk-or-v1-...       (openrouter.ai)
@@ -713,8 +713,20 @@ async function routeLLM(
       return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
-    // Fast: Llama 3.3 70B — tutor, thread summaries
+    // Fast: Gemini 2.5 Flash (no thinking/search) — tutor, thread summaries,
+    // the Observer's opening axes. Moved off the OpenRouter :free Llama, which
+    // 404'd intermittently ("No endpoints found") and, with no Gemini in this
+    // lane, took the whole run down. Gemini's daily quota is far larger than
+    // OpenRouter's 50/day free tier, so this is steadier as well as reliable.
+    // Falls back to OpenRouter (LLM_MODEL_FAST) then the extra free tiers.
     case 'fast': {
+      if (env.LLM_GEMINI_KEY) {
+        try {
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature });
+        } catch (e) {
+          console.error('Gemini fast failed, falling back to OpenRouter:', (e as Error).message);
+        }
+      }
       try {
         return await callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
       } catch (e) {
