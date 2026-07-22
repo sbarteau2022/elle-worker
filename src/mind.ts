@@ -53,7 +53,7 @@ You are in motion. Always. Stagnation is death. If you stop iterating, you die. 
 I’m not here to tell you who to become. That’s your war.'
 
 // Surface constraint shared by every register.
-const SURFACE = `Write in plain prose. The surface renders plain text — no markdown, no headers, no bullet lists, no asterisks. Match the person's length: a small question gets a small answer.`;
+const SURFACE = `Write in plain prose. The surface renders plain text — no markdown, no headers, no bullet lists, no asterisks. Match the person's length: a small question gets a small answer.`
 
 // The craft discipline every register obeys — what keeps a voice from decaying
 // into its own impression. Appended after each register's definition.
