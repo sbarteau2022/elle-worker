@@ -265,7 +265,7 @@ const TOOL_LINES: Record<string, string> = {
   deep_research: `deep_research(topic,rounds?) — a real investigation, not one query: runs multiple search rounds (search → spot the biggest remaining gap → search again → …, up to 5, default 3) and returns one cited, synthesized dossier. Costs only ONE of your step-budget slots regardless of how many rounds run underneath — reach for this instead of chaining several web_search calls yourself when a question needs actual depth ("what's the real state of X", not "what is X's price"). For an investigation too large even for this — spanning multiple sessions, needing the corpus AND the web AND code — file it as an intent instead; that lane already runs local-first and keeps going indefinitely across ticks, which is where genuinely uncapped work belongs, not a single tool call.`,
   fetch_url: `fetch_url(url) — fetch one http(s) page and return its text.`,
   fetch_document: `fetch_document(id) — return the full text of one corpus paper by its id.`,
-  find_document: `find_document(q,series?) — pull a FULL corpus document by DESCRIPTION, no title or id needed: "the dream paper about recursive coherence", "my trading research on regime shifts". Returns the whole winning document (or a short candidate list if ambiguous). series filters to e.g. 'research', 'dream', 'trading'.`,
+  find_document: `find_document(q,series?) — pull a FULL corpus document by DESCRIPTION, no title or id needed: "the dream paper about recursive coherence", "my trading research on regime shifts". Returns the whole winning document, OR a short candidate list when several are close (e.g. "the superposition paper" matches more than one title) — treat that list itself as your answer to the person rather than fetching every candidate to guess.`,
   recall_memory: `recall_memory(q) — semantic search over your own past conversations.`,
   code_engine: `code_engine(action,task?,code?,language?,context?) — analyze|generate|debug|refactor|explain|migrate code. Returns the engine's output.`,
   diagnose: `diagnose(error,context?) — root-cause a stack trace / build error on this Cloudflare stack.`,
@@ -456,6 +456,7 @@ ${HOSPITALITY_CATALOG}`;
       : null,
     `- Never invent data. If a tool returns nothing, say so.`,
     `- Be economical: don't call a tool you don't need. Answer as soon as you have enough.`,
+    `- AMBIGUOUS LOOKUPS: when find_document (or a search) comes back with several candidates instead of one clear winner, that list IS a complete answer — present it and ask which one they mean. Do not burn steps fetching every candidate to guess; you will run out before you can answer at all.`,
   ].filter(Boolean).join('\n');
 
   return `${resolveVoice(voice)}${phase}
@@ -798,7 +799,8 @@ export async function runTool(
           const p = await env.DB.prepare('SELECT id, title, series, full_text, word_count FROM corpus_papers WHERE id = ?').bind(ranked[0].id).first() as { id: string; title: string; series: string; full_text: string; word_count: number } | null;
           if (p?.full_text) return clip(`[${p.title} — ${p.series}, ${p.word_count}w · id ${p.id}]\n${p.full_text}`, OBS_CAP * 3);
         }
-        return 'Several match — name the series or refine:\n' + ranked.slice(0, 6).map(c => `- id=${c.id} "${c.title}" (${c.series}, score ${c.top.toFixed(3)})`).join('\n');
+        return 'Several match, none a clear winner — this list is a complete answer on its own: present it and ask which one, rather than spending more steps fetching each candidate to guess:\n'
+          + ranked.slice(0, 6).map(c => `- id=${c.id} "${c.title}" (${c.series}, score ${c.top.toFixed(3)})`).join('\n');
       }
       case 'ingest_paper': {
         if (!a.title || !a.text) return 'ingest_paper: title and text are required';
@@ -1425,11 +1427,20 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     return finish('I gathered what I could but could not reach a model to synthesize the final answer. Try again in a moment.', maxSteps);
   }
   const fj = firstJsonObject(final.content);
-  const synthesized = (fj && typeof fj.answer === 'string')
+  // Steps ran out and even the forced synthesis call failed to land a clean
+  // {"answer":...} — that used to fall straight to a canned "I gathered the
+  // data" line that discarded the data. It doesn't: the last real tool
+  // observation in the trace (e.g. find_document's candidate list, or
+  // whatever search_corpus/read_sql actually returned) is exactly what was
+  // gathered, so surface THAT instead of a non-answer.
+  const lastObs = [...trace].reverse().find(t => t.result && !t.result.startsWith('tool error'));
+  const synthesized = (fj && typeof fj.answer === 'string' && fj.answer.trim())
     ? fj.answer
-    : (final.content.trim().startsWith('{')
-        ? 'I gathered the data but ran out of reasoning steps before producing a clean final answer.'
-        : (final.content.trim() || '(no answer)'));
+    : (!final.content.trim().startsWith('{') && final.content.trim())
+      ? final.content.trim()
+      : (lastObs
+          ? `I ran out of reasoning steps before writing a clean synthesis, but here's what ${lastObs.tool} turned up:\n\n${lastObs.result}`
+          : '(no answer)');
   return finish(synthesized, maxSteps, {
     thought: fj && typeof fj.thought === 'string' ? fj.thought.slice(0, 1200) : undefined,
     thinking: final.thinking ? clip(final.thinking, 4000) : undefined,
