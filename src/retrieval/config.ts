@@ -47,3 +47,31 @@ export const RRF_K = 60;
 // legacy plain-chunk vectors already in the index, so old vectors stay
 // queryable during the §2.4 eval-gated cutover.
 export const VECTOR_VARIANT_CONTEXTUAL = 'contextual_v1';
+
+// ── Mandatory query scope (P0 privacy constraint) ───────────────────────────
+// elle-corpus-vectors is ONE shared Vectorize index for corpus chunks AND
+// private per-user data (conv-/jrnl-/mem- id-prefixed vectors — see
+// journal.ts, memory.ts, index.ts). Existing queries scope by filtering the
+// RETURNED matches by id prefix, in application code, AFTER the query runs —
+// none of them pass a user_id filter INTO Vectorize, and journalSearch()
+// (journal.ts) queries the whole index with no owner check before the
+// prefix filter. That is the "existing journal-read bug" the port plan
+// names explicitly and requires new code not repeat.
+//
+// Every retrieval/dense.ts and retrieval/fts.ts query takes a mandatory
+// RetrievalScope — no default parameter, so omitting it is a compile error,
+// not a runtime one. Corpus retrieval only ever needs 'corpus_public' today
+// (corpus_chunks has no owner column); the `user:${id}` arm exists so this
+// module's query surface is ready if a per-user retrieval path is ever
+// layered on the same index, without repeating the unscoped-query mistake.
+export type RetrievalScope = 'corpus_public' | `user:${string}`;
+
+export function assertCorpusScope(scope: RetrievalScope): void {
+  if (scope !== 'corpus_public') {
+    throw new Error(
+      `retrieval/pipeline.ts only serves the public corpus today (scope='corpus_public'); ` +
+      `got '${scope}'. There is no per-user corpus data yet — if you're adding one, extend ` +
+      `dense.ts/fts.ts's actual filtering (not just this assertion) first.`
+    );
+  }
+}

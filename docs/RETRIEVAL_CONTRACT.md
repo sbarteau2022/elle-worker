@@ -195,6 +195,66 @@ Both live in `src/llm.ts` next to `callLLM`; tests in `src/llm.test.ts`
 (`prefer: 'local'` against a stubbed `env.AI` — same pattern the file already
 uses for `callLLM`, no network in CI).
 
+## Phase 1 status (contextual RAG pipeline, §2)
+
+Built and unit-tested (110 test files / 1095 tests passing, `tsc --noEmit`
+clean), **not yet run against live infrastructure**:
+
+- `src/retrieval/chunker.ts` — token-aware naive chunking (whitespace-token
+  estimator, ~320 target/~15% overlap), separate from `index.ts`'s
+  paragraph-based `semanticChunks()` (that one stays as-is for the existing
+  plain-ingestion path; this one is specifically for the contextual re-embed).
+- `src/retrieval/contextualizer.ts` — the verbatim context-generation prompt,
+  windowed-vs-full document selection at the 30k-token threshold, per-chunk
+  retry with exponential backoff, and a D1 checkpoint
+  (`embedding_status`) so a killed run resumes rather than restarts.
+- `src/retrieval/fts.ts` + `db/schema.ts`'s `backfillCorpusChunksContext()` —
+  the D1 FTS5 BM25 leg, added as an out-of-band-table extension (new columns
+  + a synced virtual table), matching the existing `backfillConvTurnKappa`-
+  style convention rather than introducing a `migrations/` directory this
+  repo doesn't have.
+- `src/retrieval/dense.ts` — the Vectorize leg. **Real finding, not in the
+  original plan**: `elle-corpus-vectors` is a SINGLE shared index across
+  corpus chunks AND private per-user data (`conv-`/`jrnl-`/`mem-`
+  id-prefixed vectors from `journal.ts`/`memory.ts`/`index.ts`), scoped only
+  by post-query id-prefix filtering in application code — no query anywhere
+  passes a `user_id` filter into Vectorize itself, and `journalSearch()`
+  queries the whole index with no owner check before the prefix filter.
+  That confirms, in code, the "existing journal-read bug" the plan
+  references. `dense.ts` enforces a mandatory `RetrievalScope` (uncompilable
+  to omit, `config.ts`), filters on a `variant='contextual_v1'` metadata
+  field so this module can never return the legacy/private vectors even
+  before the metadata index is confirmed to exist, and strips any
+  `conv-`/`jrnl-`/`mem-` id as defense in depth regardless.
+- `src/retrieval/fusion.ts` (RRF, K=60) and `src/retrieval/rerank.ts`
+  (strategy-switched, `llm` default per W0.3) — both direct ports.
+- `src/retrieval/pipeline.ts` — `retrieve(env, query, scope, opts)` wires all
+  of the above into query → [dense ∥ fts] → RRF → rerank → top-k.
+
+**Deliberately NOT done in this pass** — each needs either a live-infra
+decision or a cost/human-input call this sandbox can't make on its own:
+
+1. **The metadata index** `dense.ts` assumes (`variant` field, for
+   `wrangler vectorize create-metadata-index`) is unconfirmed — same
+   network-blocked category as W0.1/W0.3.
+2. **No queue consumer wiring.** `contextualizeDocument()` is a callable
+   function, not yet hooked into `INGEST_QUEUE`'s consumer in `index.ts`
+   for a `contextualize_document` message type. Wiring it is small, but
+   merging it live means the next `git push` to `main` deploys it — doing
+   that without confirming the re-embed's cost/timing first seemed like the
+   wrong default.
+3. **The full re-embed itself has not run.** ~5,774 chunks × (1 context-gen
+   call + 1 embed call) is real cost and, per the W0.2 finding above, real
+   risk of starving interactive Gemini traffic if it runs unpaced against
+   the same quota. Needs a explicit go-ahead on timing/budget, not an
+   autonomous call.
+4. **The §2.4 golden 20-question eval set** — the plan is explicit this is
+   authored by a human ("questions Stewart writes... where exact wording is
+   load-bearing"). Not something to fabricate. The comparison harness itself
+   (query both old plain-vector search and the new pipeline, check top-3)
+   is straightforward to build once the questions exist — flagging as the
+   next piece, not building blind.
+
 ## Open items carried forward (not resolved by this document)
 
 1. Live Vectorize dimension/metric confirmation (see W0.1 caveat) — blocks
