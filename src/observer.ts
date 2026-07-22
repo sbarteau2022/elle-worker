@@ -279,7 +279,78 @@ export async function runAndPersistObserver(
     id(), analysisId, JSON.stringify(traj), kappaRun, result.status === 'complete' ? 1 : 0, predConf, KAPPA_DEF,
   ).run().catch(() => {}); // instrument write is best-effort — it must never fail a run
 
+  // Rung 5 groundwork — the REAL axis embeddings for the coherence instrument.
+  // Embed each axis's prose with the production embedder over the native
+  // Workers-AI binding (no external call). Best-effort: an embedding failure
+  // must never fail a run. The five vectors feed kappa_iso (path geometry) —
+  // an INDEPENDENT coherence measurement, not a re-transform of the lexical κ.
+  await embedAndPersistAxes(env, analysisId, [
+    result.dominant.data, result.counter.data, result.structural.data,
+    result.dissent.data, result.prediction.data,
+  ]).catch(() => {});
+
   return { analysisId, result, kappa, grounding: result.grounding };
+}
+
+// The production embedder — the same model Elle embeds the corpus with, run on
+// the bound AI (env.AI), so it needs no network egress.
+export const AXIS_EMBED_MODEL = '@cf/baai/bge-large-en-v1.5';
+
+// Embed a list of axis prose strings -> one vector each. Returns null on any
+// trouble (missing AI binding, provider error, shape mismatch) so the caller
+// can degrade silently. Pure-ish edge: the only side effect is the AI call.
+export async function embedAxisProse(env: ObserverEnv, dataByAxis: unknown[]): Promise<number[][] | null> {
+  const ai = (env as unknown as Env).AI;
+  if (!ai) return null;
+  const texts = dataByAxis.map(d => axisProse(d).slice(0, 2000) || ' ');
+  try {
+    const out = await ai.run(AXIS_EMBED_MODEL, { text: texts }) as { data?: number[][] };
+    return out?.data && out.data.length === texts.length ? out.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// Embed the five axes and persist the vectors (rounded to keep the blob lean).
+// Idempotent per analysis (ON CONFLICT). Best-effort throughout.
+export async function embedAndPersistAxes(env: ObserverEnv, analysisId: string, dataByAxis: unknown[]): Promise<boolean> {
+  const vecs = await embedAxisProse(env, dataByAxis);
+  if (!vecs) return false;
+  const rounded = vecs.map(v => v.map(x => Math.round(x * 1e5) / 1e5));
+  await env.DB.prepare(
+    `INSERT INTO observer_embeddings (id, analysis_id, model, dim, embeddings_json) VALUES (?,?,?,?,?)
+     ON CONFLICT(analysis_id) DO UPDATE SET model=excluded.model, dim=excluded.dim, embeddings_json=excluded.embeddings_json, created_at=datetime('now')`
+  ).bind(id(), analysisId, AXIS_EMBED_MODEL, vecs[0]?.length ?? 0, JSON.stringify(rounded)).run().catch(() => {});
+  return true;
+}
+
+// Backfill embeddings for a user's analyses that lack them (bounded, cap 30).
+// Shared by the embed_axes action and the idle auto-drain cron, so the docket's
+// existing runs get embedded without a manual authenticated call.
+export async function backfillObserverEmbeddings(
+  env: ObserverEnv, userId: string, n: number,
+): Promise<{ embedded: number; remaining: number }> {
+  const count = Math.min(Math.max(n || 10, 1), 30);
+  const rows = await env.DB.prepare(
+    `SELECT a.id, a.dominant_json, a.counter_json, a.structural_json, a.dissent_json, a.prediction_json
+     FROM observer_analyses a
+     WHERE a.user_id = ? AND NOT EXISTS (SELECT 1 FROM observer_embeddings e WHERE e.analysis_id = a.id)
+     ORDER BY a.created_at ASC LIMIT ?`
+  ).bind(userId, count).all().catch(() => ({ results: [] }));
+  const parse = (s: unknown) => { try { return JSON.parse(String(s || 'null')); } catch { return null; } };
+  let embedded = 0;
+  for (const r of (rows.results as Array<Record<string, unknown>>)) {
+    const ok = await embedAndPersistAxes(env, String(r.id), [
+      parse(r.dominant_json), parse(r.counter_json), parse(r.structural_json),
+      parse(r.dissent_json), parse(r.prediction_json),
+    ]);
+    if (ok) embedded++;
+  }
+  const left = await env.DB.prepare(
+    `SELECT COUNT(*) AS c FROM observer_analyses a WHERE a.user_id = ?
+     AND NOT EXISTS (SELECT 1 FROM observer_embeddings e WHERE e.analysis_id = a.id)`
+  ).bind(userId).first() as { c: number } | null;
+  return { embedded, remaining: left?.c ?? 0 };
 }
 
 // ── DB bootstrap — guarded, self-healing (house style) ─────────
@@ -433,6 +504,15 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     return json({ labeled: keys.length, keys });
   }
 
+  // ── embed_axes — backfill the REAL per-axis embeddings (production bge-large
+  //    on the native AI binding) for this caller's analyses that lack them.
+  //    Idempotent; bounded (cap 30/call). Feeds the coherence instrument's
+  //    kappa_iso, which reads the axis vectors' path geometry.
+  if (action === 'embed_axes') {
+    const out = await backfillObserverEmbeddings(env, userId, Number(body.n) || 10);
+    return json({ ...out, model: AXIS_EMBED_MODEL });
+  }
+
   if (action === 'list') {
     const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
     const rows = await env.DB.prepare(
@@ -583,5 +663,5 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     });
   }
 
-  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|resolve|pending|falsify|list|get|outcome)` }, 400);
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|embed_axes|resolve|pending|falsify|list|get|outcome)` }, 400);
 }
