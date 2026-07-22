@@ -176,6 +176,16 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       prediction_confidence TEXT, kappa_def TEXT, provisional INTEGER DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
+    // observer.ts — the REAL per-axis embeddings (production bge-large, via the
+    // native Workers-AI binding). One row per analysis: the five axis vectors
+    // that the coherence instrument (kappa_iso from path geometry) reads. Kept
+    // in its own table so no ALTER is needed and a heavy vector blob never bloats
+    // the trajectory row. Write is best-effort; an embedding failure never fails a run.
+    `CREATE TABLE IF NOT EXISTS observer_embeddings (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE,
+      model TEXT, dim INTEGER, embeddings_json TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     // lattice.ts — The Lattice: 32-axis security deduction engine
     `CREATE TABLE IF NOT EXISTS lattice_analyses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,

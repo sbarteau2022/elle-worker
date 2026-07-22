@@ -1,7 +1,7 @@
 // Pure-logic tests for the Observer: the opening-axis roster and that every
 // axis instructs JSON-only output. No network, no D1.
 import { describe, it, expect } from 'vitest';
-import { OPENING_AXES, axisProse, kappaTrajectory, outcomeSource } from './observer';
+import { OPENING_AXES, axisProse, kappaTrajectory, outcomeSource, embedAxisProse, AXIS_EMBED_MODEL } from './observer';
 
 describe('observer · the opening axes', () => {
   it('two opening axes — Dominant Narrative and Counter-Narrative — feeding the structural reading', () => {
@@ -60,5 +60,26 @@ describe('observer · the open-case segmentation (hindsight-free vs calibration)
     expect(outcomeSource('some free-text note')).toBe('docket');
     // Defensive: a non-string never throws and never counts as open.
     expect(outcomeSource(undefined as unknown as string)).toBe('docket');
+  });
+});
+
+describe('observer · the real-embedding seam (bge via the AI binding)', () => {
+  it('degrades to null when the AI binding is absent — never throws, never fails a run', async () => {
+    const env = { DB: {} } as unknown as Parameters<typeof embedAxisProse>[0];
+    expect(await embedAxisProse(env, [{ a: 'x' }, { a: 'y' }])).toBeNull();
+  });
+  it('embeds each axis prose with the production model, one vector per axis', async () => {
+    const calls: Array<[string, { text: string[] }]> = [];
+    const env = { AI: { run: async (m: string, inp: { text: string[] }) => {
+      calls.push([m, inp]); return { data: inp.text.map(() => [1, 2, 3]) };
+    } } } as unknown as Parameters<typeof embedAxisProse>[0];
+    const vecs = await embedAxisProse(env, [{ s: 'alpha reasoning' }, { s: 'beta reasoning' }]);
+    expect(vecs).toEqual([[1, 2, 3], [1, 2, 3]]);
+    expect(calls[0][0]).toBe(AXIS_EMBED_MODEL);
+    expect(calls[0][1].text).toEqual(['alpha reasoning', 'beta reasoning']); // axisProse flattened
+  });
+  it('returns null on a shape mismatch (provider gave fewer vectors than axes)', async () => {
+    const env = { AI: { run: async () => ({ data: [[1]] }) } } as unknown as Parameters<typeof embedAxisProse>[0];
+    expect(await embedAxisProse(env, [{}, {}, {}])).toBeNull();
   });
 });

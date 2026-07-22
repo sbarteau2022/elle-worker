@@ -21,7 +21,7 @@ import {
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
 import { handleFalcon, type FalconEnv } from './falcon';
-import { handleObserver, drainObserverQueue, seedObserverDocket, type ObserverEnv } from './observer';
+import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
@@ -1170,7 +1170,12 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       const oenv = env as unknown as ObserverEnv;
       const seed = await seedObserverDocket(oenv, owner);
       const out = await drainObserverQueue(oenv, owner, 1);
-      return { ran: `observer_drain (seeded ${seed.seeded}, processed ${out.processed.length}, remaining ${out.remaining})` };
+      // When the queue is idle, spend the tick backfilling REAL axis embeddings
+      // for runs that predate them (bge-large on the native AI binding) — so the
+      // coherence instrument's inputs complete themselves, no manual call.
+      let emb = { embedded: 0, remaining: 0 };
+      if (out.remaining === 0) emb = await backfillObserverEmbeddings(oenv, owner, 2);
+      return { ran: `observer_drain (seeded ${seed.seeded}, processed ${out.processed.length}, remaining ${out.remaining}, embedded ${emb.embedded}/${emb.remaining} left)` };
     }
     case 'consolidate': return { ran: await runConsolidation(env, embed) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
