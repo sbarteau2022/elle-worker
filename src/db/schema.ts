@@ -626,3 +626,61 @@ export async function backfillTradesExtColumns(db: D1Database): Promise<void> {
   }
   tradesExtReady = true;
 }
+
+// `corpus_papers`/`corpus_chunks` are ALSO out-of-band (verified: no CREATE
+// TABLE for either anywhere in this repo — see docs/RETRIEVAL_CONTRACT.md).
+// The §2 contextual-RAG port (src/retrieval/*) EXTENDS the existing
+// corpus_chunks table rather than introducing a parallel one — new columns
+// only, same convention as the backfills above. Invoked from
+// src/retrieval/contextualizer.ts and pipeline.ts, which only ever run after
+// corpus_chunks is known to exist (chunks are inserted well before any
+// contextualization pass reads them).
+let corpusChunksContextReady = false;
+export async function backfillCorpusChunksContext(db: D1Database): Promise<void> {
+  if (corpusChunksContextReady) return;
+  const columns: Array<[string, string]> = [
+    // LLM-generated context ("what this chunk means in the whole document")
+    // and the two derived texts § 2.1 defines — kept as separate columns
+    // (not recomputed) so re-running the contextualizer is a cheap re-read.
+    ['context_text', 'TEXT'],
+    ['contextual_text', 'TEXT'], // context_text + ' ' + chunk_text — what gets embedded/FTS-indexed
+    ['context_source', 'TEXT'],  // 'full' | 'windowed' (§2.2 — full doc vs. running-summary prompt)
+    ['embedding_status', 'TEXT'], // 'pending' | 'contextualized' | 'embedded' | 'failed'
+    ['contextualized_at', 'INTEGER'],
+  ];
+  for (const [name, type] of columns) {
+    await db.prepare(`ALTER TABLE corpus_chunks ADD COLUMN ${name} ${type}`).run().catch(() => {});
+  }
+
+  // D1 FTS5 virtual table over contextual_text — the BM25 leg of hybrid
+  // retrieval (Vectorize has no keyword search). External-content table
+  // (content='corpus_chunks') so the indexed text isn't duplicated on disk;
+  // synced by the three triggers below rather than rebuilt on every read.
+  await db.prepare(
+    `CREATE VIRTUAL TABLE IF NOT EXISTS corpus_chunks_fts USING fts5(contextual_text, content='corpus_chunks', content_rowid='rowid')`
+  ).run().catch(() => {});
+  await db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS corpus_chunks_fts_ai AFTER INSERT ON corpus_chunks BEGIN
+      INSERT INTO corpus_chunks_fts(rowid, contextual_text) VALUES (new.rowid, new.contextual_text);
+    END
+  `).run().catch(() => {});
+  await db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS corpus_chunks_fts_ad AFTER DELETE ON corpus_chunks BEGIN
+      INSERT INTO corpus_chunks_fts(corpus_chunks_fts, rowid, contextual_text) VALUES('delete', old.rowid, old.contextual_text);
+    END
+  `).run().catch(() => {});
+  await db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS corpus_chunks_fts_au AFTER UPDATE ON corpus_chunks BEGIN
+      INSERT INTO corpus_chunks_fts(corpus_chunks_fts, rowid, contextual_text) VALUES('delete', old.rowid, old.contextual_text);
+      INSERT INTO corpus_chunks_fts(rowid, contextual_text) VALUES (new.rowid, new.contextual_text);
+    END
+  `).run().catch(() => {});
+
+  // Triggers only sync FUTURE writes. Rows that already existed when the FTS
+  // table was created need one manual sync — safe to run every time this
+  // function runs (guarded by corpusChunksContextReady, so once per isolate),
+  // and a no-op once the FTS index is already current.
+  await db.prepare(`INSERT INTO corpus_chunks_fts(corpus_chunks_fts) VALUES ('rebuild')`).run().catch(() => {});
+
+  corpusChunksContextReady = true;
+}

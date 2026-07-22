@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { callLLM } from './llm';
+import { z } from 'zod';
+import { callLLM, runLLM, jsonLLM } from './llm';
 import type { LLMEnv } from './llm';
 
 // A fetch stub that routes by URL substring; records every URL it saw so a test
@@ -67,5 +68,54 @@ describe('callExtraFreeTiers — Groq is reached as a free fallback tier', () =>
     expect(out.content).toBe('from-groq');
     expect(seen.some(u => u.includes('openrouter.ai'))).toBe(true); // tried first
     expect(seen.some(u => u.includes('api.groq.com'))).toBe(true);  // then Groq
+  });
+});
+
+describe('runLLM — thin text wrapper over callLLM', () => {
+  it('returns the response content as a plain string', async () => {
+    const run = vi.fn(async () => ({ response: 'plain text answer' }));
+    const env = { AI: { run } } as unknown as LLMEnv;
+
+    const out = await runLLM(env, 'say hi', { prefer: 'local' });
+
+    expect(out).toBe('plain text answer');
+  });
+});
+
+const RouteSchema = z.object({
+  selected_route: z.enum(['billing', 'support', 'sales']),
+});
+
+describe('jsonLLM — schema-validated structured output with one repair retry', () => {
+  it('parses and validates a well-formed JSON response on the first try', async () => {
+    const run = vi.fn(async () => ({ response: '{"selected_route":"billing"}' }));
+    const env = { AI: { run } } as unknown as LLMEnv;
+
+    const out = await jsonLLM(env, 'route this ticket', RouteSchema, { task: 'conversation', prefer: 'local' });
+
+    expect(out.repaired).toBe(false);
+    expect(out.data.selected_route).toBe('billing');
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it('retries once with the validation error and succeeds on the repaired reply', async () => {
+    const run = vi.fn()
+      .mockResolvedValueOnce({ response: '{"selected_route":"not-a-real-route"}' })
+      .mockResolvedValueOnce({ response: '{"selected_route":"support"}' });
+    const env = { AI: { run } } as unknown as LLMEnv;
+
+    const out = await jsonLLM(env, 'route this ticket', RouteSchema, { prefer: 'local' });
+
+    expect(out.repaired).toBe(true);
+    expect(out.data.selected_route).toBe('support');
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws after the repair retry also fails validation', async () => {
+    const run = vi.fn(async () => ({ response: 'not json at all' }));
+    const env = { AI: { run } } as unknown as LLMEnv;
+
+    await expect(jsonLLM(env, 'route this ticket', RouteSchema, { prefer: 'local' })).rejects.toThrow(/schema validation failed/);
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
