@@ -156,6 +156,10 @@ export interface Env extends LLMEnv {
   // One client ID, or a comma-separated allowlist (web + iOS client IDs from
   // the same Google Cloud project) — see src/google-auth.ts.
   GOOGLE_CLIENT_ID?: string;
+  // Resend API key for the contact-form email notification (notifyContact,
+  // above handleContact). Unset ⇒ the form still logs to elle_outreach_log,
+  // just without the email courtesy. Set with: wrangler secret put RESEND_API_KEY
+  RESEND_API_KEY?: string;
   ENVIRONMENT:      string;
   // Alpaca — paper trading
   ALPACA_API_KEY?:    string;
@@ -997,6 +1001,27 @@ async function handleThreads(body: Record<string, unknown>, env: Env, userId: st
 // ── Contact (public) ───────────────────────────────────
 // Public contact/outreach form. Writes ONLY to elle_outreach_log with
 // parameterized binds — the client-supplied `table` is never used in SQL.
+// Best-effort email notification for a contact-form submission. The D1 row
+// (elle_outreach_log) is the durable record regardless; this is a courtesy
+// so Stewart doesn't have to query the table to see it. Inert (no-op) until
+// RESEND_API_KEY is set — never blocks or fails the actual submission.
+const CONTACT_NOTIFY_EMAIL = 'sbarteau2022@iCloud.com';
+async function notifyContact(env: Env, outreach_type: string, initiated_by: string, thought: string): Promise<void> {
+  if (!env.RESEND_API_KEY) return;
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'The Ethical Intelligence Project <onboarding@resend.dev>',
+        to: [CONTACT_NOTIFY_EMAIL],
+        subject: `[${outreach_type}] New message from ${initiated_by}`,
+        text: thought,
+      }),
+    });
+  } catch { /* best-effort — the D1 log is the durable record */ }
+}
+
 async function handleContact(body: Record<string, unknown>, env: Env): Promise<Response> {
   const row = (body.row ?? body) as Record<string, unknown>;
   const thought = row.thought != null ? String(row.thought).slice(0, 5000) : '';
@@ -1007,6 +1032,7 @@ async function handleContact(body: Record<string, unknown>, env: Env): Promise<R
   await env.DB.prepare(
     `INSERT INTO elle_outreach_log (id, outreach_type, thought, initiated_by, needs_response, notified) VALUES (?, ?, ?, ?, ?, 0)`
   ).bind(generateId(), outreach_type, thought, initiated_by, needs_response).run();
+  await notifyContact(env, outreach_type, initiated_by, thought);
   return json({ success: true });
 }
 
