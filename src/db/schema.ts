@@ -647,6 +647,13 @@ export async function backfillCorpusChunksContext(db: D1Database): Promise<void>
     ['context_source', 'TEXT'],  // 'full' | 'windowed' (§2.2 — full doc vs. running-summary prompt)
     ['embedding_status', 'TEXT'], // 'pending' | 'contextualized' | 'embedded' | 'failed'
     ['contextualized_at', 'INTEGER'],
+    // The re-embedded contextual_text vector lives under its OWN Vectorize
+    // id (never overwrites the legacy `vectorize_id` column/vector — see
+    // retrieval/dense.ts's embedAndUpsertContextual) so the OLD plain-chunk
+    // search path keeps working unchanged through the §2.4 eval-gated
+    // cutover. Only the pipeline that reads this column should ever query
+    // the contextual_v1 variant.
+    ['contextual_vectorize_id', 'TEXT'],
   ];
   for (const [name, type] of columns) {
     await db.prepare(`ALTER TABLE corpus_chunks ADD COLUMN ${name} ${type}`).run().catch(() => {});

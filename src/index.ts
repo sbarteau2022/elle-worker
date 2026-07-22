@@ -88,6 +88,7 @@ import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from '.
 import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
 import { ingestAtlasCsv } from './atlas-ingest';
 import { readAtlasEvents } from './atlas-events';
+import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from './retrieval/reembed';
 
 // ── /privacy — the door's policy, in plain language ──────────────────────────
 const PRIVACY_HTML = `<!doctype html>
@@ -2099,6 +2100,16 @@ export default {
     // Video = caller-supplied keyframes (image parts) + audio track (audio part).
     if (path === '/api/ingest-multimodal') { if (!svc) return err('Unauthorized', 401); return handleIngestMultimodal(body, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
+    // Kicks off the §2 contextual-RAG re-embed (docs/RETRIEVAL_CONTRACT.md):
+    // one INGEST_QUEUE message per document that still has an un-embedded
+    // chunk. Idempotent — a document with nothing left pending sends no
+    // message, so this is also how you resume after a partial run. Real
+    // LLM + embedding cost against the live corpus; admin-gated on purpose,
+    // not wired to any schedule or the regular ingest path.
+    if (path === '/api/retrieval/backfill-contextual') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await enqueueContextualBackfill(env as unknown as ReembedEnv & { INGEST_QUEUE: Queue }));
+    }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/research')          { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/search') {
@@ -2590,6 +2601,19 @@ export default {
           `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'reading', 'ingest_worker', ?, 0.7, 0.7)`
         ).bind(generateId(), `Elle read: "${m.title}" (${m.chunks_count} chunks)`).run().catch(() => {});
         msg.ack();
+      } else if (m.type === 'reembed_document') {
+        // §2 contextual-RAG backfill — enqueued by /api/retrieval/backfill-contextual.
+        // Each phase (context-gen, embed+upsert) checkpoints via
+        // corpus_chunks.embedding_status, so retry() on a transient failure
+        // safely resumes rather than redoing already-finished chunks.
+        try {
+          const result = await handleReembedMessage(env as unknown as ReembedEnv, m.paper_id);
+          console.log(`[reembed] ${m.paper_id}:`, JSON.stringify(result));
+          msg.ack();
+        } catch (e) {
+          console.error(`[reembed] ${m.paper_id} failed, will retry:`, (e as Error).message);
+          msg.retry();
+        }
       } else { msg.retry(); }
     }
   },

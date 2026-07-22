@@ -197,8 +197,8 @@ uses for `callLLM`, no network in CI).
 
 ## Phase 1 status (contextual RAG pipeline, §2)
 
-Built and unit-tested (110 test files / 1095 tests passing, `tsc --noEmit`
-clean), **not yet run against live infrastructure**:
+Built and unit-tested (see the full-suite count in this PR's test plan;
+`tsc --noEmit` clean), **not yet run against live infrastructure**:
 
 - `src/retrieval/chunker.ts` — token-aware naive chunking (whitespace-token
   estimator, ~320 target/~15% overlap), separate from `index.ts`'s
@@ -231,29 +231,97 @@ clean), **not yet run against live infrastructure**:
 - `src/retrieval/pipeline.ts` — `retrieve(env, query, scope, opts)` wires all
   of the above into query → [dense ∥ fts] → RRF → rerank → top-k.
 
-**Deliberately NOT done in this pass** — each needs either a live-infra
-decision or a cost/human-input call this sandbox can't make on its own:
+## Phase 1b — re-embed wiring (contextualize → embed → upsert)
 
-1. **The metadata index** `dense.ts` assumes (`variant` field, for
-   `wrangler vectorize create-metadata-index`) is unconfirmed — same
-   network-blocked category as W0.1/W0.3.
-2. **No queue consumer wiring.** `contextualizeDocument()` is a callable
-   function, not yet hooked into `INGEST_QUEUE`'s consumer in `index.ts`
-   for a `contextualize_document` message type. Wiring it is small, but
-   merging it live means the next `git push` to `main` deploys it — doing
-   that without confirming the re-embed's cost/timing first seemed like the
-   wrong default.
-3. **The full re-embed itself has not run.** ~5,774 chunks × (1 context-gen
-   call + 1 embed call) is real cost and, per the W0.2 finding above, real
-   risk of starving interactive Gemini traffic if it runs unpaced against
-   the same quota. Needs a explicit go-ahead on timing/budget, not an
-   autonomous call.
-4. **The §2.4 golden 20-question eval set** — the plan is explicit this is
-   authored by a human ("questions Stewart writes... where exact wording is
-   load-bearing"). Not something to fabricate. The comparison harness itself
-   (query both old plain-vector search and the new pipeline, check top-3)
-   is straightforward to build once the questions exist — flagging as the
-   next piece, not building blind.
+Now built and unit-tested: `src/retrieval/reembed.ts` orchestrates the full
+per-document re-embed — contextualize any pending chunk (`contextualizer.ts`,
+checkpointed via `embedding_status`), then batch-embed the resulting
+`contextual_text` and upsert into Vectorize under `variant='contextual_v1'`
+(`dense.ts`'s `embedAndUpsertContextual`), storing the new vector's id in a
+**separate** `contextual_vectorize_id` column so the existing `vectorize_id`
+column — and the legacy plain-chunk vector it points to — is never touched.
+The old plain-vector search path keeps working unchanged through the whole
+cutover.
+
+Wired into `src/index.ts`:
+- `POST /api/retrieval/backfill-contextual` (service-key gated, same as
+  `/api/ingest`) — enqueues one `INGEST_QUEUE` message
+  (`{type:'reembed_document', paper_id}`) per document that still has an
+  un-embedded chunk. Idempotent: call it again any time to pick up whatever
+  is still pending (new papers, or chunks left over from a prior partial
+  run) — a document with nothing left pending sends no message.
+- The queue consumer now handles `reembed_document`: runs
+  `reembedDocument()` for that paper, `ack()`s on success, `retry()`s on
+  failure (Cloudflare Queues' own backoff) — safe because both phases are
+  checkpointed, so a retry only redoes whatever didn't finish.
+
+**This has NOT been run.** Two separate reasons, not one:
+
+1. **Cannot run it from here at all.** This session's outbound network
+   policy hard-blocks `api.cloudflare.com` (confirmed both in Phase 0 and
+   again immediately before this work — `curl` to Cloudflare's API returns
+   `403` on CONNECT regardless of credentials). That means this session can
+   neither `wrangler deploy` the code above nor call the trigger route once
+   deployed — both require reaching Cloudflare's API/edge, which this
+   sandbox cannot do. This is an environment constraint, not a policy
+   choice.
+2. **Real cost, independent of (1).** ~5,774 chunks × (1 context-gen call +
+   1 embed call), and per the W0.2 finding, real risk of starving
+   interactive Gemini traffic if it runs unpaced against a thin shared
+   quota. Even from an unrestricted environment this shouldn't run
+   unattended on the first try.
+
+**To actually run it**, from an environment with real Cloudflare access
+(your machine, or CI after this merges and auto-deploys):
+
+```
+# 1. Kick off the backfill — enqueues one message per pending document.
+curl -X POST https://<worker-host>/api/retrieval/backfill-contextual \
+  -H "Authorization: Bearer $ELLE_SERVICE_KEY"
+
+# 2. Watch it work through the queue (each line is one document's result).
+wrangler tail --format pretty | grep '\[reembed\]'
+
+# 3. Re-run step 1 any time to resume — already-embedded chunks are skipped.
+```
+
+Given the W0.2 quota finding, consider starting with a handful of documents
+(temporarily narrow the `enqueueContextualBackfill` query, or just watch the
+first few `wrangler tail` lines for `429`s) before letting it run against
+all ~270 papers unattended.
+
+**Still not done, deliberately** — the §2.4 golden 20-question eval set. The
+plan is explicit this is human-authored ("questions Stewart writes... where
+exact wording is load-bearing") — not something to fabricate. The
+comparison harness itself (query both old plain-vector search and the new
+pipeline, check top-3) is straightforward to build once the questions
+exist; flagging as the next piece once the backfill above has actually run.
+
+## Phase 2c status (router-as-structured-output primitive, §6)
+
+`src/agents/primitives.ts` implements `routeStructured(env, query, routes,
+opts)` — the cookbook's `Dict[route_name, description]` → enum-schema →
+`{selected_route}` pattern, via `jsonLLM`. Unit-tested (valid route, invalid
+route triggering the repair retry then throwing, and the <2-routes guard).
+
+**Not applied to `router.ts`'s own per-step `"engine"` hand-off** (the
+closest thing to a prompt-parsed "engine router" in this codebase — see
+`runRouter()`'s `ENGINES`/`Engine` type, ~line 1291). That field rides inside
+the single freeform JSON blob the model emits every ReAct step (which also
+carries `tool`/`args`/`thought`/`answer`), and is already validated with a
+`Set.has()` check that silently no-ops on an invalid value rather than
+failing the step — it isn't a standalone routing decision an LLM is asked to
+make, so there's no clean call site to redirect into `routeStructured()`
+without redesigning the core per-step protocol itself. That redesign is real
+work with real regression risk on the single most heavily-used code path in
+the app, and wasn't attempted without confirming the scope first (asked;
+question tooling was unavailable in this session, so this is the
+conservative default taken instead — flag if a real migration of that loop
+is actually wanted).
+
+The parallel-aggregate pattern (`Parallel_Agent.ipynb`) is logged as a
+documented-but-unimplemented primitive in the same file, per the plan's own
+scope for this pass ("implement only the router migration now").
 
 ## Open items carried forward (not resolved by this document)
 
