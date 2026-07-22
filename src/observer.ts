@@ -38,6 +38,7 @@ import { computeKappa, KAPPA_DEF } from './journal';
 import type { Env } from './index';
 import { OBSERVER_DOCKET, docketOutcomeForSubject } from './observer-docket';
 import { falsify, overlapMatch, POWER_FLOOR } from './observer-falsifier';
+import { extractAndPersistBlanket, type BlanketEnv } from './observer-blanket';
 
 // ── Rung 3: the read-only trajectory instrument ─────────────────
 // An Observer run is a reasoning trajectory — five axes fired in order. We
@@ -289,6 +290,15 @@ export async function runAndPersistObserver(
     result.dissent.data, result.prediction.data,
   ]).catch(() => {});
 
+  // The two-models step: extract the nested-Markov-blanket MODEL this run inferred
+  // and score its completeness. Predicts prediction↔outcome fidelity far better
+  // than trajectory coherence (validated rho≈+0.61 vs +0.08). Best-effort; the
+  // LLM extraction here is the unbiased replication (separate from any fidelity
+  // judge). Read-only, gates nothing.
+  await extractAndPersistBlanket(env as unknown as BlanketEnv, analysisId, {
+    structural: result.structural.data, dissent: result.dissent.data, prediction: result.prediction.data,
+  }).catch(() => {});
+
   return { analysisId, result, kappa, grounding: result.grounding };
 }
 
@@ -351,6 +361,35 @@ export async function backfillObserverEmbeddings(
      AND NOT EXISTS (SELECT 1 FROM observer_embeddings e WHERE e.analysis_id = a.id)`
   ).bind(userId).first() as { c: number } | null;
   return { embedded, remaining: left?.c ?? 0 };
+}
+
+// Backfill the nested-blanket extraction for a user's analyses that lack it
+// (bounded, cap 20 — each is ~1 reasoning call). Shared by the blanket_extract
+// action and the idle auto-drain cron, so the docket's runs get their blanket
+// model without a manual authenticated call.
+export async function backfillObserverBlankets(
+  env: ObserverEnv, userId: string, n: number,
+): Promise<{ extracted: number; remaining: number }> {
+  const count = Math.min(Math.max(n || 5, 1), 20);
+  const rows = await env.DB.prepare(
+    `SELECT a.id, a.structural_json, a.dissent_json, a.prediction_json
+     FROM observer_analyses a
+     WHERE a.user_id = ? AND NOT EXISTS (SELECT 1 FROM observer_blankets b WHERE b.analysis_id = a.id)
+     ORDER BY a.created_at ASC LIMIT ?`
+  ).bind(userId, count).all().catch(() => ({ results: [] }));
+  const parse = (s: unknown) => { try { return JSON.parse(String(s || 'null')); } catch { return null; } };
+  let extracted = 0;
+  for (const r of (rows.results as Array<Record<string, unknown>>)) {
+    const ok = await extractAndPersistBlanket(env as unknown as BlanketEnv, String(r.id), {
+      structural: parse(r.structural_json), dissent: parse(r.dissent_json), prediction: parse(r.prediction_json),
+    });
+    if (ok) extracted++;
+  }
+  const left = await env.DB.prepare(
+    `SELECT COUNT(*) AS c FROM observer_analyses a WHERE a.user_id = ?
+     AND NOT EXISTS (SELECT 1 FROM observer_blankets b WHERE b.analysis_id = a.id)`
+  ).bind(userId).first() as { c: number } | null;
+  return { extracted, remaining: left?.c ?? 0 };
 }
 
 // ── DB bootstrap — guarded, self-healing (house style) ─────────
@@ -513,6 +552,14 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     return json({ ...out, model: AXIS_EMBED_MODEL });
   }
 
+  // ── blanket_extract — backfill the nested-Markov-blanket model + completeness
+  //    for this caller's analyses that lack it. Idempotent; bounded (cap 20).
+  //    The prediction-time predictor of prediction↔outcome fidelity.
+  if (action === 'blanket_extract') {
+    const out = await backfillObserverBlankets(env, userId, Number(body.n) || 5);
+    return json(out);
+  }
+
   if (action === 'list') {
     const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
     const rows = await env.DB.prepare(
@@ -663,5 +710,5 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     });
   }
 
-  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|embed_axes|resolve|pending|falsify|list|get|outcome)` }, 400);
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|embed_axes|blanket_extract|resolve|pending|falsify|list|get|outcome)` }, 400);
 }

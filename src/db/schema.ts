@@ -186,6 +186,15 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       model TEXT, dim INTEGER, embeddings_json TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
+    // observer-blanket.ts — the nested-Markov-blanket model each run inferred
+    // (the operator's NestedMarkovBlanketExtraction schema) + its prediction-time
+    // COMPLETENESS score. Validated to predict prediction↔outcome fidelity far
+    // better than trajectory coherence. Read-only; best-effort; gates nothing.
+    `CREATE TABLE IF NOT EXISTS observer_blankets (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE,
+      model_json TEXT NOT NULL, completeness REAL, n_blankets INTEGER, n_collisions INTEGER,
+      alignment_status TEXT, created_at TEXT DEFAULT (datetime('now'))
+    )`,
     // lattice.ts — The Lattice: 32-axis security deduction engine
     `CREATE TABLE IF NOT EXISTS lattice_analyses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,
