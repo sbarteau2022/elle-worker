@@ -57,3 +57,34 @@ export async function denseQuery(
 function isPrivateId(id: string): boolean {
   return id.startsWith('conv-') || id.startsWith('jrnl-') || id.startsWith('mem-');
 }
+
+export interface ContextualChunkInput {
+  vectorizeId: string; // e.g. `ctxv1-${chunk.id}` — a NEW id, distinct from the chunk's legacy vectorize_id
+  text: string;        // contextual_text: generated_context + ' ' + original chunk_text
+  paperId: string;
+  chunkIndex: number;
+}
+
+// §2.2's re-embed step: batched (same 25/call convention as index.ts's
+// embedBatch) embed of contextual_text into Vectorize, tagged
+// variant='contextual_v1' so denseQuery's filter only ever returns these.
+// Writes ONLY to Vectorize — the caller is responsible for recording each
+// chunk's contextual_vectorize_id + embedding_status in D1 (see
+// retrieval/reembed.ts) once a batch upserts successfully.
+export async function embedAndUpsertContextual(env: DenseEnv, chunks: ContextualChunkInput[]): Promise<void> {
+  const BATCH = 25;
+  for (let i = 0; i < chunks.length; i += BATCH) {
+    const batch = chunks.slice(i, i + BATCH);
+    const result = (await env.AI.run(EMBEDDING_MODEL, { text: batch.map(c => c.text.slice(0, 2000)) })) as { data?: number[][] };
+    if (!result?.data || result.data.length !== batch.length) {
+      throw new Error(`embedAndUpsertContextual: expected ${batch.length} embeddings, got ${result?.data?.length ?? 0}`);
+    }
+    await env.VECTORIZE.upsert(
+      batch.map((c, j) => ({
+        id: c.vectorizeId,
+        values: result.data![j],
+        metadata: { paper_id: c.paperId, chunk_index: c.chunkIndex, variant: VECTOR_VARIANT_CONTEXTUAL },
+      }))
+    );
+  }
+}
