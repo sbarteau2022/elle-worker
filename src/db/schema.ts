@@ -195,6 +195,27 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       model_json TEXT NOT NULL, completeness REAL, n_blankets INTEGER, n_collisions INTEGER,
       alignment_status TEXT, created_at TEXT DEFAULT (datetime('now'))
     )`,
+    // observer-live.ts — the ONLY uncontaminated validator of the completeness→
+    // fidelity claim. Every retrospective test NULLed because the weights had
+    // memorized the docket's endings; gated and ungated fidelity diverged by the
+    // contamination gap. The escape is TIME: log a prediction on an OPEN case,
+    // stamp the training cutoff, and let the world resolve it later. A row is
+    // admissible only if t0 postdates the cutoff AND the outcome was undecided at
+    // t0 (open + post-cutoff) — enforced at write time, so no memorized outcome
+    // can enter. Mode A = the inferred topology (completeness sets the ceiling);
+    // forecasts_json = the GATED forward sim (each forecast's driver must already
+    // be a named agent — the gate that keeps recall out). Scored at resolution:
+    // mode_a_completeness (ceiling) and gated_fidelity (did we hit it), separately.
+    `CREATE TABLE IF NOT EXISTS observer_predictions_live (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE, case_title TEXT,
+      t0 TEXT NOT NULL, model_id TEXT NOT NULL, training_cutoff TEXT NOT NULL, resolution_due TEXT NOT NULL,
+      admissible INTEGER NOT NULL DEFAULT 0, admit_reason TEXT,
+      topology_json TEXT NOT NULL, mode_a_completeness REAL, n_agents INTEGER,
+      forecasts_json TEXT NOT NULL, n_forecasts INTEGER, n_refused INTEGER DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      outcomes_json TEXT, gated_fidelity REAL, free_energy REAL, resolved_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     // lattice.ts — The Lattice: 32-axis security deduction engine
     `CREATE TABLE IF NOT EXISTS lattice_analyses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,

@@ -39,6 +39,7 @@ import type { Env } from './index';
 import { OBSERVER_DOCKET, docketOutcomeForSubject } from './observer-docket';
 import { falsify, overlapMatch, POWER_FLOOR } from './observer-falsifier';
 import { extractAndPersistBlanket, type BlanketEnv } from './observer-blanket';
+import { logLivePrediction, resolveLivePrediction, liveValidation, type LiveEnv, type ResolvedOutcome } from './observer-live';
 
 // ── Rung 3: the read-only trajectory instrument ─────────────────
 // An Observer run is a reasoning trajectory — five axes fired in order. We
@@ -710,5 +711,68 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     });
   }
 
-  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|embed_axes|blanket_extract|resolve|pending|falsify|list|get|outcome)` }, 400);
+  // ── log_live — the uncontaminated validator's WRITE side (observer-live.ts).
+  //    For an OPEN case (a prediction whose outcome is not yet knowable), capture
+  //    the Mode-A topology + the GATED Mode-B forward simulation, stamped with the
+  //    model's training cutoff and a resolution horizon. Admissibility (open +
+  //    post-cutoff) is computed and stored; an inadmissible row is kept and marked,
+  //    never silently dropped. Refuses closed docket subjects — those carry the
+  //    hindsight this whole rung exists to exclude. Read-only; best-effort.
+  if (action === 'log_live') {
+    const analysisId = String(body.analysis_id || '');
+    if (!analysisId) return json({ error: 'analysis_id required' }, 400);
+    const a = await env.DB.prepare(
+      `SELECT id, subject, structural_json, dissent_json, prediction_json FROM observer_analyses WHERE id = ? AND user_id = ?`
+    ).bind(analysisId, userId).first() as { id: string; subject: string; structural_json: string; dissent_json: string; prediction_json: string } | null;
+    if (!a) return json({ error: 'not found' }, 404);
+    if (docketOutcomeForSubject(a.subject)) {
+      return json({ error: 'this is a closed docket case (the model has hindsight) — log_live is for open, post-cutoff cases only' }, 400);
+    }
+    const parse = (s: unknown) => { try { return JSON.parse(String(s || 'null')); } catch { return null; } };
+    // Provenance: the model that actually generated the prediction axis (the one
+    // whose cutoff the firewall is about), from the reasoning log.
+    const predLog = await env.DB.prepare(
+      `SELECT model FROM observer_reasoning_log WHERE analysis_id = ? AND step = 'axis:prediction' LIMIT 1`
+    ).bind(analysisId).first() as { model: string | null } | null;
+    const out = await logLivePrediction(env as unknown as LiveEnv, analysisId, {
+      caseTitle: a.subject,
+      modelId: String(body.model_id || predLog?.model || 'unknown'),
+      trainingCutoff: body.training_cutoff ? String(body.training_cutoff) : undefined,
+      t0: body.t0 ? String(body.t0) : undefined,
+      resolutionDue: body.resolution_due ? String(body.resolution_due) : undefined,
+      horizonDays: body.horizon_days ? Number(body.horizon_days) : undefined,
+      axisData: { structural: parse(a.structural_json), dissent: parse(a.dissent_json), prediction: parse(a.prediction_json) },
+    });
+    if (!out) return json({ error: 'could not extract a topology for this run — nothing logged' }, 422);
+    return json({ logged: analysisId, ...out, note: out.admissible ? 'logged as a live, hindsight-free forecast — resolve it when reality settles' : 'stored but INADMISSIBLE — it will not enter the κ validation sample' });
+  }
+
+  // ── resolve_live — the WRITE side's counterpart: attach the realized outcomes
+  //    to a logged live row and compute the two separated scores (Mode-A
+  //    completeness = the ceiling; gated fidelity = whether we hit it). Refuses to
+  //    score an inadmissible row. outcomes: [{description, occurred, driving_agent}].
+  if (action === 'resolve_live') {
+    const analysisId = String(body.analysis_id || '');
+    if (!analysisId) return json({ error: 'analysis_id required' }, 400);
+    const raw = Array.isArray(body.outcomes) ? body.outcomes as Array<Record<string, unknown>> : [];
+    if (!raw.length) return json({ error: 'outcomes (array of {description, occurred, driving_agent}) required — the realized outcomes, now that reality has settled' }, 400);
+    const outcomes: ResolvedOutcome[] = raw.map(o => ({
+      description: String(o.description || '').slice(0, 300),
+      occurred: o.occurred === true || o.occurred === 1 || o.occurred === 'true',
+      driving_agent: String(o.driving_agent || '').trim(),
+    })).filter(o => o.description && o.driving_agent);
+    if (!outcomes.length) return json({ error: 'each outcome needs a description and a driving_agent' }, 400);
+    const out = await resolveLivePrediction(env as unknown as LiveEnv, analysisId, outcomes);
+    if (!out) return json({ error: 'no live row logged for this analysis (call log_live first)' }, 404);
+    return json({ resolved: analysisId, ...out });
+  }
+
+  // ── live_status — the uncontaminated READOUT: completeness → gated fidelity
+  //    over admissible + resolved rows only. A clock, not a snapshot: no verdict
+  //    until enough post-cutoff cases settle. The only readout that can validate κ.
+  if (action === 'live_status') {
+    return json(await liveValidation(env as unknown as LiveEnv, userId));
+  }
+
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|embed_axes|blanket_extract|resolve|pending|falsify|list|get|outcome|log_live|resolve_live|live_status)` }, 400);
 }
