@@ -30,6 +30,7 @@
 
 import { ensureAllSchemas } from './db/schema';
 import { callLLM, type LLMEnv } from './llm';
+import { gatherMaterialGround, assertGrounded, groundToBlock, extractFalconBlanket, GroundingUnavailableError } from './falcon-ground';
 
 export interface FalconEnv extends LLMEnv {
   DB: D1Database;
@@ -187,15 +188,30 @@ async function runAxis(env: FalconEnv, axis: AxisDef, userPrompt: string, maxTok
 type AxisResult = Awaited<ReturnType<typeof runAxis>>;
 
 async function runFalconAnalysis(env: FalconEnv, direction: string) {
-  const basePrompt = `Product/market direction: "${direction}"`;
+  // Tier 0 — the sweep. The Falcon CANNOT fire without grounding: gather the
+  // real, cited material ground first, and refuse the run if the sweep came back
+  // empty (GroundingUnavailableError). No axis reasons from prior alone.
+  const ground = await gatherMaterialGround(env, direction);
+  assertGrounded(ground);
+  const groundBlock = groundToBlock(ground);
+  const basePrompt = `Product/market direction: "${direction}"\n\n${groundBlock}`;
 
-  // Tier 1 — Material Ground. Six axes, simultaneous.
+  // Tier 1 — Material Ground. Six axes, simultaneous, reasoning over the sweep.
   const tier1 = await Promise.all(TIER1_AXES.map(a => runAxis(env, a, basePrompt, 550)));
 
   const tier1Summary = tier1.map(r => `AXIS ${r.n} — ${r.label}: ${JSON.stringify(r.data)}`).join('\n\n');
-  const tier2Prompt = `${basePrompt}\n\nTier 1 — Material Ground (already resolved):\n${tier1Summary}`;
 
-  // Tier 2 — Observer Reading. Nine axes, simultaneous, reads Tier 1.
+  // The nested-Markov-blanket world-model (rec C): the human agents as nested
+  // self-optimizing silos, so Tier 2 reads them as such. Best-effort enrichment.
+  const blanket = await extractFalconBlanket(env, ground, tier1Summary).catch(() => null);
+  const blanketBlock = blanket
+    ? `\n\nAGENTS IN PLAY — nested self-optimizing silos (Markov blankets), each minimizing surprise toward its own boundary:\n${JSON.stringify(blanket.model).slice(0, 3000)}`
+    : '';
+
+  const tier2Prompt = `${basePrompt}\n\nTier 1 — Material Ground (already resolved):\n${tier1Summary}${blanketBlock}`;
+
+  // Tier 2 — Observer Reading. Nine axes, simultaneous, reads Tier 1 + the
+  // world-model + the historical corpus look-back carried in the ground block.
   const tier2 = await Promise.all(TIER2_AXES.map(a => runAxis(env, a, tier2Prompt, 650)));
 
   // Tier 3 — Validation fires first (sequential, stronger model).
@@ -211,7 +227,7 @@ async function runFalconAnalysis(env: FalconEnv, direction: string) {
   const rupture = parseFirstJson(ruptureRaw.content) || { error: 'no parseable JSON', raw: ruptureRaw.content.slice(0, 400) };
 
   return {
-    tier1, tier2,
+    tier1, tier2, ground, blanket,
     validation: { data: validation, model: validationRaw.model, provider: validationRaw.provider },
     rupture: { data: rupture, model: ruptureRaw.model, provider: ruptureRaw.provider },
   };
@@ -228,13 +244,22 @@ export async function runAndPersistFalcon(
   const result = await runFalconAnalysis(env, direction);
 
   const analysisId = id();
+  const groundForStore = {
+    findings: result.ground.findings, sources: result.ground.sources,
+    corpus: result.ground.corpus.map(m => ({ title: m.title, series: m.series, score: m.score })),
+    passes: result.ground.passes, provider: result.ground.provider,
+  };
   await env.DB.prepare(
-    `INSERT INTO falcon_analyses (id, user_id, direction, tier1_json, tier2_json, validation_json) VALUES (?,?,?,?,?,?)`
+    `INSERT INTO falcon_analyses (id, user_id, direction, tier1_json, tier2_json, validation_json, material_ground_json, grounded, n_sources, blanket_json) VALUES (?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     analysisId, userId, direction,
     JSON.stringify(result.tier1).slice(0, 60000),
     JSON.stringify(result.tier2).slice(0, 60000),
     JSON.stringify(result.validation).slice(0, 20000),
+    JSON.stringify(groundForStore).slice(0, 40000),
+    result.ground.grounded ? 1 : 0,
+    result.ground.sources.length,
+    result.blanket ? JSON.stringify(result.blanket.model).slice(0, 20000) : null,
   ).run();
 
   const ruptureId = id();
@@ -248,8 +273,10 @@ export async function runAndPersistFalcon(
     ruptureData?.first_thing_to_build ? String(ruptureData.first_thing_to_build).slice(0, 500) : null,
   ).run();
 
-  // Reasoning log — every axis + validation + rupture, factual chain (spec VI).
+  // Reasoning log — the material ground first (the factual chain starts at the
+  // evidence, spec VI), then every axis + validation + rupture.
   const logRows = [
+    { step: 'material_ground', chain: JSON.stringify(groundForStore), model: 'research', provider: result.ground.provider },
     ...result.tier1.map(r => ({ step: `axis:${r.id}`, chain: JSON.stringify(r.data), model: r.model, provider: r.provider })),
     ...result.tier2.map(r => ({ step: `axis:${r.id}`, chain: JSON.stringify(r.data), model: r.model, provider: r.provider })),
     { step: 'validation', chain: JSON.stringify(result.validation.data), model: result.validation.model, provider: result.validation.provider },
@@ -299,9 +326,23 @@ export async function handleFalcon(body: Record<string, unknown>, env: FalconEnv
     if (!direction) return json({ error: 'direction required — point the ship at a market, problem, domain, or idea' }, 400);
     if (direction.length > 2000) return json({ error: 'direction too long (2000 char max)' }, 400);
 
-    const { analysisId, ruptureId, result } = await runAndPersistFalcon(env, direction, userId);
+    let out;
+    try {
+      out = await runAndPersistFalcon(env, direction, userId);
+    } catch (e) {
+      // The hard grounding gate: a run that could not gather real cited evidence
+      // does not fire. Surface it as 503 (retry when search is back), not a 500.
+      if (e instanceof GroundingUnavailableError) {
+        return json({ error: 'grounding_unavailable', detail: e.message, provider: e.provider, direction }, 503);
+      }
+      throw e;
+    }
+    const { analysisId, ruptureId, result } = out;
     return json({
       analysis_id: analysisId, rupture_id: ruptureId, direction,
+      grounded: result.ground.grounded, n_sources: result.ground.sources.length, sweep_passes: result.ground.passes,
+      material_ground: { findings: result.ground.findings, sources: result.ground.sources },
+      blanket: result.blanket?.model ?? null,
       tier1: result.tier1, tier2: result.tier2,
       validation: result.validation.data, rupture: result.rupture.data,
     });
@@ -326,7 +367,11 @@ export async function handleFalcon(body: Record<string, unknown>, env: FalconEnv
   //    cron — a later rung) to keep the queue draining. Each row is claimed
   //    atomically so concurrent drains don't double-run it.
   if (action === 'drain') {
-    const n = Math.min(Math.max(Number(body.n) || 1, 1), 3);
+    // Cap 2 (was 3): grounding adds slow, search-bound research passes to every
+    // run, so a smaller batch keeps a single drain inside Worker CPU/subrequest
+    // limits. A grounding-unavailable run marks its row 'error' via the catch
+    // below (the run refused to fire), the same as any other failure.
+    const n = Math.min(Math.max(Number(body.n) || 1, 1), 2);
     const processed: Array<Record<string, unknown>> = [];
     for (let i = 0; i < n; i++) {
       const next = await env.DB.prepare(
@@ -391,8 +436,13 @@ export async function handleFalcon(body: Record<string, unknown>, env: FalconEnv
     try { validation = analysis.validation_json ? JSON.parse(String(analysis.validation_json)) : null; } catch { /* leave null */ }
     let ruptureData: unknown = null;
     try { ruptureData = rupture ? JSON.parse(String((rupture as Record<string, unknown>).rupture_json || 'null')) : null; } catch { /* leave null */ }
+    let materialGround: unknown = null, blanket: unknown = null;
+    try { materialGround = analysis.material_ground_json ? JSON.parse(String(analysis.material_ground_json)) : null; } catch { /* leave null */ }
+    try { blanket = analysis.blanket_json ? JSON.parse(String(analysis.blanket_json)) : null; } catch { /* leave null */ }
     return json({
       analysis_id: analysisId, direction: analysis.direction, created_at: analysis.created_at,
+      grounded: analysis.grounded === 1, n_sources: analysis.n_sources ?? null,
+      material_ground: materialGround, blanket,
       tier1, tier2, validation, rupture: ruptureData, outcome: outcome || null,
     });
   }
