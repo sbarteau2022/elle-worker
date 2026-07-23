@@ -20,6 +20,7 @@ import {
   type LawEnv,
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
+import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
 import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
@@ -907,8 +908,12 @@ async function handleTradingView(env: Env): Promise<Response> {
   // regress trades to "nothing shown" instead of "shown minus new fields".
   // Idempotent and cheap; safe to call from the read path too.
   await ensureTradingExtSchema(env);
+  // Same story for the scout's research table: the workbench can be opened
+  // before the first scout has ever run — ensure it so the desk reads an
+  // empty list, not an error.
+  await ensureScoutSchema(env.DB).catch(() => {});
   const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
-  const [account, positions, trades, theses, journal, observations] = await Promise.all([
+  const [account, positions, trades, theses, journal, observations, research] = await Promise.all([
     grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
     grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at, asset_class, option_right, strike_price, expiration_date, underlying_symbol, attribution FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
@@ -918,8 +923,11 @@ async function handleTradingView(env: Env): Promise<Response> {
     // names the panel renders. (The unaliased query failed on every load and
     // grab() nulled it: the observations section could never appear.)
     grab(env.DB.prepare('SELECT signal_type AS observation_type, symbol, observation, observed_at AS created_at FROM elle_market_observations ORDER BY observed_at DESC LIMIT 20').all().then(r => r.results)),
+    // Her research desk — symbols she scouted and researched herself
+    // (symbol-scout.ts), newest first.
+    grab(env.DB.prepare('SELECT id, symbol, picked_because, findings, thesis, expected_catalyst, risks, verdict, confidence, source, created_at FROM elle_symbol_research ORDER BY created_at DESC LIMIT 30').all().then(r => r.results)),
   ]);
-  return json({ account, positions, trades, theses, journal, observations, market_open: marketOpen(), as_of: Date.now() });
+  return json({ account, positions, trades, theses, journal, observations, research, market_open: marketOpen(), as_of: Date.now() });
 }
 
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
