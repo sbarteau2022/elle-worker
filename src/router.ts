@@ -19,7 +19,7 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
-import { callLLM, sanitizeAnswer, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
+import { callLLM, sanitizeAnswer, firstJsonObjectFrom, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
 import { computeKappa } from './journal';
@@ -215,6 +215,14 @@ export function toolAllowed(scope: Scope, name: string): boolean {
   if (scope === 'public') return PUBLIC_TOOLS.has(name);
   return HOSPITALITY_TOOLS.has(name);
 }
+
+// The per-step "engine" hand-off (see runRouter): which LLM backend runs the
+// NEXT step. 'local' is the sovereign lane (see runRouter's comment) — the
+// one addition LLMTask doesn't already have. Module-scope (not declared
+// inside runRouter) so it can be referenced/tested independently of the
+// whole loop.
+export type Engine = LLMTask | 'local';
+export const ENGINES = new Set<Engine>(['reasoning', 'code', 'fast', 'research', 'conversation', 'local']);
 
 // These tools are REAL — ported directly from the deployed rapid2ai-ai-worker
 // (src/rapid.ts), running native queries against rapid2ai-db via the RAPID_DB
@@ -490,28 +498,6 @@ D1 TABLES (for read_sql):
 ${TABLE_CATALOG}` : ''}`;
 }
 
-// ── balanced JSON object extractor (first complete {...}) ─────
-function firstJsonObject(text: unknown): any | null {
-  // Defensive: a provider may hand back non-string content (e.g. an array of
-  // content parts). Coerce so .replace can never throw "text.replace is not a
-  // function" and 500 the whole router.
-  const s = String(text ?? '').replace(/```json|```/g, '');
-  let depth = 0, start = -1, inStr = false, esc = false;
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-      continue;
-    }
-    if (c === '"') inStr = true;
-    else if (c === '{') { if (depth === 0) start = i; depth++; }
-    else if (c === '}') { depth--; if (depth === 0 && start !== -1) { try { return JSON.parse(s.slice(start, i + 1)); } catch { return null; } } }
-  }
-  return null;
-}
-
 function clip(s: string, n = OBS_CAP): string {
   return s.length > n ? s.slice(0, n) + `\n…[truncated ${s.length - n} chars]` : s;
 }
@@ -547,8 +533,8 @@ async function alpacaOrder(
   env: Env, action: string, symbol: string, qty?: number,
   opts?: { assetClass?: 'us_equity' | 'option'; optionRight?: 'call' | 'put'; expiration?: string; strike?: number },
 ): Promise<unknown> {
-  const key = (env as any).ALPACA_API_KEY as string | undefined;
-  const secret = (env as any).ALPACA_SECRET_KEY as string | undefined;
+  const key = env.ALPACA_API_KEY;
+  const secret = env.ALPACA_SECRET_KEY;
   if (!key || !secret) return { error: 'Alpaca not configured (ALPACA_API_KEY/SECRET missing)' };
   // Live URL without ELLE_LIVE_TRADING='on' throws — surface it as this
   // tool's error observation so the refusal lands in the trace, loudly.
@@ -596,6 +582,18 @@ export async function ensureNotebook(env: Env): Promise<void> {
   if (notebookReady) return;
   await ensureAllSchemas(env.DB);
   notebookReady = true;
+}
+
+// This session's tagged (current-definition) κ series — used both to build
+// the phase-awareness block (runRouter) and to report it verbatim in
+// self_state. Tagged values ONLY: untagged legacy rows are the v1
+// fixed-point artifact (84% sat on exactly 0.5), and including those would
+// tell the model a fabricated flat "coherence trajectory."
+async function taggedKappaSeries(env: Env, sessionId: string): Promise<number[]> {
+  const rows = await env.DB.prepare(
+    'SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL AND kappa_def IS NOT NULL ORDER BY created_at ASC'
+  ).bind(sessionId).all();
+  return (rows.results || []).map(r => Number((r as { kappa: number }).kappa)).filter(Number.isFinite);
 }
 
 // ── tool dispatch ────────────────────────────────────────────
@@ -863,10 +861,7 @@ export async function runTool(
           grab(env.DB.prepare("SELECT kappa, reserve, velocity, accel, jerk, created_at, substr(content,1,200) AS opening FROM optimus_entries WHERE role = 'elle' ORDER BY kappa_ts DESC LIMIT 1").first()),
           grab(env.DB.prepare('SELECT type, title, status, surface_priority, created_at FROM elle_sandbox ORDER BY created_at DESC LIMIT 3').all().then(r => r.results)),
           grab(env.DB.prepare("SELECT summary, memory_type, created_at FROM elle_memory WHERE memory_type = 'deliberate' ORDER BY created_at DESC LIMIT 5").all().then(r => r.results)),
-          ctx.sessionId
-            ? grab(env.DB.prepare('SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL AND kappa_def IS NOT NULL ORDER BY created_at ASC').bind(ctx.sessionId).all()
-                .then(r => (r.results || []).map(x => Number((x as { kappa: number }).kappa))))
-            : Promise.resolve(null),
+          ctx.sessionId ? grab(taggedKappaSeries(env, ctx.sessionId)) : Promise.resolve(null),
           grab(graphShape(env)),
         ]);
         return clip(JSON.stringify({
@@ -1049,7 +1044,7 @@ export async function runTool(
       case 'pami':
         return clip(await pamiTool(env, a as PamiToolInput));
       case 'metabolism':
-        return await metabolismTool(env as any);
+        return await metabolismTool(env);
       case 'tool_forge':
         // Reserve every built-in tool name — a self-forged tool named e.g.
         // "run_shell" or "forge_write" can't shadow the real dispatch (name
@@ -1107,8 +1102,8 @@ Continue from here — at most a couple more tool calls if genuinely needed — 
       default:
         return `unknown tool "${name}"`;
     }
-  } catch (e: any) {
-    return `tool "${name}" failed: ${e?.message || String(e)}`;
+  } catch (e) {
+    return `tool "${name}" failed: ${(e as Error)?.message || String(e)}`;
   }
 }
 
@@ -1210,14 +1205,8 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   let phase = '';
   if (sessionId && scope !== 'hospitality') {
     try {
-      // Tagged (current-definition) values ONLY. Untagged legacy rows are the
-      // v1 fixed-point artifact — 84% sat on exactly 0.5 — and injecting those
-      // told the model a fabricated flat "coherence trajectory" every turn.
-      // Better no phase block than a false one.
-      const rows = await env.DB.prepare(
-        'SELECT kappa FROM elle_conversation_turns WHERE session_id = ? AND kappa IS NOT NULL AND kappa_def IS NOT NULL ORDER BY created_at ASC'
-      ).bind(sessionId).all();
-      phase = phaseBlock((rows.results || []).map(r => Number((r as { kappa: number }).kappa)).filter(Number.isFinite));
+      // Better no phase block than a false one — see taggedKappaSeries.
+      phase = phaseBlock(await taggedKappaSeries(env, sessionId));
     } catch { /* phase is a luxury, never a dependency */ }
   }
   // Skill index: name + trigger lines only (bodies load via skill_read). Not
@@ -1296,8 +1285,6 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // exploration tick, the workbench) opts in with prefer:'local'; if the laptop
   // path is closed or errors, the step demotes to hosted engines transparently
   // and stays demoted, so a closed lid never strands a run.
-  type Engine = LLMTask | 'local';
-  const ENGINES = new Set<Engine>(['reasoning', 'code', 'fast', 'research', 'conversation', 'local']);
   let engine: Engine = opts.prefer === 'local' ? 'local' : 'reasoning';
 
   for (let step = 0; step < maxSteps; step++) {
@@ -1334,7 +1321,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
         return finish('I could not reach a model to work through that just now. Give it a moment and try again.', step);
       }
     }
-    const parsed = firstJsonObject(result.content);
+    const parsed = firstJsonObjectFrom(result.content);
 
     if (!parsed) {
       // If the model answered in plain prose (no JSON envelope at all), accept it
@@ -1426,7 +1413,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     console.error('[ROUTER] final synthesis model call failed:', (e as Error).message);
     return finish('I gathered what I could but could not reach a model to synthesize the final answer. Try again in a moment.', maxSteps);
   }
-  const fj = firstJsonObject(final.content);
+  const fj = firstJsonObjectFrom(final.content);
   // Steps ran out and even the forced synthesis call failed to land a clean
   // {"answer":...} — that used to fall straight to a canned "I gathered the
   // data" line that discarded the data. It doesn't: the last real tool
