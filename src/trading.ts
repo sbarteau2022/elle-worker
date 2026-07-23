@@ -27,6 +27,7 @@ import { runPhiOscSuite, ensurePhiOscSchema } from './phi-oscillator';
 import { gatherTradingGround, recordTradeRationale, type TradingGround } from './trading-ground';
 import { guardOptionOrder, type HeldPosition } from './risk-guard';
 import { maxOrderFrac, sizeWithinCap, latestEquityPrice, latestOptionMark } from './order-guards';
+import { runSymbolScout, readResearchDesk, formatResearchDesk } from './symbol-scout';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -251,6 +252,25 @@ const WATCHLIST_SECTORS: Record<string, string[]> = {
 };
 const WATCHLIST = Object.values(WATCHLIST_SECTORS).flat();
 
+// One symbol's recent tape, summarized for the decision prompt. Shared by the
+// watchlist sweep and the research-desk augmentation (her own picks get real
+// prices in front of the decision loop, not just prose).
+async function fetchSymbolBars(env: Env, symbol: string): Promise<Record<string, unknown> | null> {
+  try {
+    const res  = await fetch(`${alpacaData(env)}/v2/stocks/${symbol}/bars?timeframe=5Min&limit=12`, { headers: alpacaHeaders(env) });
+    const data = await res.json() as { bars: Array<{ o: number; h: number; l: number; c: number; v: number }> };
+    if (!data.bars?.length) return null;
+    const bars = data.bars, latest = bars[bars.length - 1], first = bars[0];
+    return {
+      price:      latest.c,
+      change_pct: ((latest.c - first.c) / first.c * 100).toFixed(3),
+      volume:     bars.reduce((s, b) => s + b.v, 0),
+      high:       Math.max(...bars.map(b => b.h)),
+      low:        Math.min(...bars.map(b => b.l)),
+    };
+  } catch { return null; }
+}
+
 async function gatherMarketData(env: Env) {
   const watchlist = WATCHLIST;
   const symbols: Record<string, unknown> = {};
@@ -259,20 +279,8 @@ async function gatherMarketData(env: Env) {
   const d = alpacaData(env);
 
   await Promise.all(watchlist.map(async symbol => {
-    try {
-      const res  = await fetch(`${d}/v2/stocks/${symbol}/bars?timeframe=5Min&limit=12`, { headers: h });
-      const data = await res.json() as { bars: Array<{ o: number; h: number; l: number; c: number; v: number }> };
-      if (data.bars?.length) {
-        const bars = data.bars, latest = bars[bars.length - 1], first = bars[0];
-        symbols[symbol] = {
-          price:      latest.c,
-          change_pct: ((latest.c - first.c) / first.c * 100).toFixed(3),
-          volume:     bars.reduce((s, b) => s + b.v, 0),
-          high:       Math.max(...bars.map(b => b.h)),
-          low:        Math.min(...bars.map(b => b.l)),
-        };
-      }
-    } catch {}
+    const summary = await fetchSymbolBars(env, symbol);
+    if (summary) symbols[symbol] = summary;
   }));
 
   try {
@@ -558,6 +566,31 @@ export async function runTradingCycle(env: Env): Promise<void> {
   const thesesRows = await env.DB.prepare(
     `SELECT thesis_type, title, thesis, confidence FROM elle_market_thesis WHERE is_active = 1 ORDER BY confidence DESC LIMIT 5`
   ).all().catch(() => ({ results: [] }));
+  const thesesText = thesesRows.results
+    .map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n');
+
+  // ── the symbol scout (her own picks, once per trading day) ──
+  // She proposes candidates outside the fixed watchlist, validates them
+  // against Alpaca's asset list, runs grounded web research on each, and
+  // logs the notes to elle_symbol_research. The desk (last 7 days of her
+  // own research) is read back below, and her researched symbols get real
+  // bars merged into the market data so she can actually trade them.
+  // Best-effort: a failed scout never blocks the cycle.
+  let deskBlock = '';
+  try {
+    await runSymbolScout(env, {
+      base: alpacaBase(env), headers: alpacaHeaders(env),
+      watchlist: WATCHLIST, positionSymbols: positions.map(p => p.symbol),
+      news: marketData.news, thesesText,
+    });
+    const desk = await readResearchDesk(env.DB);
+    deskBlock = formatResearchDesk(desk);
+    const unpriced = desk.map(x => x.symbol).filter(s => !(s in marketData.symbols));
+    await Promise.all(unpriced.map(async s => {
+      const summary = await fetchSymbolBars(env, s);
+      if (summary) marketData.symbols[s] = summary;
+    }));
+  } catch (e) { console.error('[SCOUT] failed:', (e as Error).message); }
 
   // Realized track record — fed back into every decision so she optimizes
   // against her actual results, not just this cycle's tape. Best-effort.
@@ -597,6 +630,15 @@ SIZING — keep buy-ins small:
   equity per order — that cap is enforced mechanically and oversized orders are cut down to fit.
 - Prefer several small positions over one big one. Add to an existing position only on new evidence,
   never just because conviction "feels" higher.
+
+SYMBOL SELECTION — the tape is a floor, not a fence:
+- You may trade ANY active, tradable US-listed equity (or its options), not just the symbols shown in
+  MARKET DATA. New names enter through your research desk: once per trading day you scout symbols of
+  your own choosing, research them against the live web, and the notes are logged and shown below.
+- Prefer opening positions in names you have actually researched — your desk verdicts and catalysts
+  are your own work, weigh them above headline reflexes. An "avoid" verdict is also information.
+- If a symbol outside the tape looks compelling but unresearched, "watch" it and let the next scout
+  cycle research it before committing capital.
 
 DIVERSIFICATION — required, not aspirational:
 - Spread the book across sectors and asset classes. Your tape covers broad market, tech/megacap,
@@ -641,7 +683,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
     return `, conviction κ=${r.kappa.toFixed(2)} (${r.status}, target size ${(r.targetFraction * 100).toFixed(0)}%)`;
   };
 
-  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nYOUR TRACK RECORD:\n${perfLine}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}${ground.block ? `\n\nYOUR HISTORY AND GROUND (read before deciding — these are your own lessons, your corpus, and measured field state, not this cycle's noise):\n${ground.block}` : ''}\n\nWhat do you see? What do you do?`;
+  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nYOUR TRACK RECORD:\n${perfLine}\n\nYOUR RESEARCH DESK (symbols you scouted and researched yourself, last 7 days):\n${deskBlock || 'Nothing researched yet — the scout runs once per trading day.'}\n\nACTIVE THESES:\n${thesesText || 'None yet'}${ground.block ? `\n\nYOUR HISTORY AND GROUND (read before deciding — these are your own lessons, your corpus, and measured field state, not this cycle's noise):\n${ground.block}` : ''}\n\nWhat do you see? What do you do?`;
 
   let decision: Record<string, unknown>;
   try {
