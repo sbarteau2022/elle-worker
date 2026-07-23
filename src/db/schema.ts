@@ -176,6 +176,46 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
       prediction_confidence TEXT, kappa_def TEXT, provisional INTEGER DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now'))
     )`,
+    // observer.ts — the REAL per-axis embeddings (production bge-large, via the
+    // native Workers-AI binding). One row per analysis: the five axis vectors
+    // that the coherence instrument (kappa_iso from path geometry) reads. Kept
+    // in its own table so no ALTER is needed and a heavy vector blob never bloats
+    // the trajectory row. Write is best-effort; an embedding failure never fails a run.
+    `CREATE TABLE IF NOT EXISTS observer_embeddings (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE,
+      model TEXT, dim INTEGER, embeddings_json TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    // observer-blanket.ts — the nested-Markov-blanket model each run inferred
+    // (the operator's NestedMarkovBlanketExtraction schema) + its prediction-time
+    // COMPLETENESS score. Validated to predict prediction↔outcome fidelity far
+    // better than trajectory coherence. Read-only; best-effort; gates nothing.
+    `CREATE TABLE IF NOT EXISTS observer_blankets (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE,
+      model_json TEXT NOT NULL, completeness REAL, n_blankets INTEGER, n_collisions INTEGER,
+      alignment_status TEXT, created_at TEXT DEFAULT (datetime('now'))
+    )`,
+    // observer-live.ts — the ONLY uncontaminated validator of the completeness→
+    // fidelity claim. Every retrospective test NULLed because the weights had
+    // memorized the docket's endings; gated and ungated fidelity diverged by the
+    // contamination gap. The escape is TIME: log a prediction on an OPEN case,
+    // stamp the training cutoff, and let the world resolve it later. A row is
+    // admissible only if t0 postdates the cutoff AND the outcome was undecided at
+    // t0 (open + post-cutoff) — enforced at write time, so no memorized outcome
+    // can enter. Mode A = the inferred topology (completeness sets the ceiling);
+    // forecasts_json = the GATED forward sim (each forecast's driver must already
+    // be a named agent — the gate that keeps recall out). Scored at resolution:
+    // mode_a_completeness (ceiling) and gated_fidelity (did we hit it), separately.
+    `CREATE TABLE IF NOT EXISTS observer_predictions_live (
+      id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE, case_title TEXT,
+      t0 TEXT NOT NULL, model_id TEXT NOT NULL, training_cutoff TEXT NOT NULL, resolution_due TEXT NOT NULL,
+      admissible INTEGER NOT NULL DEFAULT 0, admit_reason TEXT,
+      topology_json TEXT NOT NULL, mode_a_completeness REAL, n_agents INTEGER,
+      forecasts_json TEXT NOT NULL, n_forecasts INTEGER, n_refused INTEGER DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      outcomes_json TEXT, gated_fidelity REAL, free_energy REAL, resolved_at TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`,
     // lattice.ts — The Lattice: 32-axis security deduction engine
     `CREATE TABLE IF NOT EXISTS lattice_analyses (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, incident TEXT NOT NULL,
@@ -553,6 +593,15 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // security-network.ts
     `CREATE INDEX IF NOT EXISTS idx_security_events_time ON elle_security_events(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_security_events_actor ON elle_security_events(actor_key)`,
+    // falcon.ts — the Material Ground. A run cannot fire without grounding, so
+    // every persisted analysis carries the cited evidence it was built on:
+    // material_ground_json (findings + sources + corpus look-back), grounded=1
+    // (there is no ungrounded run on file), n_sources, and blanket_json (the
+    // nested-Markov-blanket world-model Tier 2 read the human agents through).
+    `ALTER TABLE falcon_analyses ADD COLUMN material_ground_json TEXT`,
+    `ALTER TABLE falcon_analyses ADD COLUMN grounded INTEGER DEFAULT 0`,
+    `ALTER TABLE falcon_analyses ADD COLUMN n_sources INTEGER`,
+    `ALTER TABLE falcon_analyses ADD COLUMN blanket_json TEXT`,
   ];
   for (const sql of extras) await db.prepare(sql).run().catch(() => {});
 
@@ -606,4 +655,69 @@ export async function backfillTradesExtColumns(db: D1Database): Promise<void> {
     await db.prepare(`ALTER TABLE elle_trades ADD COLUMN ${name} ${type}`).run().catch(() => {});
   }
   tradesExtReady = true;
+}
+
+// `corpus_papers`/`corpus_chunks` are ALSO out-of-band (verified: no CREATE
+// TABLE for either anywhere in this repo — see docs/RETRIEVAL_CONTRACT.md).
+// The §2 contextual-RAG port (src/retrieval/*) EXTENDS the existing
+// corpus_chunks table rather than introducing a parallel one — new columns
+// only, same convention as the backfills above. Invoked from
+// src/retrieval/contextualizer.ts and pipeline.ts, which only ever run after
+// corpus_chunks is known to exist (chunks are inserted well before any
+// contextualization pass reads them).
+let corpusChunksContextReady = false;
+export async function backfillCorpusChunksContext(db: D1Database): Promise<void> {
+  if (corpusChunksContextReady) return;
+  const columns: Array<[string, string]> = [
+    // LLM-generated context ("what this chunk means in the whole document")
+    // and the two derived texts § 2.1 defines — kept as separate columns
+    // (not recomputed) so re-running the contextualizer is a cheap re-read.
+    ['context_text', 'TEXT'],
+    ['contextual_text', 'TEXT'], // context_text + ' ' + chunk_text — what gets embedded/FTS-indexed
+    ['context_source', 'TEXT'],  // 'full' | 'windowed' (§2.2 — full doc vs. running-summary prompt)
+    ['embedding_status', 'TEXT'], // 'pending' | 'contextualized' | 'embedded' | 'failed'
+    ['contextualized_at', 'INTEGER'],
+    // The re-embedded contextual_text vector lives under its OWN Vectorize
+    // id (never overwrites the legacy `vectorize_id` column/vector — see
+    // retrieval/dense.ts's embedAndUpsertContextual) so the OLD plain-chunk
+    // search path keeps working unchanged through the §2.4 eval-gated
+    // cutover. Only the pipeline that reads this column should ever query
+    // the contextual_v1 variant.
+    ['contextual_vectorize_id', 'TEXT'],
+  ];
+  for (const [name, type] of columns) {
+    await db.prepare(`ALTER TABLE corpus_chunks ADD COLUMN ${name} ${type}`).run().catch(() => {});
+  }
+
+  // D1 FTS5 virtual table over contextual_text — the BM25 leg of hybrid
+  // retrieval (Vectorize has no keyword search). External-content table
+  // (content='corpus_chunks') so the indexed text isn't duplicated on disk;
+  // synced by the three triggers below rather than rebuilt on every read.
+  await db.prepare(
+    `CREATE VIRTUAL TABLE IF NOT EXISTS corpus_chunks_fts USING fts5(contextual_text, content='corpus_chunks', content_rowid='rowid')`
+  ).run().catch(() => {});
+  await db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS corpus_chunks_fts_ai AFTER INSERT ON corpus_chunks BEGIN
+      INSERT INTO corpus_chunks_fts(rowid, contextual_text) VALUES (new.rowid, new.contextual_text);
+    END
+  `).run().catch(() => {});
+  await db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS corpus_chunks_fts_ad AFTER DELETE ON corpus_chunks BEGIN
+      INSERT INTO corpus_chunks_fts(corpus_chunks_fts, rowid, contextual_text) VALUES('delete', old.rowid, old.contextual_text);
+    END
+  `).run().catch(() => {});
+  await db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS corpus_chunks_fts_au AFTER UPDATE ON corpus_chunks BEGIN
+      INSERT INTO corpus_chunks_fts(corpus_chunks_fts, rowid, contextual_text) VALUES('delete', old.rowid, old.contextual_text);
+      INSERT INTO corpus_chunks_fts(rowid, contextual_text) VALUES (new.rowid, new.contextual_text);
+    END
+  `).run().catch(() => {});
+
+  // Triggers only sync FUTURE writes. Rows that already existed when the FTS
+  // table was created need one manual sync — safe to run every time this
+  // function runs (guarded by corpusChunksContextReady, so once per isolate),
+  // and a no-op once the FTS index is already current.
+  await db.prepare(`INSERT INTO corpus_chunks_fts(corpus_chunks_fts) VALUES ('rebuild')`).run().catch(() => {});
+
+  corpusChunksContextReady = true;
 }

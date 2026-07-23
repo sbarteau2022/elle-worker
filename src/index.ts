@@ -20,8 +20,9 @@ import {
   type LawEnv,
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
+import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
-import { handleObserver, drainObserverQueue, seedObserverDocket, type ObserverEnv } from './observer';
+import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
@@ -88,6 +89,7 @@ import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from '.
 import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
 import { ingestAtlasCsv } from './atlas-ingest';
 import { readAtlasEvents } from './atlas-events';
+import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from './retrieval/reembed';
 
 // ── /privacy — the door's policy, in plain language ──────────────────────────
 const PRIVACY_HTML = `<!doctype html>
@@ -156,6 +158,10 @@ export interface Env extends LLMEnv {
   // One client ID, or a comma-separated allowlist (web + iOS client IDs from
   // the same Google Cloud project) — see src/google-auth.ts.
   GOOGLE_CLIENT_ID?: string;
+  // Resend API key for the contact-form email notification (notifyContact,
+  // above handleContact). Unset ⇒ the form still logs to elle_outreach_log,
+  // just without the email courtesy. Set with: wrangler secret put RESEND_API_KEY
+  RESEND_API_KEY?: string;
   ENVIRONMENT:      string;
   // Alpaca — paper trading
   ALPACA_API_KEY?:    string;
@@ -168,6 +174,10 @@ export interface Env extends LLMEnv {
   // Conviction channel (src/conviction.ts): the ledger + prompt surface run
   // unconditionally; set to 'on' to arm the de-risk-only trim executor.
   ELLE_CONVICTION_ENFORCE?: string;
+  // Per-order buy-in ceiling as a fraction of account equity (order-guards.ts).
+  // Optional; default 0.10, clamped to (0, 0.25]. Both execution paths (cron
+  // decisions and chat trade_execute) size opening orders under this cap.
+  ELLE_MAX_ORDER_FRAC?: string;
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set
@@ -898,8 +908,12 @@ async function handleTradingView(env: Env): Promise<Response> {
   // regress trades to "nothing shown" instead of "shown minus new fields".
   // Idempotent and cheap; safe to call from the read path too.
   await ensureTradingExtSchema(env);
+  // Same story for the scout's research table: the workbench can be opened
+  // before the first scout has ever run — ensure it so the desk reads an
+  // empty list, not an error.
+  await ensureScoutSchema(env.DB).catch(() => {});
   const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
-  const [account, positions, trades, theses, journal, observations] = await Promise.all([
+  const [account, positions, trades, theses, journal, observations, research] = await Promise.all([
     grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
     grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at, asset_class, option_right, strike_price, expiration_date, underlying_symbol, attribution FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
@@ -909,8 +923,11 @@ async function handleTradingView(env: Env): Promise<Response> {
     // names the panel renders. (The unaliased query failed on every load and
     // grab() nulled it: the observations section could never appear.)
     grab(env.DB.prepare('SELECT signal_type AS observation_type, symbol, observation, observed_at AS created_at FROM elle_market_observations ORDER BY observed_at DESC LIMIT 20').all().then(r => r.results)),
+    // Her research desk — symbols she scouted and researched herself
+    // (symbol-scout.ts), newest first.
+    grab(env.DB.prepare('SELECT id, symbol, picked_because, findings, thesis, expected_catalyst, risks, verdict, confidence, source, created_at FROM elle_symbol_research ORDER BY created_at DESC LIMIT 30').all().then(r => r.results)),
   ]);
-  return json({ account, positions, trades, theses, journal, observations, market_open: marketOpen(), as_of: Date.now() });
+  return json({ account, positions, trades, theses, journal, observations, research, market_open: marketOpen(), as_of: Date.now() });
 }
 
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
@@ -997,6 +1014,27 @@ async function handleThreads(body: Record<string, unknown>, env: Env, userId: st
 // ── Contact (public) ───────────────────────────────────
 // Public contact/outreach form. Writes ONLY to elle_outreach_log with
 // parameterized binds — the client-supplied `table` is never used in SQL.
+// Best-effort email notification for a contact-form submission. The D1 row
+// (elle_outreach_log) is the durable record regardless; this is a courtesy
+// so Stewart doesn't have to query the table to see it. Inert (no-op) until
+// RESEND_API_KEY is set — never blocks or fails the actual submission.
+const CONTACT_NOTIFY_EMAIL = 'sbarteau2022@iCloud.com';
+async function notifyContact(env: Env, outreach_type: string, initiated_by: string, thought: string): Promise<void> {
+  if (!env.RESEND_API_KEY) return;
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'The Ethical Intelligence Project <onboarding@resend.dev>',
+        to: [CONTACT_NOTIFY_EMAIL],
+        subject: `[${outreach_type}] New message from ${initiated_by}`,
+        text: thought,
+      }),
+    });
+  } catch { /* best-effort — the D1 log is the durable record */ }
+}
+
 async function handleContact(body: Record<string, unknown>, env: Env): Promise<Response> {
   const row = (body.row ?? body) as Record<string, unknown>;
   const thought = row.thought != null ? String(row.thought).slice(0, 5000) : '';
@@ -1007,6 +1045,7 @@ async function handleContact(body: Record<string, unknown>, env: Env): Promise<R
   await env.DB.prepare(
     `INSERT INTO elle_outreach_log (id, outreach_type, thought, initiated_by, needs_response, notified) VALUES (?, ?, ?, ?, ?, 0)`
   ).bind(generateId(), outreach_type, thought, initiated_by, needs_response).run();
+  await notifyContact(env, outreach_type, initiated_by, thought);
   return json({ success: true });
 }
 
@@ -1144,7 +1183,17 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
       const oenv = env as unknown as ObserverEnv;
       const seed = await seedObserverDocket(oenv, owner);
       const out = await drainObserverQueue(oenv, owner, 1);
-      return { ran: `observer_drain (seeded ${seed.seeded}, processed ${out.processed.length}, remaining ${out.remaining})` };
+      // When the queue is idle, spend the tick backfilling the instrument's
+      // inputs for runs that predate them — REAL axis embeddings (kappa_iso),
+      // then the nested-blanket model (completeness). Both on the native AI
+      // binding, best-effort, so the inputs complete themselves, no manual call.
+      let emb = { embedded: 0, remaining: 0 };
+      let blk = { extracted: 0, remaining: 0 };
+      if (out.remaining === 0) {
+        emb = await backfillObserverEmbeddings(oenv, owner, 2);
+        if (emb.remaining === 0) blk = await backfillObserverBlankets(oenv, owner, 1);
+      }
+      return { ran: `observer_drain (seeded ${seed.seeded}, processed ${out.processed.length}, remaining ${out.remaining}, embedded ${emb.embedded}/${emb.remaining}, blanket ${blk.extracted}/${blk.remaining})` };
     }
     case 'consolidate': return { ran: await runConsolidation(env, embed) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
@@ -2063,6 +2112,16 @@ export default {
     // Video = caller-supplied keyframes (image parts) + audio track (audio part).
     if (path === '/api/ingest-multimodal') { if (!svc) return err('Unauthorized', 401); return handleIngestMultimodal(body, env); }
     if (path === '/api/admin-feed')        { if (!svc) return err('Unauthorized', 401); return handleAdminFeed(env); }
+    // Kicks off the §2 contextual-RAG re-embed (docs/RETRIEVAL_CONTRACT.md):
+    // one INGEST_QUEUE message per document that still has an un-embedded
+    // chunk. Idempotent — a document with nothing left pending sends no
+    // message, so this is also how you resume after a partial run. Real
+    // LLM + embedding cost against the live corpus; admin-gated on purpose,
+    // not wired to any schedule or the regular ingest path.
+    if (path === '/api/retrieval/backfill-contextual') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await enqueueContextualBackfill(env as unknown as ReembedEnv & { INGEST_QUEUE: Queue }));
+    }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/research')          { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/search') {
@@ -2554,6 +2613,19 @@ export default {
           `INSERT INTO elle_memory (id, memory_type, source_engine, summary, importance, importance_score) VALUES (?, 'reading', 'ingest_worker', ?, 0.7, 0.7)`
         ).bind(generateId(), `Elle read: "${m.title}" (${m.chunks_count} chunks)`).run().catch(() => {});
         msg.ack();
+      } else if (m.type === 'reembed_document') {
+        // §2 contextual-RAG backfill — enqueued by /api/retrieval/backfill-contextual.
+        // Each phase (context-gen, embed+upsert) checkpoints via
+        // corpus_chunks.embedding_status, so retry() on a transient failure
+        // safely resumes rather than redoing already-finished chunks.
+        try {
+          const result = await handleReembedMessage(env as unknown as ReembedEnv, m.paper_id);
+          console.log(`[reembed] ${m.paper_id}:`, JSON.stringify(result));
+          msg.ack();
+        } catch (e) {
+          console.error(`[reembed] ${m.paper_id} failed, will retry:`, (e as Error).message);
+          msg.retry();
+        }
       } else { msg.retry(); }
     }
   },
