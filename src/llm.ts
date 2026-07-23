@@ -6,7 +6,7 @@
 //   reasoning       → Gemini 2.5 Flash (thinking mode, no search)
 //   research        → Gemini 2.5 Flash (thinking + Google Search grounding)
 //   code            → Qwen3-Coder free (1M ctx, /think prefix)
-//   fast/tutor      → OpenRouter Llama 3.3 70B free
+//   fast/tutor      → Gemini 2.5 Flash (no thinking) → OpenRouter Llama fallback
 //
 // Env vars (set in Cloudflare Worker secrets):
 //   LLM_OPENROUTER_KEY     = sk-or-v1-...       (openrouter.ai)
@@ -42,6 +42,7 @@
 // is corrected at call time instead of taking the whole conversation path down.
 // ============================================================
 
+import { z } from 'zod';
 import { recordLLMCall } from './metabolism';
 
 export interface LLMEnv {
@@ -713,8 +714,20 @@ async function routeLLM(
       return callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
     }
 
-    // Fast: Llama 3.3 70B — tutor, thread summaries
+    // Fast: Gemini 2.5 Flash (no thinking/search) — tutor, thread summaries,
+    // the Observer's opening axes. Moved off the OpenRouter :free Llama, which
+    // 404'd intermittently ("No endpoints found") and, with no Gemini in this
+    // lane, took the whole run down. Gemini's daily quota is far larger than
+    // OpenRouter's 50/day free tier, so this is steadier as well as reliable.
+    // Falls back to OpenRouter (LLM_MODEL_FAST) then the extra free tiers.
     case 'fast': {
+      if (env.LLM_GEMINI_KEY) {
+        try {
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature });
+        } catch (e) {
+          console.error('Gemini fast failed, falling back to OpenRouter:', (e as Error).message);
+        }
+      }
       try {
         return await callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
       } catch (e) {
@@ -740,30 +753,36 @@ async function routeLLM(
     // is rate-limited (free tier = 50/day), so Elle stays queryable.
     case 'conversation':
     default: {
+      // The voice lane runs hotter than the working lanes (0.9 vs 0.7): this is
+      // where figurative reach and cadence live, and 0.7 sampling flattens both.
+      // Threaded explicitly into every fallback so a rate-limited primary doesn't
+      // silently drop her back to a stock-temperature provider default. Callers
+      // that pass their own temperature still win.
+      const voiceTemp = temperature ?? 0.9;
       try {
-        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, voiceTemp);
       } catch (e) {
         console.error('OpenRouter conversation failed, falling back to Gemini:', (e as Error).message);
       }
       if (env.LLM_GEMINI_KEY) {
         try {
-          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature });
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature: voiceTemp });
         } catch (e) {
           console.error('Gemini conversation fallback failed, falling back to Grok:', (e as Error).message);
         }
       }
       if (env.LLM_GROK_KEY) {
         try {
-          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false, temperature });
+          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false, temperature: voiceTemp });
         } catch (e) {
           console.error('Grok conversation fallback failed, falling back to Llama:', (e as Error).message);
         }
       }
-      try { return await callExtraFreeTiers(system, messages, maxTokens, env, temperature); }
+      try { return await callExtraFreeTiers(system, messages, maxTokens, env, voiceTemp); }
       catch (e) { console.error('Extra free tiers (conversation) unavailable:', (e as Error).message); }
       // Last resort: Llama 3.3 70B — a separate free pool from Nemotron, so Elle
       // stays queryable even when the primary, Gemini, and Grok are all unavailable.
-      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
+      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, voiceTemp);
     }
   }
 }
@@ -826,4 +845,81 @@ export function sanitizeAnswer(raw: unknown): string {
   ).trimStart();
   if (s && s !== before) s = s.charAt(0).toUpperCase() + s.slice(1);
   return s || before;
+}
+
+// ============================================================
+// Portions adapted from togethercomputer/together-cookbook (MIT) —
+// the runLLM/jsonLLM helper pair that underpins the cookbook's Router,
+// Looping, Serial, and Parallel agent notebooks. callLLM/firstJsonObjectFrom
+// above are Elle's existing equivalents; these two just give every retrieval/
+// judge/agent module a single, schema-validated call shape to import instead
+// of hand-rolling prompt+parse per call site.
+// ============================================================
+
+// Thin wrapper over callLLM for callers that just want text back. Not a new
+// provider chain — same routing, same fallbacks, same metabolism recording.
+export async function runLLM(
+  env: LLMEnv,
+  userPrompt: string,
+  opts: { system?: string; task?: LLMTask; maxTokens?: number; temperature?: number; prefer?: 'local' } = {}
+): Promise<string> {
+  const r = await callLLM(
+    opts.task ?? 'conversation',
+    opts.system ?? '',
+    [{ role: 'user', content: userPrompt }],
+    opts.maxTokens ?? 4000,
+    env,
+    { temperature: opts.temperature ?? 0.7, prefer: opts.prefer }
+  );
+  return r.content;
+}
+
+export interface JsonLLMResult<T> {
+  data: T;
+  repaired: boolean; // true if the first response failed validation and the retry succeeded
+}
+
+// Structured-output helper: asks for JSON, extracts the first balanced object
+// (firstJsonObjectFrom), validates against the caller's zod schema, and — per
+// the W0.2 adherence-probe policy — retries ONCE with the parse/validation
+// error appended before giving up. No provider here does native constrained
+// decoding, so this repair loop is the adherence backstop.
+export async function jsonLLM<T>(
+  env: LLMEnv,
+  userPrompt: string,
+  schema: z.ZodType<T>,
+  opts: { system?: string; task?: LLMTask; maxTokens?: number; temperature?: number; prefer?: 'local' } = {}
+): Promise<JsonLLMResult<T>> {
+  const task = opts.task ?? 'conversation';
+  const system = opts.system ?? '';
+  const jsonInstruction =
+    'Respond with ONLY a single valid JSON object matching the requested shape. No prose, no markdown code fences.';
+
+  const attempt = async (
+    messages: LLMMessage[]
+  ): Promise<{ ok: true; data: T } | { ok: false; error: string; raw: string }> => {
+    const r = await callLLM(task, system, messages, opts.maxTokens ?? 1500, env, {
+      temperature: opts.temperature ?? 0.2,
+      prefer: opts.prefer,
+    });
+    const parsed = firstJsonObjectFrom(r.content);
+    if (!parsed) return { ok: false, error: 'no JSON object found in response', raw: r.content };
+    const result = schema.safeParse(parsed);
+    if (!result.success) return { ok: false, error: result.error.message, raw: r.content };
+    return { ok: true, data: result.data };
+  };
+
+  const firstMessages: LLMMessage[] = [{ role: 'user', content: `${userPrompt}\n\n${jsonInstruction}` }];
+  const first = await attempt(firstMessages);
+  if (first.ok) return { data: first.data, repaired: false };
+
+  const repairMessages: LLMMessage[] = [
+    ...firstMessages,
+    { role: 'assistant', content: first.raw },
+    { role: 'user', content: `That response failed validation: ${first.error}. Reply again with ONLY a corrected JSON object.` },
+  ];
+  const second = await attempt(repairMessages);
+  if (second.ok) return { data: second.data, repaired: true };
+
+  throw new Error(`jsonLLM: schema validation failed after repair retry: ${second.error}`);
 }

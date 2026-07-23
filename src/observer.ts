@@ -38,6 +38,8 @@ import { computeKappa, KAPPA_DEF } from './journal';
 import type { Env } from './index';
 import { OBSERVER_DOCKET, docketOutcomeForSubject } from './observer-docket';
 import { falsify, overlapMatch, POWER_FLOOR } from './observer-falsifier';
+import { extractAndPersistBlanket, type BlanketEnv } from './observer-blanket';
+import { logLivePrediction, resolveLivePrediction, liveValidation, type LiveEnv, type ResolvedOutcome } from './observer-live';
 
 // ── Rung 3: the read-only trajectory instrument ─────────────────
 // An Observer run is a reasoning trajectory — five axes fired in order. We
@@ -279,7 +281,116 @@ export async function runAndPersistObserver(
     id(), analysisId, JSON.stringify(traj), kappaRun, result.status === 'complete' ? 1 : 0, predConf, KAPPA_DEF,
   ).run().catch(() => {}); // instrument write is best-effort — it must never fail a run
 
+  // Rung 5 groundwork — the REAL axis embeddings for the coherence instrument.
+  // Embed each axis's prose with the production embedder over the native
+  // Workers-AI binding (no external call). Best-effort: an embedding failure
+  // must never fail a run. The five vectors feed kappa_iso (path geometry) —
+  // an INDEPENDENT coherence measurement, not a re-transform of the lexical κ.
+  await embedAndPersistAxes(env, analysisId, [
+    result.dominant.data, result.counter.data, result.structural.data,
+    result.dissent.data, result.prediction.data,
+  ]).catch(() => {});
+
+  // The two-models step: extract the nested-Markov-blanket MODEL this run inferred
+  // and score its completeness. Predicts prediction↔outcome fidelity far better
+  // than trajectory coherence (validated rho≈+0.61 vs +0.08). Best-effort; the
+  // LLM extraction here is the unbiased replication (separate from any fidelity
+  // judge). Read-only, gates nothing.
+  await extractAndPersistBlanket(env as unknown as BlanketEnv, analysisId, {
+    structural: result.structural.data, dissent: result.dissent.data, prediction: result.prediction.data,
+  }).catch(() => {});
+
   return { analysisId, result, kappa, grounding: result.grounding };
+}
+
+// The production embedder — the same model Elle embeds the corpus with, run on
+// the bound AI (env.AI), so it needs no network egress.
+export const AXIS_EMBED_MODEL = '@cf/baai/bge-large-en-v1.5';
+
+// Embed a list of axis prose strings -> one vector each. Returns null on any
+// trouble (missing AI binding, provider error, shape mismatch) so the caller
+// can degrade silently. Pure-ish edge: the only side effect is the AI call.
+export async function embedAxisProse(env: ObserverEnv, dataByAxis: unknown[]): Promise<number[][] | null> {
+  const ai = (env as unknown as Env).AI;
+  if (!ai) return null;
+  const texts = dataByAxis.map(d => axisProse(d).slice(0, 2000) || ' ');
+  try {
+    const out = await ai.run(AXIS_EMBED_MODEL, { text: texts }) as { data?: number[][] };
+    return out?.data && out.data.length === texts.length ? out.data : null;
+  } catch {
+    return null;
+  }
+}
+
+// Embed the five axes and persist the vectors (rounded to keep the blob lean).
+// Idempotent per analysis (ON CONFLICT). Best-effort throughout.
+export async function embedAndPersistAxes(env: ObserverEnv, analysisId: string, dataByAxis: unknown[]): Promise<boolean> {
+  const vecs = await embedAxisProse(env, dataByAxis);
+  if (!vecs) return false;
+  const rounded = vecs.map(v => v.map(x => Math.round(x * 1e5) / 1e5));
+  await env.DB.prepare(
+    `INSERT INTO observer_embeddings (id, analysis_id, model, dim, embeddings_json) VALUES (?,?,?,?,?)
+     ON CONFLICT(analysis_id) DO UPDATE SET model=excluded.model, dim=excluded.dim, embeddings_json=excluded.embeddings_json, created_at=datetime('now')`
+  ).bind(id(), analysisId, AXIS_EMBED_MODEL, vecs[0]?.length ?? 0, JSON.stringify(rounded)).run().catch(() => {});
+  return true;
+}
+
+// Backfill embeddings for a user's analyses that lack them (bounded, cap 30).
+// Shared by the embed_axes action and the idle auto-drain cron, so the docket's
+// existing runs get embedded without a manual authenticated call.
+export async function backfillObserverEmbeddings(
+  env: ObserverEnv, userId: string, n: number,
+): Promise<{ embedded: number; remaining: number }> {
+  const count = Math.min(Math.max(n || 10, 1), 30);
+  const rows = await env.DB.prepare(
+    `SELECT a.id, a.dominant_json, a.counter_json, a.structural_json, a.dissent_json, a.prediction_json
+     FROM observer_analyses a
+     WHERE a.user_id = ? AND NOT EXISTS (SELECT 1 FROM observer_embeddings e WHERE e.analysis_id = a.id)
+     ORDER BY a.created_at ASC LIMIT ?`
+  ).bind(userId, count).all().catch(() => ({ results: [] }));
+  const parse = (s: unknown) => { try { return JSON.parse(String(s || 'null')); } catch { return null; } };
+  let embedded = 0;
+  for (const r of (rows.results as Array<Record<string, unknown>>)) {
+    const ok = await embedAndPersistAxes(env, String(r.id), [
+      parse(r.dominant_json), parse(r.counter_json), parse(r.structural_json),
+      parse(r.dissent_json), parse(r.prediction_json),
+    ]);
+    if (ok) embedded++;
+  }
+  const left = await env.DB.prepare(
+    `SELECT COUNT(*) AS c FROM observer_analyses a WHERE a.user_id = ?
+     AND NOT EXISTS (SELECT 1 FROM observer_embeddings e WHERE e.analysis_id = a.id)`
+  ).bind(userId).first() as { c: number } | null;
+  return { embedded, remaining: left?.c ?? 0 };
+}
+
+// Backfill the nested-blanket extraction for a user's analyses that lack it
+// (bounded, cap 20 — each is ~1 reasoning call). Shared by the blanket_extract
+// action and the idle auto-drain cron, so the docket's runs get their blanket
+// model without a manual authenticated call.
+export async function backfillObserverBlankets(
+  env: ObserverEnv, userId: string, n: number,
+): Promise<{ extracted: number; remaining: number }> {
+  const count = Math.min(Math.max(n || 5, 1), 20);
+  const rows = await env.DB.prepare(
+    `SELECT a.id, a.structural_json, a.dissent_json, a.prediction_json
+     FROM observer_analyses a
+     WHERE a.user_id = ? AND NOT EXISTS (SELECT 1 FROM observer_blankets b WHERE b.analysis_id = a.id)
+     ORDER BY a.created_at ASC LIMIT ?`
+  ).bind(userId, count).all().catch(() => ({ results: [] }));
+  const parse = (s: unknown) => { try { return JSON.parse(String(s || 'null')); } catch { return null; } };
+  let extracted = 0;
+  for (const r of (rows.results as Array<Record<string, unknown>>)) {
+    const ok = await extractAndPersistBlanket(env as unknown as BlanketEnv, String(r.id), {
+      structural: parse(r.structural_json), dissent: parse(r.dissent_json), prediction: parse(r.prediction_json),
+    });
+    if (ok) extracted++;
+  }
+  const left = await env.DB.prepare(
+    `SELECT COUNT(*) AS c FROM observer_analyses a WHERE a.user_id = ?
+     AND NOT EXISTS (SELECT 1 FROM observer_blankets b WHERE b.analysis_id = a.id)`
+  ).bind(userId).first() as { c: number } | null;
+  return { extracted, remaining: left?.c ?? 0 };
 }
 
 // ── DB bootstrap — guarded, self-healing (house style) ─────────
@@ -433,6 +544,23 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     return json({ labeled: keys.length, keys });
   }
 
+  // ── embed_axes — backfill the REAL per-axis embeddings (production bge-large
+  //    on the native AI binding) for this caller's analyses that lack them.
+  //    Idempotent; bounded (cap 30/call). Feeds the coherence instrument's
+  //    kappa_iso, which reads the axis vectors' path geometry.
+  if (action === 'embed_axes') {
+    const out = await backfillObserverEmbeddings(env, userId, Number(body.n) || 10);
+    return json({ ...out, model: AXIS_EMBED_MODEL });
+  }
+
+  // ── blanket_extract — backfill the nested-Markov-blanket model + completeness
+  //    for this caller's analyses that lack it. Idempotent; bounded (cap 20).
+  //    The prediction-time predictor of prediction↔outcome fidelity.
+  if (action === 'blanket_extract') {
+    const out = await backfillObserverBlankets(env, userId, Number(body.n) || 5);
+    return json(out);
+  }
+
   if (action === 'list') {
     const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100);
     const rows = await env.DB.prepare(
@@ -583,5 +711,68 @@ export async function handleObserver(body: Record<string, unknown>, env: Observe
     });
   }
 
-  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|resolve|pending|falsify|list|get|outcome)` }, 400);
+  // ── log_live — the uncontaminated validator's WRITE side (observer-live.ts).
+  //    For an OPEN case (a prediction whose outcome is not yet knowable), capture
+  //    the Mode-A topology + the GATED Mode-B forward simulation, stamped with the
+  //    model's training cutoff and a resolution horizon. Admissibility (open +
+  //    post-cutoff) is computed and stored; an inadmissible row is kept and marked,
+  //    never silently dropped. Refuses closed docket subjects — those carry the
+  //    hindsight this whole rung exists to exclude. Read-only; best-effort.
+  if (action === 'log_live') {
+    const analysisId = String(body.analysis_id || '');
+    if (!analysisId) return json({ error: 'analysis_id required' }, 400);
+    const a = await env.DB.prepare(
+      `SELECT id, subject, structural_json, dissent_json, prediction_json FROM observer_analyses WHERE id = ? AND user_id = ?`
+    ).bind(analysisId, userId).first() as { id: string; subject: string; structural_json: string; dissent_json: string; prediction_json: string } | null;
+    if (!a) return json({ error: 'not found' }, 404);
+    if (docketOutcomeForSubject(a.subject)) {
+      return json({ error: 'this is a closed docket case (the model has hindsight) — log_live is for open, post-cutoff cases only' }, 400);
+    }
+    const parse = (s: unknown) => { try { return JSON.parse(String(s || 'null')); } catch { return null; } };
+    // Provenance: the model that actually generated the prediction axis (the one
+    // whose cutoff the firewall is about), from the reasoning log.
+    const predLog = await env.DB.prepare(
+      `SELECT model FROM observer_reasoning_log WHERE analysis_id = ? AND step = 'axis:prediction' LIMIT 1`
+    ).bind(analysisId).first() as { model: string | null } | null;
+    const out = await logLivePrediction(env as unknown as LiveEnv, analysisId, {
+      caseTitle: a.subject,
+      modelId: String(body.model_id || predLog?.model || 'unknown'),
+      trainingCutoff: body.training_cutoff ? String(body.training_cutoff) : undefined,
+      t0: body.t0 ? String(body.t0) : undefined,
+      resolutionDue: body.resolution_due ? String(body.resolution_due) : undefined,
+      horizonDays: body.horizon_days ? Number(body.horizon_days) : undefined,
+      axisData: { structural: parse(a.structural_json), dissent: parse(a.dissent_json), prediction: parse(a.prediction_json) },
+    });
+    if (!out) return json({ error: 'could not extract a topology for this run — nothing logged' }, 422);
+    return json({ logged: analysisId, ...out, note: out.admissible ? 'logged as a live, hindsight-free forecast — resolve it when reality settles' : 'stored but INADMISSIBLE — it will not enter the κ validation sample' });
+  }
+
+  // ── resolve_live — the WRITE side's counterpart: attach the realized outcomes
+  //    to a logged live row and compute the two separated scores (Mode-A
+  //    completeness = the ceiling; gated fidelity = whether we hit it). Refuses to
+  //    score an inadmissible row. outcomes: [{description, occurred, driving_agent}].
+  if (action === 'resolve_live') {
+    const analysisId = String(body.analysis_id || '');
+    if (!analysisId) return json({ error: 'analysis_id required' }, 400);
+    const raw = Array.isArray(body.outcomes) ? body.outcomes as Array<Record<string, unknown>> : [];
+    if (!raw.length) return json({ error: 'outcomes (array of {description, occurred, driving_agent}) required — the realized outcomes, now that reality has settled' }, 400);
+    const outcomes: ResolvedOutcome[] = raw.map(o => ({
+      description: String(o.description || '').slice(0, 300),
+      occurred: o.occurred === true || o.occurred === 1 || o.occurred === 'true',
+      driving_agent: String(o.driving_agent || '').trim(),
+    })).filter(o => o.description && o.driving_agent);
+    if (!outcomes.length) return json({ error: 'each outcome needs a description and a driving_agent' }, 400);
+    const out = await resolveLivePrediction(env as unknown as LiveEnv, analysisId, outcomes);
+    if (!out) return json({ error: 'no live row logged for this analysis (call log_live first)' }, 404);
+    return json({ resolved: analysisId, ...out });
+  }
+
+  // ── live_status — the uncontaminated READOUT: completeness → gated fidelity
+  //    over admissible + resolved rows only. A clock, not a snapshot: no verdict
+  //    until enough post-cutoff cases settle. The only readout that can validate κ.
+  if (action === 'live_status') {
+    return json(await liveValidation(env as unknown as LiveEnv, userId));
+  }
+
+  return json({ error: `unknown action "${action}" (run|enqueue|drain|queue_status|seed_queue|label_outcomes|embed_axes|blanket_extract|resolve|pending|falsify|list|get|outcome|log_live|resolve_live|live_status)` }, 400);
 }
