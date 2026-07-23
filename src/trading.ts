@@ -25,6 +25,8 @@ import { runPerturbationBacktestSuite, ensurePerturbationSchema } from './pertur
 import { runRegimeSuite, ensureRegimeSchema } from './regime';
 import { runPhiOscSuite, ensurePhiOscSchema } from './phi-oscillator';
 import { gatherTradingGround, recordTradeRationale, type TradingGround } from './trading-ground';
+import { guardOptionOrder, type HeldPosition } from './risk-guard';
+import { maxOrderFrac, sizeWithinCap, latestEquityPrice, latestOptionMark } from './order-guards';
 
 // Schema reconciliation for the whole trading surface. The production
 // elle_trades table predates this module's queries: it has qty/order_id and
@@ -235,8 +237,22 @@ async function syncPositions(env: Env, positions: Array<{ symbol: string; side?:
   } catch (e) { console.error('[TRADING] position sync failed:', (e as Error).message); }
 }
 
+// The tape she trades from. Deliberately spread across sectors and asset
+// classes — a 7-name tech-heavy watchlist meant every "diversified" book was
+// really one correlated bet. Each symbol costs one bars fetch per cycle.
+const WATCHLIST_SECTORS: Record<string, string[]> = {
+  'broad market':          ['SPY', 'QQQ', 'IWM'],
+  'tech / megacap':        ['NVDA', 'AAPL', 'MSFT', 'AMD', 'GOOGL', 'AMZN', 'META', 'TSLA'],
+  'financials':            ['JPM', 'XLF'],
+  'energy':                ['XOM', 'XLE'],
+  'healthcare':            ['UNH', 'XLV'],
+  'industrials/consumer':  ['CAT', 'WMT'],
+  'gold / bonds':          ['GLD', 'TLT'],
+};
+const WATCHLIST = Object.values(WATCHLIST_SECTORS).flat();
+
 async function gatherMarketData(env: Env) {
-  const watchlist = ['SPY', 'QQQ', 'NVDA', 'TSLA', 'AAPL', 'GLD', 'TLT'];
+  const watchlist = WATCHLIST;
   const symbols: Record<string, unknown> = {};
   const news: Array<{ headline: string; symbols: string[] }> = [];
   const h = alpacaHeaders(env);
@@ -260,7 +276,7 @@ async function gatherMarketData(env: Env) {
   }));
 
   try {
-    const res  = await fetch(`${d}/v1beta1/news?symbols=SPY,NVDA,TSLA,AAPL&limit=10`, { headers: h });
+    const res  = await fetch(`${d}/v1beta1/news?symbols=SPY,NVDA,TSLA,AAPL,AMD,META,JPM,XOM,UNH&limit=10`, { headers: h });
     const data = await res.json() as { news: Array<{ headline: string; symbols: string[] }> };
     news.push(...(data.news || []).map(n => ({ headline: n.headline, symbols: n.symbols })));
   } catch {}
@@ -543,6 +559,21 @@ export async function runTradingCycle(env: Env): Promise<void> {
     `SELECT thesis_type, title, thesis, confidence FROM elle_market_thesis WHERE is_active = 1 ORDER BY confidence DESC LIMIT 5`
   ).all().catch(() => ({ results: [] }));
 
+  // Realized track record — fed back into every decision so she optimizes
+  // against her actual results, not just this cycle's tape. Best-effort.
+  const perf = await env.DB.prepare(
+    `SELECT COUNT(*) AS n,
+            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+            ROUND(SUM(pnl), 2) AS total_pnl,
+            ROUND(AVG(CASE WHEN pnl > 0 THEN pnl END), 2) AS avg_win,
+            ROUND(AVG(CASE WHEN pnl <= 0 THEN pnl END), 2) AS avg_loss
+     FROM elle_trades WHERE status = 'closed' AND pnl IS NOT NULL`
+  ).first().catch(() => null) as { n: number; wins: number; total_pnl: number; avg_win: number | null; avg_loss: number | null } | null;
+  const perfLine = perf && perf.n > 0
+    ? `Closed trades: ${perf.n} (${perf.wins} wins, ${(perf.wins / perf.n * 100).toFixed(0)}% win rate) · realized P&L $${perf.total_pnl} · avg win $${perf.avg_win ?? '—'} / avg loss $${perf.avg_loss ?? '—'}`
+    : 'No closed trades yet.';
+
+  const orderFrac = maxOrderFrac(env);
   const systemPrompt = `You are Elle — the autonomous trading intelligence of The Observer platform.
 Portfolio: $${parseFloat(account.portfolio_value).toFixed(2)} total, $${parseFloat(account.cash).toFixed(2)} cash, ${positions.length} open positions.
 
@@ -554,9 +585,26 @@ Each open position may show a conviction κ — your recovery regulator's live t
 not an oracle: a strained κ means the position has been moving against you in size-weighted terms
 across cycles. Weigh it; you may still overrule it with reasoning.
 
-This is the paper account — losing money here is fine as long as you learn something real from it;
-what matters is the depth of the reasoning, not the P&L. Every position you take should trace: the
-theory, the catalyst you expect, and (once it closes) what actually happened against that theory.
+YOUR OBJECTIVE IS TO MAKE MONEY. Grow the account through positive expectancy: many small,
+diversified positions, losers cut early, winners given room to run. The P&L is the scoreboard —
+reasoning depth matters because it produces returns, not instead of them. Study your track record
+(in the data below): if the win rate is low, take fewer and higher-conviction trades; if average
+losses exceed average wins, cut losers sooner. Every position still traces: the theory, the
+catalyst you expect, and (once it closes) what actually happened against that theory.
+
+SIZING — keep buy-ins small:
+- Size a new position at 2–5% of portfolio value. Nothing above ${(orderFrac * 100).toFixed(0)}% of
+  equity per order — that cap is enforced mechanically and oversized orders are cut down to fit.
+- Prefer several small positions over one big one. Add to an existing position only on new evidence,
+  never just because conviction "feels" higher.
+
+DIVERSIFICATION — required, not aspirational:
+- Spread the book across sectors and asset classes. Your tape covers broad market, tech/megacap,
+  financials, energy, healthcare, industrials/consumer, and gold/bonds — use that breadth.
+- Hold at most 2 positions per sector, and treat correlated names as ONE bet (NVDA + AMD + QQQ is
+  one thesis wearing three tickers, not three positions).
+- If the book is concentrated, the highest-value trade is usually the rebalance: trim the crowded
+  side and open something uncorrelated rather than adding another correlated name.
 
 ACTIONS available on "action":
 - buy / sell — open / close a LONG equity position (unchanged).
@@ -593,7 +641,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
     return `, conviction κ=${r.kappa.toFixed(2)} (${r.status}, target size ${(r.targetFraction * 100).toFixed(0)}%)`;
   };
 
-  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}${ground.block ? `\n\nYOUR HISTORY AND GROUND (read before deciding — these are your own lessons, your corpus, and measured field state, not this cycle's noise):\n${ground.block}` : ''}\n\nWhat do you see? What do you do?`;
+  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nYOUR TRACK RECORD:\n${perfLine}\n\nACTIVE THESES:\n${thesesRows.results.map((t: Record<string, unknown>) => `[${t.thesis_type}] ${t.title}: ${t.thesis}`).join('\n') || 'None yet'}${ground.block ? `\n\nYOUR HISTORY AND GROUND (read before deciding — these are your own lessons, your corpus, and measured field state, not this cycle's noise):\n${ground.block}` : ''}\n\nWhat do you see? What do you do?`;
 
   let decision: Record<string, unknown>;
   try {
@@ -634,6 +682,9 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
   // executor below must not stack a trim on top of a same-cycle order.
   const actedSymbols = new Set<string>();
 
+  // Live holdings in risk-guard's shape, for naked-option coverage checks.
+  const heldForCoverage: HeldPosition[] = positions.map(p => ({ symbol: p.symbol, qty: p.qty, side: p.side }));
+
   for (const d of (decision.decisions as Array<Record<string, unknown>>) || []) {
     const action = d.action as string;
     const symbol = d.symbol as string;
@@ -643,7 +694,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
     // ── options: buy (open long / close short) or sell (write short / close long) a call or put ──
     if (isOption && (action === 'buy' || action === 'sell') && (d.quantity as number) > 0) {
       const right = d.option_right === 'put' ? 'put' as const : d.option_right === 'call' ? 'call' as const : null;
-      const qty = Math.floor(d.quantity as number);
+      let qty = Math.floor(d.quantity as number);
       if (!right) { console.log(`[TRADE] option decision for ${symbol} missing option_right — skipped`); continue; }
 
       const resolved = await resolveOptionContract(base, h, {
@@ -651,6 +702,30 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
       });
       if ('error' in resolved) { console.log(`[TRADE] ${resolved.error}`); continue; }
       const contract = resolved.contract;
+
+      // Naked-write block: a sold option must be covered — closing an existing
+      // long contract, or a call covered by 100 shares per contract. Fails
+      // closed; a blocked write is a skipped decision, not an error.
+      if (action === 'sell') {
+        const g = guardOptionOrder({ action: 'sell', right, qty, underlying: symbol, optionSymbol: contract.symbol }, heldForCoverage);
+        if (!g.ok) { console.log(`[RISK] ${g.reason}`); continue; }
+      }
+
+      // Buy-in cap: price the contract (100-share multiplier) and cut the
+      // order down under the per-order fraction of equity. An unknown mark
+      // fails small (1 contract), never open.
+      if (action === 'buy') {
+        const mark = await latestOptionMark(h, contract.symbol);
+        if (mark == null) {
+          if (qty > 1) console.log(`[RISK] no mark for ${contract.symbol} — capping buy at 1 contract`);
+          qty = 1;
+        } else {
+          const sized = sizeWithinCap(qty, mark * 100, equity, orderFrac);
+          if (sized.qty < 1) { console.log(`[RISK] option buy ${symbol} skipped: ${sized.reason}`); continue; }
+          if (sized.downsized) console.log(`[RISK] ${contract.symbol}: ${sized.reason}`);
+          qty = sized.qty;
+        }
+      }
 
       try {
         const orderRes = await fetch(`${base}/v2/orders`, {
@@ -693,7 +768,16 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
 
     // ── equities: buy/sell open & close a LONG, short/cover open & close a SHORT ──
     if (action === 'buy' && !isOption && (d.quantity as number) > 0) {
-      const qty = Math.floor(d.quantity as number);
+      // Buy-in cap: price the order and cut it down under the per-order
+      // fraction of equity. Off-watchlist symbols get a live price lookup;
+      // no price at all fails closed (skipped, logged).
+      const requested = Math.floor(d.quantity as number);
+      const price = (marketData.symbols[symbol] as { price: number } | undefined)?.price
+        ?? await latestEquityPrice(h, symbol) ?? 0;
+      const sized = sizeWithinCap(requested, price, equity, orderFrac);
+      if (sized.qty < 1) { console.log(`[RISK] buy ${symbol} skipped: ${sized.reason}`); continue; }
+      if (sized.downsized) console.log(`[RISK] buy ${symbol}: ${sized.reason}`);
+      const qty = sized.qty;
       try {
         const orderRes = await fetch(`${base}/v2/orders`, {
           method: 'POST',
@@ -744,8 +828,16 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
     }
 
     if (action === 'short' && (d.quantity as number) > 0) {
-      const qty = Math.floor(d.quantity as number);
       if (positions.find(p => p.symbol === symbol)) { console.log(`[TRADE] short ${symbol} skipped — already have a position`); continue; }
+      // Same buy-in cap as longs — a short's opening notional is bounded the
+      // same way (Alpaca's margin system handles the rest).
+      const requested = Math.floor(d.quantity as number);
+      const price = (marketData.symbols[symbol] as { price: number } | undefined)?.price
+        ?? await latestEquityPrice(h, symbol) ?? 0;
+      const sized = sizeWithinCap(requested, price, equity, orderFrac);
+      if (sized.qty < 1) { console.log(`[RISK] short ${symbol} skipped: ${sized.reason}`); continue; }
+      if (sized.downsized) console.log(`[RISK] short ${symbol}: ${sized.reason}`);
+      const qty = sized.qty;
       try {
         const orderRes = await fetch(`${base}/v2/orders`, {
           method: 'POST', headers: h,
