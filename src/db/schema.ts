@@ -593,6 +593,15 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // security-network.ts
     `CREATE INDEX IF NOT EXISTS idx_security_events_time ON elle_security_events(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_security_events_actor ON elle_security_events(actor_key)`,
+    // falcon.ts — the Material Ground. A run cannot fire without grounding, so
+    // every persisted analysis carries the cited evidence it was built on:
+    // material_ground_json (findings + sources + corpus look-back), grounded=1
+    // (there is no ungrounded run on file), n_sources, and blanket_json (the
+    // nested-Markov-blanket world-model Tier 2 read the human agents through).
+    `ALTER TABLE falcon_analyses ADD COLUMN material_ground_json TEXT`,
+    `ALTER TABLE falcon_analyses ADD COLUMN grounded INTEGER DEFAULT 0`,
+    `ALTER TABLE falcon_analyses ADD COLUMN n_sources INTEGER`,
+    `ALTER TABLE falcon_analyses ADD COLUMN blanket_json TEXT`,
   ];
   for (const sql of extras) await db.prepare(sql).run().catch(() => {});
 
