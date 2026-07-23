@@ -46,6 +46,8 @@ import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registry
 import { runLocalAgent } from './local-agent';
 import { deepResearch } from './deep-research';
 import { resolveOptionContract } from './alpaca-options';
+import { guardOptionOrder } from './risk-guard';
+import { maxOrderFrac, sizeWithinCap, latestEquityPrice, latestOptionMark } from './order-guards';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
 import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
@@ -559,16 +561,51 @@ async function alpacaOrder(
   const sym = String(symbol || '').toUpperCase().trim();
   if (!sym) return { error: 'symbol required' };
 
+  // Buy-in cap + naked-write block — the same rails the autonomous cron runs
+  // (order-guards.ts / risk-guard.ts). Chat is interactive, so a blocked order
+  // returns the reason and a downsized one says so in the result, not silence.
+  const orderFrac = maxOrderFrac(env as unknown as { ELLE_MAX_ORDER_FRAC?: string });
+  const accountEquity = async (): Promise<number> => {
+    try {
+      const r = await fetch(`${base}/v2/account`, { headers });
+      if (!r.ok) return 0;
+      const acct = await r.json() as { equity?: string; portfolio_value?: string };
+      return parseFloat(acct.equity || acct.portfolio_value || '0') || 0;
+    } catch { return 0; }
+  };
+
   if (opts?.assetClass === 'option' && (action === 'buy' || action === 'sell')) {
-    const q = Math.floor(Number(qty) || 0);
+    let q = Math.floor(Number(qty) || 0);
     if (q <= 0) return { error: 'qty must be a positive integer for an option order' };
     if (opts.optionRight !== 'call' && opts.optionRight !== 'put') return { error: 'optionRight must be "call" or "put"' };
     const resolved = await resolveOptionContract(base, headers, {
       underlying: sym, right: opts.optionRight, expiration: String(opts.expiration || ''), targetStrike: Number(opts.strike),
     });
     if ('error' in resolved) return { error: resolved.error };
+    let sizingNote: string | undefined;
+    if (action === 'sell') {
+      // A sold option must be covered: closing an existing long contract, or a
+      // call covered by 100 held shares per contract. Fails closed.
+      const pr = await fetch(`${base}/v2/positions`, { headers }).catch(() => null);
+      const held = pr?.ok ? await pr.json() as Array<{ symbol: string; qty: string; side?: string }> : [];
+      const g = guardOptionOrder({ action: 'sell', right: opts.optionRight, qty: q, underlying: sym, optionSymbol: resolved.contract.symbol }, held);
+      if (!g.ok) return { error: g.reason };
+    } else {
+      // Buying: bound the premium under the per-order cap. Unknown mark fails
+      // small (1 contract), never open.
+      const mark = await latestOptionMark(headers, resolved.contract.symbol);
+      if (mark == null) {
+        if (q > 1) sizingNote = `no market price available for ${resolved.contract.symbol} — capped at 1 contract`;
+        q = 1;
+      } else {
+        const sized = sizeWithinCap(q, mark * 100, await accountEquity(), orderFrac);
+        if (sized.qty < 1) return { error: `order blocked: ${sized.reason}` };
+        if (sized.downsized) sizingNote = sized.reason;
+        q = sized.qty;
+      }
+    }
     const r = await fetch(`${base}/v2/orders`, { method: 'POST', headers, body: JSON.stringify({ symbol: resolved.contract.symbol, qty: String(q), side: action, type: 'market', time_in_force: 'day' }) });
-    return { paper: base.includes('paper'), contract: resolved.contract, order: await r.json() };
+    return { paper: base.includes('paper'), contract: resolved.contract, order: await r.json(), ...(sizingNote ? { downsized: true, note: sizingNote } : {}) };
   }
 
   if (action === 'close') {
@@ -581,10 +618,31 @@ async function alpacaOrder(
     return { paper: base.includes('paper'), closed_side: pos.side || 'long', order: await r.json() };
   }
   if (action === 'buy' || action === 'sell') {
-    const q = Math.floor(Number(qty) || 0);
+    let q = Math.floor(Number(qty) || 0);
     if (q <= 0) return { error: 'qty must be a positive integer for buy/sell' };
+    // Cap only orders that OPEN or extend exposure. A buy that covers a held
+    // short, or a sell that reduces a held long, must never be downsized —
+    // cutting losers in full always stays possible.
+    let closingQty = 0;
+    try {
+      const pr = await fetch(`${base}/v2/positions/${sym}`, { headers });
+      if (pr.ok) {
+        const pos = await pr.json() as { qty?: string; side?: string };
+        const side = (pos.side || 'long').toLowerCase();
+        const heldQty = Math.abs(Number(pos.qty) || 0);
+        if ((action === 'buy' && side === 'short') || (action === 'sell' && side === 'long')) closingQty = heldQty;
+      }
+    } catch {}
+    let sizingNote: string | undefined;
+    if (closingQty < q) {
+      const price = await latestEquityPrice(headers, sym) ?? 0;
+      const sized = sizeWithinCap(q, price, await accountEquity(), orderFrac);
+      if (sized.qty < 1) return { error: `order blocked: ${sized.reason}` };
+      if (sized.downsized) sizingNote = sized.reason;
+      q = sized.qty;
+    }
     const r = await fetch(`${base}/v2/orders`, { method: 'POST', headers, body: JSON.stringify({ symbol: sym, qty: String(q), side: action, type: 'market', time_in_force: 'day' }) });
-    return { paper: base.includes('paper'), order: await r.json() };
+    return { paper: base.includes('paper'), order: await r.json(), ...(sizingNote ? { downsized: true, note: sizingNote } : {}) };
   }
   return { error: `unknown trade action "${action}" (expected buy|sell|close)` };
 }

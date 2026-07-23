@@ -173,6 +173,10 @@ export interface Env extends LLMEnv {
   // Conviction channel (src/conviction.ts): the ledger + prompt surface run
   // unconditionally; set to 'on' to arm the de-risk-only trim executor.
   ELLE_CONVICTION_ENFORCE?: string;
+  // Per-order buy-in ceiling as a fraction of account equity (order-guards.ts).
+  // Optional; default 0.10, clamped to (0, 0.25]. Both execution paths (cron
+  // decisions and chat trade_execute) size opening orders under this cap.
+  ELLE_MAX_ORDER_FRAC?: string;
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set
