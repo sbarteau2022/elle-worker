@@ -753,30 +753,36 @@ async function routeLLM(
     // is rate-limited (free tier = 50/day), so Elle stays queryable.
     case 'conversation':
     default: {
+      // The voice lane runs hotter than the working lanes (0.9 vs 0.7): this is
+      // where figurative reach and cadence live, and 0.7 sampling flattens both.
+      // Threaded explicitly into every fallback so a rate-limited primary doesn't
+      // silently drop her back to a stock-temperature provider default. Callers
+      // that pass their own temperature still win.
+      const voiceTemp = temperature ?? 0.9;
       try {
-        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, temperature ?? 0.7);
+        return await callOpenRouter(MODEL.primary(env), system, messages, maxTokens, env, voiceTemp);
       } catch (e) {
         console.error('OpenRouter conversation failed, falling back to Gemini:', (e as Error).message);
       }
       if (env.LLM_GEMINI_KEY) {
         try {
-          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature });
+          return await callGemini(MODEL.reasoning(env), system, messages, maxTokens, env, { thinking: false, search: false, temperature: voiceTemp });
         } catch (e) {
           console.error('Gemini conversation fallback failed, falling back to Grok:', (e as Error).message);
         }
       }
       if (env.LLM_GROK_KEY) {
         try {
-          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false, temperature });
+          return await callGrok('grok-3-mini', system, messages, maxTokens, env, { thinking: false, search: false, temperature: voiceTemp });
         } catch (e) {
           console.error('Grok conversation fallback failed, falling back to Llama:', (e as Error).message);
         }
       }
-      try { return await callExtraFreeTiers(system, messages, maxTokens, env, temperature); }
+      try { return await callExtraFreeTiers(system, messages, maxTokens, env, voiceTemp); }
       catch (e) { console.error('Extra free tiers (conversation) unavailable:', (e as Error).message); }
       // Last resort: Llama 3.3 70B — a separate free pool from Nemotron, so Elle
       // stays queryable even when the primary, Gemini, and Grok are all unavailable.
-      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, temperature ?? 0.7);
+      return callOpenRouter(MODEL.fast(env), system, messages, maxTokens, env, voiceTemp);
     }
   }
 }
