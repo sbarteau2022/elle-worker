@@ -80,7 +80,7 @@ import { recordTurnTrace } from './kappa-memory/integration';
 export interface RouterDeps {
   embed: (text: string, env: Env) => Promise<number[]>;
   ragSearch: (query: string, limit: number, env: Env) => Promise<string>;
-  recallPastConversations: (query: string, session: string, env: Env) => Promise<string>;
+  recallPastConversations: (query: string, session: string, env: Env, userId?: string | null) => Promise<string>;
   handleCodeEngine: (body: any, env: Env) => Promise<Response>;
   handleIngest: (body: any, env: Env) => Promise<Response>;
   handleDiagnose: (body: any, env: Env) => Promise<Response>;
@@ -94,7 +94,7 @@ export interface RouterDeps {
   // Optional: only the admin router passes a sessionId, so the hospitality
   // callsite can omit them and still type-check.
   loadSessionHistory?: (sessionId: string, env: Env) => Promise<LLMMessage[]>;
-  persistExchange?: (sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null) => Promise<void>;
+  persistExchange?: (sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null, userId?: string | null) => Promise<void>;
 }
 
 export interface RouterStep {
@@ -729,7 +729,7 @@ export async function runTool(
         return row?.full_text ? clip(`[${row.title}]\n${row.full_text}`, OBS_CAP * 2) : `no document for id ${id}`;
       }
       case 'recall_memory': {
-        const m = await deps.recallPastConversations(String(a.q || a.query || ''), 'router', env);
+        const m = await deps.recallPastConversations(String(a.q || a.query || ''), 'router', env, ctxUserId);
         return m || '(no relevant memory)';
       }
       case 'code_engine': {
@@ -952,11 +952,14 @@ export async function runTool(
         return `remembered (importance ${importance}): ${note.slice(0, 200)}`;
       }
       case 'journal_read': {
-        const r = await deps.journalRead(env, deps.embed, { q: a.q || a.query, thread_id: a.thread_id, include_off_record: false, limit: a.limit });
+        // FIX 1: reads carry the caller's identity, same as journal_write below.
+        // Internal actors (conductor/volition) resolve to the operator's estate
+        // inside journalRead itself.
+        const r = await deps.journalRead(env, deps.embed, { q: a.q || a.query, thread_id: a.thread_id, include_off_record: false, limit: a.limit, user_id: ctxUserId });
         return clip(JSON.stringify(r));
       }
       case 'journal_thread': {
-        const r = await deps.journalThread(env, { thread_id: a.thread_id });
+        const r = await deps.journalThread(env, { thread_id: a.thread_id, user_id: ctxUserId });
         return clip(JSON.stringify(r));
       }
       case 'journal_write': {
@@ -1316,7 +1319,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       catch (e) { console.error('[KAPPA] router turn dynamics failed:', (e as Error).message); }
     }
     if (sessionId && deps.persistExchange) {
-      try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null); } catch { /* best-effort */ }
+      try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null, ctxUserId); } catch { /* best-effort */ }
     }
     // κ memory (live, gate-closed): record one bending trace for the turn off the
     // per-session κ series just updated above. Writing is always on — the

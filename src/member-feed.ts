@@ -20,8 +20,9 @@ import { doorSession } from './arrival';
 
 // ── pure helpers ─────────────────────────────────────────────────────────────
 
-// persistExchange rewrites the assistant row to "Q: …\nA: …" after embedding;
-// give the client back the clean assistant text when that pattern is present.
+// Assistant rows persisted before the persistExchange fix were rewritten to
+// "Q: …\nA: …"; give the client back the clean assistant text when that legacy
+// pattern is present. New rows store the raw answer and pass through untouched.
 export function assistantText(content: string): string {
   const m = String(content || '').match(/^Q: [\s\S]*?\nA: ([\s\S]*)$/);
   return m ? m[1] : String(content || '');

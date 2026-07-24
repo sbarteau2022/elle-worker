@@ -538,6 +538,9 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // conductor.ts
     `CREATE INDEX IF NOT EXISTS elle_runs_started ON elle_runs (started_at DESC)`,
     `ALTER TABLE elle_intents ADD COLUMN draft TEXT`,
+    // Stall breaker: consecutive forge ticks that changed nothing. Reset to 0
+    // on any real state change; at FORGE_STALL_TICKS the task → 'stalled'.
+    `ALTER TABLE elle_code_tasks ADD COLUMN noop_ticks INTEGER DEFAULT 0`,
     // forge-loop.ts (extends elle_custom_tools beyond tool-forge.ts's base)
     `ALTER TABLE elle_custom_tools ADD COLUMN goals TEXT`,
     `ALTER TABLE elle_custom_tools ADD COLUMN forge_status TEXT`,
@@ -629,6 +632,16 @@ export async function backfillConvTurnKappa(db: D1Database): Promise<void> {
   await db.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa REAL').run().catch(() => {});
   await db.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa_def TEXT').run().catch(() => {});
   convKappaReady = true;
+}
+
+// `sessions` is also out-of-band. user_id attributes a session to its owner so
+// cross-session recall can be scoped to the caller (see recallPastConversations
+// in index.ts). Pre-existing sessions stay NULL until backfilled.
+let sessionsUserReady = false;
+export async function backfillSessionsUserColumn(db: D1Database): Promise<void> {
+  if (sessionsUserReady) return;
+  await db.prepare('ALTER TABLE sessions ADD COLUMN user_id TEXT').run().catch(() => {});
+  sessionsUserReady = true;
 }
 
 let tradesExtReady = false;
