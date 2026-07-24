@@ -146,6 +146,12 @@ export interface RouterResult {
 const OBS_CAP = 12000;
 const SCRATCH_SLICE = 2800; // head slice injected into the scratch for paged observations
 
+// Tool names that mean "no tool" rather than naming a real tool. Weak fallback
+// models emit these instead of the {"answer"} shape; the loop treats them as a
+// protocol slip (nudge for a direct answer) instead of dispatching them into
+// runTool's default branch as `unknown tool "none"`.
+const NO_TOOL_SENTINELS = new Set(['none', 'null', 'nil', 'noop', 'no-op', 'no_tool', 'nothing', '']);
+
 // ── tool scoping ─────────────────────────────────────────────
 // 'full'        = admin router. Everything, including the write tools and
 //                 read_sql. The service key / admin JWT gate in index.ts is
@@ -1420,6 +1426,19 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
+      // "No tool" sentinels: some models — especially the small fallback tiers
+      // that take over when the free quotas drain — say "I don't need a tool"
+      // by emitting tool:"none" (or "null"/"noop") instead of the {"answer"}
+      // shape. Dispatching that burns a step on `unknown tool "none"` and puts
+      // a spurious failure in the trace (seen live: a quota-day turn spent its
+      // first step on none{"reason":"exceeded quota limit"}). Treat it as the
+      // protocol slip it is: hand the correction back and ask for the answer.
+      if (NO_TOOL_SENTINELS.has(parsed.tool.trim().toLowerCase())) {
+        void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: step, kind: 'note', result_preview: `no-tool sentinel "${parsed.tool}" — nudged for a direct answer` });
+        messages.push({ role: 'assistant', content: JSON.stringify({ tool: parsed.tool, args }) });
+        messages.push({ role: 'user', content: `"${parsed.tool}" is not a tool. If no tool is needed, reply now with {"answer":"..."} — your answer, in voice.` });
+        continue;
+      }
       // The step frame goes out BEFORE execution — the watcher sees what she
       // reached for and why while the tool is still running.
       ping({ kind: 'step', step, thought: stepThought, thinking: stepThinking, tool: parsed.tool, args, kappa: stepKappa });

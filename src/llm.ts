@@ -1,7 +1,13 @@
 // ============================================================
 // ELLE LLM ROUTER — src/llm.ts
 //
-// Provider routing:
+// LANE ORDER (operator directive, 2026-07-24): every task except 'research'
+// tries the bound Cloudflare Workers AI pool FIRST (free allocation,
+// independent of all hosted daily quotas), and only falls back to the hosted
+// free-router chain below when Workers AI is exhausted or erroring. 'research'
+// stays hosted-first because its value is live web-search grounding.
+//
+// Hosted fallback chain per task (after Workers AI):
 //   conversation    → OpenRouter (Nemotron Ultra free)
 //   reasoning       → Gemini 2.5 Flash (thinking mode, no search)
 //   research        → Gemini 2.5 Flash (thinking + Google Search grounding)
@@ -33,9 +39,9 @@
 //   LLM_OLLAMA_KEY         = <bearer>                      (optional, if gated)
 //   LLM_MODEL_OLLAMA       = llama3.3:70b                  (70B instruct)
 //
-// Universal safety net (always on, no config) — Cloudflare Workers AI bound via
-// env.AI: a free pool independent of OpenRouter, tried when every hosted free
-// tier AND the optional Ollama box are exhausted. @cf/meta/llama-3.3-70b → 8b.
+// Cloudflare Workers AI (bound via env.AI, no external key) — the PRIMARY lane
+// for every non-research task (see LANE ORDER above), and still the last-resort
+// safety net for 'research'. @cf/meta/llama-3.3-70b → 8b.
 //
 // NOTE: model ids are validated/remapped through normalizeModel() below, so a
 // stale or invalid id in a Worker secret (e.g. a Nemotron id OpenRouter 404s on)
@@ -517,7 +523,13 @@ export async function callWorkersAI(
       max_tokens: maxTokens,
       temperature,
     }) as { response?: unknown; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
-    return { content: toText(out?.response), ...usageOf(out) };
+    const content = toText(out?.response);
+    // Empty content is a FAILURE, not an answer. Now that this pool is the
+    // primary lane (not just the last-resort net), silently accepting an empty
+    // generation would stop the chain here and dead-end the turn — throw so
+    // the caller falls through (70B → 8B → the hosted router chain).
+    if (!content.trim()) throw new Error(`Workers AI ${m}: empty response`);
+    return { content, ...usageOf(out) };
   };
   try {
     return { ...(await run(model)), model, provider: 'workers-ai' };
@@ -559,6 +571,9 @@ export async function callLLM(
   // just on shared quota. NEVER pass this for the search-grounded 'research'
   // tier: its whole value is the hosted provider's live web search, which the
   // local lanes cannot do.
+  // A single flag so one exhausted Workers AI pool is only ever paid for once
+  // per call — whichever block tried it first, the later blocks skip it.
+  let workersAITried = false;
   if (opts.prefer === 'local') {
     if (env.LLM_OLLAMA_URL) {
       try {
@@ -567,12 +582,30 @@ export async function callLLM(
       } catch (e) { console.error(`[LLM] local-first Ollama failed for ${task}, trying Workers AI:`, (e as Error).message); }
     }
     if (env.AI) {
+      workersAITried = true;
       try {
         const r = await withTimeout(callWorkersAI(system, messages, maxTokens, env, DEFAULT_WORKERS_AI, temperature ?? 0.7), 22000);
         record(r, true); return r;
       } catch (e) { console.error(`[LLM] local-first Workers AI failed for ${task}, falling back to hosted:`, (e as Error).message); }
     }
     // Neither local lane worked — fall through to the hosted chain below.
+  }
+  // WORKERS AI FIRST (operator directive, 2026-07-24): the bound Cloudflare
+  // pool is a free allocation INDEPENDENT of every hosted provider's daily
+  // quota, so it takes the traffic before the shared hosted free tiers are
+  // touched — the hosted router chain below becomes the fallback, not the
+  // front line. The one exception is 'research': its whole value is the hosted
+  // provider's live web-search grounding, which Workers AI cannot do, so it
+  // still goes hosted-first (and keeps Workers AI as its last-resort net).
+  if (task !== 'research' && !workersAITried && env.AI) {
+    workersAITried = true;
+    try {
+      // The conversation lane keeps its hotter sampling (0.9) here too — see
+      // routeLLM's voice-temperature note.
+      const t = temperature ?? (task === 'conversation' ? 0.9 : 0.7);
+      const r = await withTimeout(callWorkersAI(system, messages, maxTokens, env, DEFAULT_WORKERS_AI, t), 22000);
+      record(r, true); return r;
+    } catch (e) { console.error(`[LLM] Workers AI primary failed for ${task}, falling back to hosted chain:`, (e as Error).message); }
   }
   try {
     const r = await routeLLM(task, system, messages, maxTokens, env, temperature);
@@ -597,7 +630,9 @@ export async function callLLM(
     //    errors OR runs long, we re-throw the ORIGINAL provider error so the
     //    caller degrades gracefully (clean 200) exactly as before this fallback
     //    existed — the safety net can only ever help, never make things worse.
-    if (env.AI) {
+    //    Skipped when the primary block above already tried (and lost) this
+    //    same pool — re-asking an exhausted allocation buys nothing but latency.
+    if (env.AI && !workersAITried) {
       try {
         console.error(`Falling back to Workers AI for ${task}:`, msg);
         const r = await withTimeout(callWorkersAI(system, messages, maxTokens, env, DEFAULT_WORKERS_AI, temperature ?? 0.7), 22000);
