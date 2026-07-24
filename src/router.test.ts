@@ -126,6 +126,22 @@ describe('runRouter — the step loop', () => {
     expect(result.trace[0].result).toContain('unknown tool');
   });
 
+  it('treats tool:"none" as a protocol slip and nudges for a direct answer, without burning a tool step', async () => {
+    // Seen live on a quota-drained day: a small fallback model emitted
+    // {"tool":"none","args":{"reason":"exceeded quota limit"}} to say "no tool
+    // needed", and the loop fed `unknown tool "none"` back as an observation.
+    // The sentinel path skips dispatch entirely — no trace entry, just a nudge.
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ thought: 'quota issue', tool: 'none', args: { reason: 'exceeded quota limit' } }),
+        geminiResponse({ answer: 'answered directly after the nudge' }),
+      ],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    expect(result.answer).toBe('answered directly after the nudge');
+    expect(result.trace).toEqual([]);
+  });
+
   it('refuses a tool outside the current scope without crashing the loop', async () => {
     stubFetchRoutes({
       'generativelanguage.googleapis.com': [

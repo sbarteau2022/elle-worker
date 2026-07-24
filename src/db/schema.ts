@@ -538,6 +538,9 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // conductor.ts
     `CREATE INDEX IF NOT EXISTS elle_runs_started ON elle_runs (started_at DESC)`,
     `ALTER TABLE elle_intents ADD COLUMN draft TEXT`,
+    // Stall breaker: consecutive forge ticks that changed nothing. Reset to 0
+    // on any real state change; at FORGE_STALL_TICKS the task → 'stalled'.
+    `ALTER TABLE elle_code_tasks ADD COLUMN noop_ticks INTEGER DEFAULT 0`,
     // forge-loop.ts (extends elle_custom_tools beyond tool-forge.ts's base)
     `ALTER TABLE elle_custom_tools ADD COLUMN goals TEXT`,
     `ALTER TABLE elle_custom_tools ADD COLUMN forge_status TEXT`,
@@ -593,6 +596,15 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // security-network.ts
     `CREATE INDEX IF NOT EXISTS idx_security_events_time ON elle_security_events(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_security_events_actor ON elle_security_events(actor_key)`,
+    // falcon.ts — the Material Ground. A run cannot fire without grounding, so
+    // every persisted analysis carries the cited evidence it was built on:
+    // material_ground_json (findings + sources + corpus look-back), grounded=1
+    // (there is no ungrounded run on file), n_sources, and blanket_json (the
+    // nested-Markov-blanket world-model Tier 2 read the human agents through).
+    `ALTER TABLE falcon_analyses ADD COLUMN material_ground_json TEXT`,
+    `ALTER TABLE falcon_analyses ADD COLUMN grounded INTEGER DEFAULT 0`,
+    `ALTER TABLE falcon_analyses ADD COLUMN n_sources INTEGER`,
+    `ALTER TABLE falcon_analyses ADD COLUMN blanket_json TEXT`,
   ];
   for (const sql of extras) await db.prepare(sql).run().catch(() => {});
 
@@ -620,6 +632,16 @@ export async function backfillConvTurnKappa(db: D1Database): Promise<void> {
   await db.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa REAL').run().catch(() => {});
   await db.prepare('ALTER TABLE elle_conversation_turns ADD COLUMN kappa_def TEXT').run().catch(() => {});
   convKappaReady = true;
+}
+
+// `sessions` is also out-of-band. user_id attributes a session to its owner so
+// cross-session recall can be scoped to the caller (see recallPastConversations
+// in index.ts). Pre-existing sessions stay NULL until backfilled.
+let sessionsUserReady = false;
+export async function backfillSessionsUserColumn(db: D1Database): Promise<void> {
+  if (sessionsUserReady) return;
+  await db.prepare('ALTER TABLE sessions ADD COLUMN user_id TEXT').run().catch(() => {});
+  sessionsUserReady = true;
 }
 
 let tradesExtReady = false;

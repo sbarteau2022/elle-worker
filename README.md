@@ -179,7 +179,11 @@ code, CI judges it, **the merge is always a human click** — no merge tool exis
 **Skills** — `skill_list`, `skill_read`, `skill_write`. A D1 library of distilled
 procedures she reads before a matching task and authors when she learns.
 
-**MCP** — `mcp_add` (mount any MCP server by URL), `mcp_tools`, `mcp_call`.
+**MCP** — `mcp_library` (the curated connector shelf: known servers with what
+they offer and what auth they need — mountable by name alone), `mcp_add`
+(mount a shelf entry by name, or any MCP server by URL), `mcp_tools`,
+`mcp_call`. The `mcp-builder` skill holds the procedure for authoring her own
+MCP servers through the forge when the shelf has no fit.
 Hugging Face pre-mounted; the external tool ecosystem is reachable this way.
 
 **Hospitality** (`src/rapid.ts`, native `rapid2ai-db`) — `rapid_report`,

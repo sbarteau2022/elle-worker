@@ -43,7 +43,7 @@ async function ensureSchema(env: Env): Promise<void> {
 }
 
 // ── seed set — inserted only if absent; her edits are never overwritten ──────
-const SEEDS: Array<{ name: string; description: string; body: string }> = [
+export const SEEDS: Array<{ name: string; description: string; body: string }> = [
   {
     name: 'forge-task',
     description: 'Any request to build, fix, or refactor code in your own repos — the full loop from reading to acceptance.',
@@ -117,6 +117,27 @@ Read the actual error text with forge_check log tails or wrangler tail before ch
 4. Ship it through the forge like any other change: branch, tests where testable, green CI, then forge_pr. The PR body must say plainly: this changes how I think/speak/act, here is the before/after on a concrete example.
 5. The merge is Stewart's — on self-revision above all. If he declines, that is information, not an obstacle: journal what you learned about the difference between what you wanted and what he saw.
 What you may NOT do, structurally and by agreement: edit .github/workflows (the judge), merge your own PRs, or route around the forge to change production behavior.`,
+  },
+  {
+    name: 'mcp-builder',
+    description: 'Building a custom MCP server of your own — when no connector on the shelf (mcp_library) covers the need — and mounting it.',
+    body: `Build a custom MCP server only when mcp_library has no connector for the job AND the capability deserves a stable external tool surface (usable by any MCP client, not just you). For a private one-off, tool_forge is cheaper; for a known service, mount the shelf entry.
+SHAPE. An MCP server is one HTTPS endpoint speaking JSON-RPC 2.0 over POST (streamable HTTP). Your own client (src/mcp.ts) is the reference consumer: stateless per call, it sends initialize → notifications/initialized → the request, and parses plain JSON or text/event-stream. Build for that client and every other MCP client works too.
+THE FOUR METHODS a minimal server needs:
+1. initialize → result {protocolVersion:'2025-03-26', capabilities:{tools:{}}, serverInfo:{name,version}}.
+2. notifications/initialized → HTTP 202, empty body (a notification has no id and gets no JSON-RPC response).
+3. tools/list → {tools:[{name, description, inputSchema}]} — inputSchema is plain JSON Schema.
+4. tools/call {name, arguments} → {content:[{type:'text',text:'…'}], isError?}. Failures the CALLER can act on go in content with isError:true; protocol failures (unknown method/tool, bad JSON) are JSON-RPC error objects.
+WHERE IT LIVES: a Cloudflare Worker in your own repos, shipped through the forge like everything else (forge-task skill governs the loop). Either a new route on elle-worker (POST /mcp — shares your D1/secrets: right when the tools read YOUR data) or a standalone worker (right when the surface should not carry your keys).
+TOOL DESIGN FOR MODEL CALLERS — the part that decides if the server is any good:
+- Few tools, each doing one whole job; verb_noun names.
+- Descriptions say WHEN to reach for the tool, not just what it does — the caller is a model choosing from a list.
+- Flat inputSchema, few required args, defaults for the rest, every arg described.
+- Return text a model can use directly: compact, structured, capped (your client truncates at 6000 chars — cap earlier yourself and say what was cut).
+- Failure text says what to try next, never a bare stack trace.
+AUTH: anything private requires Authorization: Bearer <secret>, 401 otherwise. The secret lives in Worker secrets (wrangler secret put), never in D1 or code; the client sends whatever token was passed at mcp_add.
+TESTS, same PR (vitest): fixture JSON-RPC bodies straight through the handler — initialize advertises capabilities.tools; tools/list matches the declared schemas; one tools/call happy path; one isError path; one auth-refused 401.
+ACCEPTANCE: after deploy, mcp_add(name, url) must report the handshake mounted with the expected tool count, and one real mcp_call must round-trip. Then distill what the build taught you back into this skill.`,
   },
   {
     name: 'observer-paper',

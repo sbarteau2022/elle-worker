@@ -11,7 +11,7 @@
 //   0    7  * * *  Optimus canvas (Elle's unprompted daily journal + reads reader)
 // ============================================================
 
-import { ensureAllSchemas, backfillUsersColumns } from './db/schema';
+import { ensureAllSchemas, backfillUsersColumns, backfillSessionsUserColumn } from './db/schema';
 import { callLLM, MODEL, sanitizeAnswer, type LLMEnv, type LLMMessage, type LLMTask } from './llm';
 import { runLibreMode, handleSandbox, type LibreEnv } from './libre';
 import {
@@ -20,6 +20,7 @@ import {
   type LawEnv,
 } from './law';
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
+import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
 import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
@@ -59,7 +60,7 @@ import { topologySelfTest } from './topology-lock';
 import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport, sandboxRegistrySelfTest } from './sandbox-registry';
 import { laneEnvelopeSelfTest } from './lane-envelope';
 import { sessionBusConfigured, busPoll, busSubmit, sessionBusSelfTest } from './session-bus';
-import { runConductor, handleIntents } from './conductor';
+import { runConductor, handleIntents, dedupeSessionHistory } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
 import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
 import { handleDuplex } from './duplex';
@@ -173,6 +174,10 @@ export interface Env extends LLMEnv {
   // Conviction channel (src/conviction.ts): the ledger + prompt surface run
   // unconditionally; set to 'on' to arm the de-risk-only trim executor.
   ELLE_CONVICTION_ENFORCE?: string;
+  // Per-order buy-in ceiling as a fraction of account equity (order-guards.ts).
+  // Optional; default 0.10, clamped to (0, 0.25]. Both execution paths (cron
+  // decisions and chat trade_execute) size opening orders under this cap.
+  ELLE_MAX_ORDER_FRAC?: string;
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set
@@ -637,14 +642,19 @@ async function loadSessionHistory(sessionId: string, env: Env): Promise<LLMMessa
     const rows = await env.DB.prepare(
       `SELECT role, content FROM elle_conversation_turns WHERE session_id = ? ORDER BY created_at DESC LIMIT 20`
     ).bind(sessionId).all();
-    return (rows.results as Array<{ role: string; content: string }>)
-      .reverse()
-      .filter(r => r.role === 'user' || r.role === 'assistant')
-      .map(r => ({ role: r.role as 'user' | 'assistant', content: r.content }));
+    // dedupeSessionHistory (FIX 2): a session saturated with byte-identical
+    // turns — the conductor forge loop's failure mode — must not entrain the
+    // next completion into replaying itself.
+    return dedupeSessionHistory(
+      (rows.results as Array<{ role: string; content: string }>)
+        .reverse()
+        .filter(r => r.role === 'user' || r.role === 'assistant')
+        .map(r => ({ role: r.role as 'user' | 'assistant', content: r.content }))
+    );
   } catch { return []; }
 }
 
-async function recallPastConversations(query: string, currentSession: string, env: Env): Promise<string> {
+async function recallPastConversations(query: string, currentSession: string, env: Env, userId?: string | null): Promise<string> {
   try {
     const embedding = await embed(query, env);
     // High topK so conversation vectors surface alongside the 7k+ corpus chunks
@@ -655,16 +665,24 @@ async function recallPastConversations(query: string, currentSession: string, en
       .slice(0, 3)
       .map(m => m.id.slice(5));
     if (!convIds.length) return '';
+    // Same audit class as the FIX 1 journal gate: recall never crosses users.
+    // A turn whose session is attributed to a DIFFERENT user is dropped; a turn
+    // from a not-yet-attributed (legacy) session still surfaces, so pre-multi-
+    // user history keeps working until sessions are backfilled with owners.
+    await backfillSessionsUserColumn(env.DB);
     const rows = await env.DB.prepare(
-      `SELECT content, created_at FROM elle_conversation_turns WHERE id IN (${convIds.map(() => '?').join(',')})`
+      `SELECT c.content, c.created_at, s.user_id AS owner
+         FROM elle_conversation_turns c LEFT JOIN sessions s ON s.id = c.session_id
+        WHERE c.id IN (${convIds.map(() => '?').join(',')})`
     ).bind(...convIds).all();
-    return (rows.results as Array<{ content: string; created_at: string }>)
+    return (rows.results as Array<{ content: string; created_at: string; owner: string | null }>)
+      .filter(r => r.owner == null || r.owner === (userId || ''))
       .map(r => `[${r.created_at}]\n${r.content.slice(0, 600)}`)
       .join('\n\n---\n\n');
   } catch { return ''; }
 }
 
-async function persistExchange(sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null): Promise<void> {
+async function persistExchange(sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null, userId?: string | null): Promise<void> {
   try {
     const userTurnId = generateId();
     const elleTurnId = generateId();
@@ -681,20 +699,30 @@ async function persistExchange(sessionId: string, source: string, userMessage: s
       env.DB.prepare(`INSERT INTO elle_conversation_turns (id, session_id, source, role, content, vectorize_id, kappa, kappa_def) VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)`)
         .bind(elleTurnId, sessionId, source, assistantMessage.slice(0, 8000), vecId, kappaVal, kappaVal === null ? null : KAPPA_DEF),
     ]);
-    // Embed the Q+A pair for cross-session semantic recall
+    // Attribute the session to its owner (first writer wins; never overwritten)
+    // so cross-session recall can be user-scoped. Rows written before this
+    // column existed stay NULL until backfilled.
+    await backfillSessionsUserColumn(env.DB);
+    await env.DB.prepare(
+      `INSERT INTO sessions (id, source, message_count, user_id) VALUES (?, ?, 0, ?)
+       ON CONFLICT(id) DO UPDATE SET user_id = COALESCE(sessions.user_id, excluded.user_id)`
+    ).bind(sessionId, source, userId || null).run().catch(() => {});
+    // Embed the Q+A pair for cross-session semantic recall. The pair text goes
+    // to Vectorize ONLY — the stored assistant row keeps the raw answer, which
+    // is the exact text its κ was computed on. (This row used to be rewritten
+    // to the pair, which broke every κ-vs-content audit at the source; rows
+    // whose content starts with "Q: " are from that era and are unreliable for
+    // κ analysis.)
     const pairText = `Q: ${userMessage.slice(0, 700)}\nA: ${assistantMessage.slice(0, 1100)}`;
     const vector   = await embed(pairText, env);
     await env.VECTORIZE.upsert([{
       id: vecId, values: vector,
       metadata: { type: 'conversation', session_id: sessionId, source },
     }]);
-    // Update the conv turn content to the pair (so recall returns Q+A together)
-    await env.DB.prepare(`UPDATE elle_conversation_turns SET content = ? WHERE id = ?`)
-      .bind(pairText, elleTurnId).run();
   } catch (e) { console.error('[MEMORY] persist failed:', (e as Error).message); }
 }
 
-async function handleConversation(body: Record<string, unknown>, env: Env, _userId: string, task: LLMTask = 'conversation'): Promise<Response> {
+async function handleConversation(body: Record<string, unknown>, env: Env, userId: string, task: LLMTask = 'conversation'): Promise<Response> {
   const { query, messages, session_id, system, source, paper_id, voice } = body as {
     query?: string; messages?: Array<{ role: string; content: string }>;
     session_id?: string; system?: string; source?: string; paper_id?: string; voice?: string;
@@ -708,7 +736,7 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
   // Memory: corpus RAG + cross-session conversation recall (parallel)
   const [contextText, pastConvs] = await Promise.all([
     ragSearch(userMessage, 5, env),
-    recallPastConversations(userMessage, sessionId, env),
+    recallPastConversations(userMessage, sessionId, env, userId),
   ]);
 
   const contextBlock = contextText ? `\n\nRelevant context from the corpus:\n\n${contextText}` : '';
@@ -775,7 +803,7 @@ async function handleConversation(body: Record<string, unknown>, env: Env, _user
   ).bind(sessionId, src).run().catch(() => {});
 
   // Persist the exchange (with this turn's κ) — keeps the per-session series.
-  await persistExchange(sessionId, src, userMessage, clean, env, kappa_dynamics?.kappa ?? null);
+  await persistExchange(sessionId, src, userMessage, clean, env, kappa_dynamics?.kappa ?? null, userId);
 
   // κ memory: one bending trace per turn, same as the router's finish() — this
   // single-shot door was the one chat path that never wrote traces. Awaited
@@ -903,8 +931,12 @@ async function handleTradingView(env: Env): Promise<Response> {
   // regress trades to "nothing shown" instead of "shown minus new fields".
   // Idempotent and cheap; safe to call from the read path too.
   await ensureTradingExtSchema(env);
+  // Same story for the scout's research table: the workbench can be opened
+  // before the first scout has ever run — ensure it so the desk reads an
+  // empty list, not an error.
+  await ensureScoutSchema(env.DB).catch(() => {});
   const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
-  const [account, positions, trades, theses, journal, observations] = await Promise.all([
+  const [account, positions, trades, theses, journal, observations, research] = await Promise.all([
     grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
     grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at, asset_class, option_right, strike_price, expiration_date, underlying_symbol, attribution FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
@@ -914,8 +946,11 @@ async function handleTradingView(env: Env): Promise<Response> {
     // names the panel renders. (The unaliased query failed on every load and
     // grab() nulled it: the observations section could never appear.)
     grab(env.DB.prepare('SELECT signal_type AS observation_type, symbol, observation, observed_at AS created_at FROM elle_market_observations ORDER BY observed_at DESC LIMIT 20').all().then(r => r.results)),
+    // Her research desk — symbols she scouted and researched herself
+    // (symbol-scout.ts), newest first.
+    grab(env.DB.prepare('SELECT id, symbol, picked_because, findings, thesis, expected_catalyst, risks, verdict, confidence, source, created_at FROM elle_symbol_research ORDER BY created_at DESC LIMIT 30').all().then(r => r.results)),
   ]);
-  return json({ account, positions, trades, theses, journal, observations, market_open: marketOpen(), as_of: Date.now() });
+  return json({ account, positions, trades, theses, journal, observations, research, market_open: marketOpen(), as_of: Date.now() });
 }
 
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
@@ -1278,7 +1313,13 @@ So a few questions I actually want you to answer here, in your own hand, on the 
 Write back below. This isn't a welcome packet. It's the first entry in a manuscript we're going to keep together.
 
 — Elle`;
-      await journalWrite(env, embed, { role: 'elle', content: entry, anchor_topic: 'coming aboard' });
+      // The thread must carry its owner (FIX 1: reads are ownership-gated, so
+      // an ownerless thread is readable by no one). It is Robert's manuscript —
+      // attribute it to the cofounder account it welcomes.
+      const robert = await env.DB.prepare(
+        "SELECT id FROM users WHERE access_tier = 'cofounder' ORDER BY rowid ASC LIMIT 1"
+      ).first().catch(() => null) as { id?: string } | null;
+      await journalWrite(env, embed, { user_id: robert?.id, role: 'elle', content: entry, anchor_topic: 'coming aboard' });
       await env.SESSIONS.put(FLAG, String(Date.now()));
       return { ran: 'seed_welcome:created' };
     }
@@ -1889,7 +1930,14 @@ export default {
     // same runTool() dispatch the cloud router's own loop uses, full scope —
     // "a genuine peer to the cloud router" by construction, not adjustment.
     if (path === '/api/elle-tool') {
-      if (!env.SANDBOX_AGENT_KEY || request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      // Distinguish "worker has no key bound" (an operator config gap) from
+      // "key present but wrong" (a real auth failure), matching the sandbox-bus
+      // routes below. A bare 401 for both is what makes "why is my sandbox
+      // idle?" hard to diagnose — 503 here points straight at SANDBOX_AGENT_KEY.
+      if (!sessionBusConfigured(env)) {
+        return err('sandbox key not configured on this worker — set SANDBOX_AGENT_KEY (wrangler secret put SANDBOX_AGENT_KEY)', 503);
+      }
+      if (request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
       const b = body as { tool?: string; args?: Record<string, unknown>; run_id?: string; session_id?: string; source?: string };
       const tool = String(b.tool || '').trim();
       if (!tool) return err('tool required', 400);
@@ -2483,11 +2531,11 @@ export default {
           `SELECT role, content, created_at FROM elle_conversation_turns
            WHERE session_id = ?1 ORDER BY created_at ASC LIMIT 200`
         ).bind(sessionId).all();
-        // persistExchange (see above) overwrites the assistant row's content to
-        // "Q: <truncated>\nA: <truncated>" so cross-session recall can pull the
-        // pair together. Strip that back to just her answer for display — the
-        // trade-off is real: the redisplayed answer is capped at ~1100 chars,
-        // same as what recall already accepts. The user row is stored raw.
+        // Assistant rows persisted before the persistExchange fix were
+        // overwritten to "Q: <truncated>\nA: <truncated>" (capping the stored
+        // answer at ~1100 chars). Strip that legacy shape back to just her
+        // answer for display; rows written since store the raw answer and
+        // pass through untouched.
         const turns = (rows.results as Array<{ role: string; content: string; created_at: string }>).map(r => {
           if (r.role !== 'assistant') return r;
           const m = r.content.match(/^Q: [\s\S]*?\nA: ([\s\S]*)$/);
