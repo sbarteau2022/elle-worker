@@ -7,10 +7,13 @@
 // ships next. Instead of hand-writing an integration per service, Elle
 // mounts a server by URL and its ENTIRE tool catalog becomes callable:
 //
-//   mcp_add(name, url, token?)   register a server (https only, admin scope)
+//   mcp_add(name, url?, token?)  register a server (https only, admin scope);
+//                                url may be omitted when name matches a
+//                                connector-library entry (mcp-library.ts)
 //   mcp_tools(server?)           no arg: list mounted servers; with arg:
 //                                the server's live tool catalog with schemas
 //   mcp_call(server, tool, args) invoke one tool, get text content back
+//   mcp_library(q?)              browse the curated connector shelf
 //
 // Transport: MCP streamable HTTP (JSON-RPC 2.0 over POST; responses may be
 // plain JSON or a text/event-stream — both parsed). Stateless-worker
@@ -24,6 +27,7 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
+import { findConnector, mcpLibrary } from './mcp-library';
 import type { Env } from './index';
 
 const CALL_TIMEOUT_MS = 20000;
@@ -142,9 +146,11 @@ async function rpc(server: McpServer, method: string, params: Record<string, unk
 export async function mcpAdd(env: Env, a: Record<string, unknown>): Promise<string> {
   await ensureSchema(env);
   const name = String(a.name || '').toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').slice(0, 40);
-  const url = String(a.url || '').trim();
   if (!name) return 'name required';
-  if (!/^https:\/\//i.test(url)) return 'url must be https';
+  // No url → mount from the connector library by name.
+  const entry = findConnector(name);
+  const url = String(a.url || '').trim() || entry?.url || '';
+  if (!/^https:\/\//i.test(url)) return 'url must be https (or pass a name from mcp_library to mount a known connector)';
   const token = a.token ? String(a.token) : null;
   await env.DB.prepare(
     `INSERT INTO elle_mcp_servers (name, url, auth_token, enabled, added_at) VALUES (?,?,?,1,?)
@@ -199,9 +205,10 @@ export async function mcpCall(env: Env, a: Record<string, unknown>): Promise<str
 export async function runMcpTool(name: string, a: Record<string, unknown>, env: Env): Promise<string> {
   try {
     switch (name) {
-      case 'mcp_add':   return await mcpAdd(env, a);
-      case 'mcp_tools': return await mcpTools(env, a);
-      case 'mcp_call':  return await mcpCall(env, a);
+      case 'mcp_add':     return await mcpAdd(env, a);
+      case 'mcp_tools':   return await mcpTools(env, a);
+      case 'mcp_call':    return await mcpCall(env, a);
+      case 'mcp_library': return mcpLibrary(a);
       default:          return `unknown mcp tool "${name}"`;
     }
   } catch (e) {
