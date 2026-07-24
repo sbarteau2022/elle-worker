@@ -104,9 +104,9 @@ export async function gatherArrival(env: Env, userId: string): Promise<{ materia
     ).all().then(r => r.results as Array<{ kind: string; outcome: string }>)),
   ]);
 
-  // The door session stores [assistant, user] newest-first; the assistant row's
-  // content is the persisted Q+A pair (see persistExchange), so prefer the user
-  // row for "them" and strip the pair prefix for "her".
+  // The door session stores [assistant, user] newest-first. Assistant rows now
+  // keep the raw answer, but rows persisted before the persistExchange fix
+  // carry the old "Q: …\nA: …" pair — strip that prefix when present.
   let lastExchange: ArrivalMaterials['lastExchange'] = null;
   let lastTurnAt: string | null = null;
   if (turns && turns.length) {

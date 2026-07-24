@@ -387,11 +387,15 @@ export async function journalWrite(
   const role = (args.role === 'elle' || args.role === 'reader') ? args.role : 'reader';
   const offRecord = args.off_record ? 1 : 0;
 
-  // resolve / create thread
+  // resolve / create thread. The thread's owner (not the caller) is what the
+  // vector metadata carries — an append to an existing thread belongs to
+  // whoever owns that thread.
   let threadId = args.thread_id || '';
+  let threadOwner: string | null = args.user_id || null;
   if (threadId) {
-    const t = await env.DB.prepare('SELECT id FROM optimus_threads WHERE id = ?').bind(threadId).first();
+    const t = await env.DB.prepare('SELECT id, user_id FROM optimus_threads WHERE id = ?').bind(threadId).first() as { id?: string; user_id?: string | null } | null;
     if (!t) threadId = '';
+    else threadOwner = (t.user_id as string | null) ?? null;
   }
   if (!threadId) {
     threadId = id();
@@ -423,7 +427,10 @@ export async function journalWrite(
     try {
       contentVector = await embed(content, env);
       vectorizeId = `jrnl-${entryId}`;
-      await env.VECTORIZE.upsert([{ id: vectorizeId, values: contentVector, metadata: { type: 'journal', thread_id: threadId, entry_id: entryId, role } }]);
+      // user_id in the metadata is forward-looking efficiency only — historic
+      // vectors lack it, so ENFORCEMENT stays in the D1 ownership join
+      // (journalRead), never in a Vectorize metadata filter.
+      await env.VECTORIZE.upsert([{ id: vectorizeId, values: contentVector, metadata: { type: 'journal', thread_id: threadId, entry_id: entryId, role, ...(threadOwner ? { user_id: threadOwner } : {}) } }]);
     } catch { vectorizeId = null; }
   }
 
@@ -493,12 +500,35 @@ export async function journalAnnotate(
   return { id: mid };
 }
 
+// Internal actor ids that run the full-scope router unprompted. For journal
+// READS they act as the operator: their reads resolve to the superadmin's
+// estate, which also includes the threads they themselves wrote (volition
+// writes under 'elle', the conductor under 'conductor'). A human user id is
+// never in this list, so a human read is always strict equality on their own
+// user_id.
+export const INTERNAL_JOURNAL_ACTORS = ['elle', 'conductor', 'router'] as const;
+
+// Resolve the set of thread owners a caller may read. Strict single-owner for
+// any human user; the operator (superadmin) and the internal actors share one
+// estate. NULL-owned legacy threads are readable by NO ONE until backfilled —
+// fail closed, no special cases in the hot path.
+async function readableOwners(env: Env, userId: string): Promise<string[]> {
+  const owner = await resolveOwner(env);
+  const uid = (INTERNAL_JOURNAL_ACTORS as readonly string[]).includes(userId) && owner ? owner : userId;
+  return owner && uid === owner ? [uid, ...INTERNAL_JOURNAL_ACTORS] : [uid];
+}
+
 // ── read: semantic search over ON-RECORD entries only (default) ──────────────
+// FIX 1 (P0 privacy): every read is scoped to the caller. user_id is REQUIRED —
+// no silent global read — and the entry fetch joins optimus_threads ownership,
+// which is the enforcement gate (Vectorize metadata is advisory only).
 export async function journalRead(
   env: Env, embed: EmbedFn,
-  args: { q?: string; thread_id?: string; include_off_record?: boolean; limit?: number },
-): Promise<{ results: Record<string, unknown>[] }> {
+  args: { user_id?: string; q?: string; thread_id?: string; include_off_record?: boolean; limit?: number },
+): Promise<{ results: Record<string, unknown>[] } | { error: string }> {
   await ensureSchema(env);
+  const userId = String(args.user_id || '').trim();
+  if (!userId) return { error: 'user_id required' };
   const q = String(args.q || '').trim();
   const limit = Math.min(Math.max(Number(args.limit) || 8, 1), 25);
   if (!q) return { results: [] };
@@ -508,11 +538,16 @@ export async function journalRead(
   const ids = matches.matches.filter(m => m.id.startsWith('jrnl-')).map(m => m.id);
   if (!ids.length) return { results: [] };
 
+  const owners = await readableOwners(env, userId);
   const placeholders = ids.map(() => '?').join(',');
+  const ownerPh = owners.map(() => '?').join(',');
   const rows = await env.DB.prepare(
-    `SELECT id, thread_id, role, content, off_record, kappa, reserve, velocity, accel, jerk, created_at
-       FROM optimus_entries WHERE vectorize_id IN (${placeholders})${args.thread_id ? ' AND thread_id = ?' : ''}`
-  ).bind(...ids, ...(args.thread_id ? [args.thread_id] : [])).all();
+    `SELECT e.id, e.thread_id, e.role, e.content, e.off_record, e.kappa, e.reserve,
+            e.velocity, e.accel, e.jerk, e.created_at
+       FROM optimus_entries e
+       JOIN optimus_threads t ON t.id = e.thread_id
+      WHERE e.vectorize_id IN (${placeholders}) AND t.user_id IN (${ownerPh})${args.thread_id ? ' AND e.thread_id = ?' : ''}`
+  ).bind(...ids, ...owners, ...(args.thread_id ? [args.thread_id] : [])).all();
 
   // RULE 1 (defense in depth): never surface off-record unless explicitly asked.
   const score = new Map(matches.matches.map(m => [m.id, m.score]));
@@ -525,10 +560,19 @@ export async function journalRead(
 }
 
 // ── full manuscript: ordered entries + phase-state series + marginalia ───────
-export async function journalThread(env: Env, args: { thread_id?: string }): Promise<Record<string, unknown>> {
+// FIX 1: same gate as journalRead — a thread dump is a journal read. The
+// caller only sees a thread they own (or, for the operator/internal actors,
+// one inside the shared estate). Not-owned reads answer 'thread not found',
+// indistinguishable from a bad id.
+export async function journalThread(env: Env, args: { thread_id?: string; user_id?: string }): Promise<Record<string, unknown>> {
   await ensureSchema(env);
   if (!args.thread_id) return { error: 'thread_id required' };
-  const thread = await env.DB.prepare('SELECT * FROM optimus_threads WHERE id = ?').bind(args.thread_id).first();
+  const userId = String(args.user_id || '').trim();
+  if (!userId) return { error: 'user_id required' };
+  const owners = await readableOwners(env, userId);
+  const thread = await env.DB.prepare(
+    `SELECT * FROM optimus_threads WHERE id = ? AND user_id IN (${owners.map(() => '?').join(',')})`
+  ).bind(args.thread_id, ...owners).first();
   if (!thread) return { error: 'thread not found' };
   const entries = await env.DB.prepare(
     'SELECT id, role, content, off_record, kappa, kappa_ts, reserve, velocity, accel, jerk, anchor_distance, created_at FROM optimus_entries WHERE thread_id = ? ORDER BY kappa_ts ASC'
@@ -560,8 +604,13 @@ export async function handleOptimusJournal(
   switch (op) {
     case 'write':    return json(await journalWrite(env, embed, { ...body, user_id: userId }));
     case 'annotate': return json(await journalAnnotate(env, body));
-    case 'read':     return json(await journalRead(env, embed, body));
-    case 'thread':   return json(await journalThread(env, body));
+    // read/thread: explicit fields only — never spread the client body, so a
+    // caller can't smuggle someone else's user_id past the auth gate.
+    case 'read':     return json(await journalRead(env, embed, {
+      q: body?.q, thread_id: body?.thread_id, include_off_record: body?.include_off_record,
+      limit: body?.limit, user_id: userId,
+    }));
+    case 'thread':   return json(await journalThread(env, { thread_id: body?.thread_id, user_id: userId }));
     case 'respond':  return json(await journalRespond(env, embed, { ...body, user_id: userId }));
     case 'list': {
       await ensureSchema(env);
