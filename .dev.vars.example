@@ -26,10 +26,14 @@ LLM_MODEL_REASONING=gemini-2.5-flash
 
 CLOUDFLARE_ACCOUNT_ID=f60c2e6068e002f5dbad7cd562a5c165
 
-# Connect-back sandbox — the shared secret the local (Electron) sandbox agent
-# presents when it dials  wss://<worker>/api/sandbox-agent/connect?key=...
-# The laptop agent must carry the SAME value (ELLE_SANDBOX_KEY in the workbench).
+# Connect-back sandbox — ONE shared secret, carried under two names (by design):
+#   elle-worker   SANDBOX_AGENT_KEY   (this worker; compared to x-sandbox-key)
+#   Elle app      ELLE_SANDBOX_KEY    (sent as x-sandbox-key when the agent polls
+#                                      /api/sandbox-bus/poll + /submit)
+# They MUST hold the same value. Unset ⇒ the worker's sandbox routes return 503
+# and the Elle agent sits idle ("ELLE_SANDBOX_KEY not set; not polling").
 # In production set it as a Worker secret, not here:
 #   wrangler secret put SANDBOX_AGENT_KEY
+# Or bind both sides in one shot:  ./scripts/set-sandbox-key.sh
 # SANDBOX_AGENT_KEY=change-me-to-a-long-random-string
 

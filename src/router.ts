@@ -80,7 +80,7 @@ import { recordTurnTrace } from './kappa-memory/integration';
 export interface RouterDeps {
   embed: (text: string, env: Env) => Promise<number[]>;
   ragSearch: (query: string, limit: number, env: Env) => Promise<string>;
-  recallPastConversations: (query: string, session: string, env: Env) => Promise<string>;
+  recallPastConversations: (query: string, session: string, env: Env, userId?: string | null) => Promise<string>;
   handleCodeEngine: (body: any, env: Env) => Promise<Response>;
   handleIngest: (body: any, env: Env) => Promise<Response>;
   handleDiagnose: (body: any, env: Env) => Promise<Response>;
@@ -94,7 +94,7 @@ export interface RouterDeps {
   // Optional: only the admin router passes a sessionId, so the hospitality
   // callsite can omit them and still type-check.
   loadSessionHistory?: (sessionId: string, env: Env) => Promise<LLMMessage[]>;
-  persistExchange?: (sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null) => Promise<void>;
+  persistExchange?: (sessionId: string, source: string, userMessage: string, assistantMessage: string, env: Env, kappa?: number | null, userId?: string | null) => Promise<void>;
 }
 
 export interface RouterStep {
@@ -145,6 +145,12 @@ export interface RouterResult {
 // tail (retrievable via page_read) instead of amputating it at clip time.
 const OBS_CAP = 12000;
 const SCRATCH_SLICE = 2800; // head slice injected into the scratch for paged observations
+
+// Tool names that mean "no tool" rather than naming a real tool. Weak fallback
+// models emit these instead of the {"answer"} shape; the loop treats them as a
+// protocol slip (nudge for a direct answer) instead of dispatching them into
+// runTool's default branch as `unknown tool "none"`.
+const NO_TOOL_SENTINELS = new Set(['none', 'null', 'nil', 'noop', 'no-op', 'no_tool', 'nothing', '']);
 
 // ── tool scoping ─────────────────────────────────────────────
 // 'full'        = admin router. Everything, including the write tools and
@@ -729,7 +735,7 @@ export async function runTool(
         return row?.full_text ? clip(`[${row.title}]\n${row.full_text}`, OBS_CAP * 2) : `no document for id ${id}`;
       }
       case 'recall_memory': {
-        const m = await deps.recallPastConversations(String(a.q || a.query || ''), 'router', env);
+        const m = await deps.recallPastConversations(String(a.q || a.query || ''), 'router', env, ctxUserId);
         return m || '(no relevant memory)';
       }
       case 'code_engine': {
@@ -952,11 +958,14 @@ export async function runTool(
         return `remembered (importance ${importance}): ${note.slice(0, 200)}`;
       }
       case 'journal_read': {
-        const r = await deps.journalRead(env, deps.embed, { q: a.q || a.query, thread_id: a.thread_id, include_off_record: false, limit: a.limit });
+        // FIX 1: reads carry the caller's identity, same as journal_write below.
+        // Internal actors (conductor/volition) resolve to the operator's estate
+        // inside journalRead itself.
+        const r = await deps.journalRead(env, deps.embed, { q: a.q || a.query, thread_id: a.thread_id, include_off_record: false, limit: a.limit, user_id: ctxUserId });
         return clip(JSON.stringify(r));
       }
       case 'journal_thread': {
-        const r = await deps.journalThread(env, { thread_id: a.thread_id });
+        const r = await deps.journalThread(env, { thread_id: a.thread_id, user_id: ctxUserId });
         return clip(JSON.stringify(r));
       }
       case 'journal_write': {
@@ -1316,7 +1325,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       catch (e) { console.error('[KAPPA] router turn dynamics failed:', (e as Error).message); }
     }
     if (sessionId && deps.persistExchange) {
-      try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null); } catch { /* best-effort */ }
+      try { await deps.persistExchange(sessionId, source, question, answer, env, kappa_dynamics?.kappa ?? null, ctxUserId); } catch { /* best-effort */ }
     }
     // κ memory (live, gate-closed): record one bending trace for the turn off the
     // per-session κ series just updated above. Writing is always on — the
@@ -1420,6 +1429,19 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
+      // "No tool" sentinels: some models — especially the small fallback tiers
+      // that take over when the free quotas drain — say "I don't need a tool"
+      // by emitting tool:"none" (or "null"/"noop") instead of the {"answer"}
+      // shape. Dispatching that burns a step on `unknown tool "none"` and puts
+      // a spurious failure in the trace (seen live: a quota-day turn spent its
+      // first step on none{"reason":"exceeded quota limit"}). Treat it as the
+      // protocol slip it is: hand the correction back and ask for the answer.
+      if (NO_TOOL_SENTINELS.has(parsed.tool.trim().toLowerCase())) {
+        void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: step, kind: 'note', result_preview: `no-tool sentinel "${parsed.tool}" — nudged for a direct answer` });
+        messages.push({ role: 'assistant', content: JSON.stringify({ tool: parsed.tool, args }) });
+        messages.push({ role: 'user', content: `"${parsed.tool}" is not a tool. If no tool is needed, reply now with {"answer":"..."} — your answer, in voice.` });
+        continue;
+      }
       // The step frame goes out BEFORE execution — the watcher sees what she
       // reached for and why while the tool is still running.
       ping({ kind: 'step', step, thought: stepThought, thinking: stepThinking, tool: parsed.tool, args, kappa: stepKappa });

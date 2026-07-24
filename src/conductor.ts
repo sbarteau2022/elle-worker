@@ -66,6 +66,53 @@ export function validateIntent(title: unknown, goal: unknown): string | null {
 // Forge tasks idle less than this are skipped — CI may still be running.
 export const FORGE_SETTLE_MS = 4 * 60 * 1000;
 
+// FIX 2 stall breaker: this many CONSECUTIVE forge ticks with no real state
+// change (same status, same pr_number, no new commits) flips the task to
+// 'stalled' and takes it off the clock. A task must never receive 400+
+// identical ticks silently — that is exactly what happened for 18 days.
+export const FORGE_STALL_TICKS = 6;
+
+// The slice of a forge task the truth gate compares across a tick. Reality is
+// this row, not the model's narrative about it.
+export interface ForgeTickState { status: string; pr_number: number | null; commits: number }
+
+export function forgeStateChanged(before: ForgeTickState, after: ForgeTickState): boolean {
+  return before.status !== after.status
+    || (before.pr_number ?? null) !== (after.pr_number ?? null)
+    || (before.commits || 0) !== (after.commits || 0);
+}
+
+// Does the answer CLAIM a PR was opened? Deliberately loose — it only ever
+// fires when the task row shows no PR landed, so a false positive costs one
+// error event, while a false negative lets a phantom-PR narrative count as a
+// clean tick.
+export function answerClaimsPr(answer: string): boolean {
+  const s = String(answer || '');
+  return /\b(?:pull[- ]request|PR)\b/i.test(s) && /\b(?:open(?:ed|ing)?|creat(?:ed|ing)|submitt(?:ed|ing)|raised)\b/i.test(s);
+}
+
+// FIX 2 history dedup: a conductor session saturated with byte-identical
+// turns entrains the model into replaying itself (identical context →
+// near-deterministic identical completion, forever). Drop any assistant turn
+// that repeats the previous assistant turn verbatim, then collapse the
+// adjacent duplicates that removal exposes. Ordinary conversations are
+// untouched — a repeated assistant turn separated by different user turns is
+// already pathological.
+export function dedupeSessionHistory<T extends { role: string; content: string }>(msgs: T[]): T[] {
+  const out: T[] = [];
+  let lastAssistant: string | null = null;
+  for (const m of msgs) {
+    if (m.role === 'assistant') {
+      if (m.content === lastAssistant) continue;
+      lastAssistant = m.content;
+    }
+    const prev = out[out.length - 1];
+    if (prev && prev.role === m.role && prev.content === m.content) continue;
+    out.push(m);
+  }
+  return out;
+}
+
 // Pure: pick what this tick works on. Forge tasks first (oldest touched),
 // then READY intents (the ship queue — finished exploration waiting on the
 // big model to finalize and push), then the highest-priority,
@@ -196,15 +243,24 @@ type RunRouterFn = (
 
 const RUN_MAX_STEPS = 8;
 
-async function recordRun(env: Env, intentId: string, kind: string, started: number, out: RouterResult): Promise<void> {
+async function recordRun(env: Env, intentId: string, kind: string, started: number, out: RouterResult, note?: string): Promise<void> {
   const rid = id();
+  const outcome = (note ? `[${note}] ` : '') + out.answer;
   await env.DB.prepare(
     `INSERT INTO elle_runs (id, intent_id, kind, started_at, finished_at, steps, outcome, trace_json) VALUES (?,?,?,?,?,?,?,?)`
-  ).bind(rid, intentId, kind, started, Date.now(), out.steps, out.answer.slice(0, 4000),
+  ).bind(rid, intentId, kind, started, Date.now(), out.steps, outcome.slice(0, 4000),
     JSON.stringify(out.trace).slice(0, 20000)).run().catch(() => {});
   await env.DB.prepare(
     `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'autonomous_run', 'conductor', ?, ?, 'info')`
-  ).bind(id(), `conductor: ${kind}`, JSON.stringify({ intent_id: intentId, steps: out.steps, outcome: out.answer.slice(0, 400) })).run().catch(() => {});
+  ).bind(id(), `conductor: ${kind}`, JSON.stringify({ intent_id: intentId, steps: out.steps, outcome: outcome.slice(0, 400) })).run().catch(() => {});
+}
+
+// One error-severity event into the live feed — the visibility half of the
+// truth gate and the stall breaker. Best-effort like every other event write.
+async function conductorAlert(env: Env, eventType: string, title: string, body: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, ?, 'conductor', ?, ?, 'error')`
+  ).bind(id(), eventType, title.slice(0, 200), body.slice(0, 2000)).run().catch(() => {});
 }
 
 // Two tick modes, one conductor:
@@ -269,6 +325,9 @@ export async function runConductor(
 
   if (work.kind === 'forge') {
     const task = await env.DB.prepare('SELECT * FROM elle_code_tasks WHERE id = ?').bind(work.id).first() as any;
+    const before: ForgeTickState = {
+      status: String(task.status), pr_number: task.pr_number ?? null, commits: Number(task.commits) || 0,
+    };
     const question =
 `AUTONOMOUS RUN — no one is reading this live; work, don't narrate.
 Your open forge task "${task.title}" (task_id ${task.id}, repo ${task.repo}, branch ${task.branch}${task.pr_number ? `, PR #${task.pr_number}` : ''}).
@@ -279,11 +338,51 @@ End with one plain sentence: what you did and what state the task is in now.`;
       maxSteps: RUN_MAX_STEPS, scope: 'full', userId: 'conductor',
       sessionId: `conductor:forge:${task.id}`, source: 'conductor',
     });
-    // Touch the task so the settle window spaces out successive sweeps of the
-    // same task even when the run itself changed nothing.
-    await env.DB.prepare('UPDATE elle_code_tasks SET updated_at = ? WHERE id = ?').bind(Date.now(), task.id).run().catch(() => {});
-    await recordRun(env, `forge:${task.id}`, 'forge_sweep', started, out);
-    return { ran: `conductor:forge:${task.id} (${out.steps} steps)` };
+    // TRUTH GATE (FIX 2): the tick is judged by the task ROW, not the model's
+    // narrative. Re-read reality; a claimed PR with pr_number still NULL is a
+    // failed tick, logged at error severity, never counted as progress.
+    const after = await env.DB.prepare(
+      'SELECT status, pr_number, commits, noop_ticks FROM elle_code_tasks WHERE id = ?'
+    ).bind(task.id).first().catch(() => null) as { status?: string; pr_number?: number | null; commits?: number; noop_ticks?: number } | null;
+    const afterState: ForgeTickState = {
+      status: String(after?.status ?? before.status),
+      pr_number: after?.pr_number ?? null,
+      commits: Number(after?.commits) || 0,
+    };
+    const changed = forgeStateChanged(before, afterState);
+    const phantomPr = !changed && afterState.pr_number == null && answerClaimsPr(out.answer);
+    if (phantomPr) {
+      await conductorAlert(env, 'forge_truth_gate',
+        `forge task ${task.id}: narrative claims a PR, none landed`,
+        JSON.stringify({ task_id: task.id, repo: task.repo, branch: task.branch, answer: out.answer.slice(0, 600) }));
+    }
+    // STALL BREAKER (FIX 2): consecutive no-change ticks accumulate; at the
+    // threshold the task leaves the schedule ('stalled' is not in pickWork's
+    // set) and the stall is surfaced. Any real state change resets the count.
+    // Every branch also touches updated_at, preserving the settle-window
+    // spacing the old unconditional touch provided.
+    const now2 = Date.now();
+    let stalled = false;
+    if (changed) {
+      await env.DB.prepare('UPDATE elle_code_tasks SET noop_ticks = 0, updated_at = ? WHERE id = ?')
+        .bind(now2, task.id).run().catch(() => {});
+    } else {
+      const noops = (Number(after?.noop_ticks) || 0) + 1;
+      stalled = noops >= FORGE_STALL_TICKS && (afterState.status === 'open' || afterState.status === 'pr_open');
+      await env.DB.prepare(
+        stalled
+          ? "UPDATE elle_code_tasks SET status = 'stalled', noop_ticks = ?, updated_at = ? WHERE id = ?"
+          : 'UPDATE elle_code_tasks SET noop_ticks = ?, updated_at = ? WHERE id = ?'
+      ).bind(noops, now2, task.id).run().catch(() => {});
+      if (stalled) {
+        await conductorAlert(env, 'forge_stalled',
+          `forge task ${task.id} stalled after ${noops} no-change ticks`,
+          JSON.stringify({ task_id: task.id, repo: task.repo, branch: task.branch, title: task.title, status: afterState.status, pr_number: afterState.pr_number, last_answer: out.answer.slice(0, 400) }));
+      }
+    }
+    await recordRun(env, `forge:${task.id}`, 'forge_sweep', started, out,
+      phantomPr ? 'truth-gate: claimed PR never landed' : stalled ? 'stalled: no state change' : undefined);
+    return { ran: `conductor:forge:${task.id} (${out.steps} steps${stalled ? ', → stalled' : ''})` };
   }
 
   const intent = await env.DB.prepare('SELECT * FROM elle_intents WHERE id = ?').bind(work.id).first() as unknown as Intent;

@@ -294,6 +294,18 @@ export async function forgeCheck(env: Env, a: Record<string, unknown>): Promise<
   return JSON.stringify(out);
 }
 
+// A forge_pr failure is never a silent string: it also lands in the live
+// events feed at error severity. The 18-day conductor stall this closes was
+// forge_pr failing HTTP 403 hourly ("Resource not accessible by personal
+// access token") with the failure visible only inside the model's context.
+async function forgePrFailed(env: Env, task: any, detail: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO elle_live_events (id, event_type, source, title, body, severity) VALUES (?, 'forge_pr_failed', 'forge', ?, ?, 'error')`
+  ).bind(tid(), `forge_pr failed for task ${task.id} (${task.repo})`,
+    JSON.stringify({ task_id: task.id, repo: task.repo, branch: task.branch, detail: detail.slice(0, 1500) })
+  ).run().catch(() => {});
+}
+
 // forge_pr: the request for acceptance. Opens (or returns the existing) PR
 // from the task branch to the default branch. There is no merge path here.
 export async function forgePR(env: Env, a: Record<string, unknown>): Promise<string> {
@@ -318,7 +330,9 @@ export async function forgePR(env: Env, a: Record<string, unknown>): Promise<str
         return JSON.stringify({ pr_number: ex.number, url: ex.html_url, note: 'existing PR' });
       }
     }
-    return `PR create failed (HTTP ${mk.status}): ${mk.data?.message || JSON.stringify(mk.data?.errors || '').slice(0, 300)}`;
+    const failure = `PR create failed (HTTP ${mk.status}): ${mk.data?.message || JSON.stringify(mk.data?.errors || '').slice(0, 300)}`;
+    await forgePrFailed(env, task, failure);
+    return failure;
   }
   await env.DB.prepare("UPDATE elle_code_tasks SET pr_number = ?, status = 'pr_open', updated_at = ? WHERE id = ?")
     .bind(mk.data.number, Date.now(), task.id).run().catch(() => {});
