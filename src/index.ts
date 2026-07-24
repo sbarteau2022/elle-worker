@@ -1930,7 +1930,14 @@ export default {
     // same runTool() dispatch the cloud router's own loop uses, full scope —
     // "a genuine peer to the cloud router" by construction, not adjustment.
     if (path === '/api/elle-tool') {
-      if (!env.SANDBOX_AGENT_KEY || request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      // Distinguish "worker has no key bound" (an operator config gap) from
+      // "key present but wrong" (a real auth failure), matching the sandbox-bus
+      // routes below. A bare 401 for both is what makes "why is my sandbox
+      // idle?" hard to diagnose — 503 here points straight at SANDBOX_AGENT_KEY.
+      if (!sessionBusConfigured(env)) {
+        return err('sandbox key not configured on this worker — set SANDBOX_AGENT_KEY (wrangler secret put SANDBOX_AGENT_KEY)', 503);
+      }
+      if (request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
       const b = body as { tool?: string; args?: Record<string, unknown>; run_id?: string; session_id?: string; source?: string };
       const tool = String(b.tool || '').trim();
       if (!tool) return err('tool required', 400);
