@@ -54,6 +54,51 @@ describe("callLLM prefer:'local' — autonomous callers spare hosted quota", () 
   });
 });
 
+describe('callLLM lane order — Workers AI first, hosted free chain as fallback', () => {
+  it('answers from Workers AI without touching any hosted provider (no prefer flag needed)', async () => {
+    const { seen } = stubFetch([{ match: 'openrouter.ai' }]); // would be recorded if reached
+    const run = vi.fn(async () => ({ response: 'from-workers-ai' }));
+    const env = { AI: { run }, LLM_OPENROUTER_KEY: 'sk-or-test' } as unknown as LLMEnv;
+
+    const out = await callLLM('conversation', 'sys', [{ role: 'user', content: 'hi' }], 100, env);
+
+    expect(out.provider).toBe('workers-ai');
+    expect(out.content).toBe('from-workers-ai');
+    expect(seen).toHaveLength(0); // hosted chain never reached
+  });
+
+  it('falls back to the hosted router chain when the Workers AI pool errors, without retrying it', async () => {
+    const { seen } = stubFetch([
+      { match: 'openrouter.ai', json: { choices: [{ message: { content: 'from-openrouter' } }] } },
+    ]);
+    const run = vi.fn(async () => { throw new Error('neuron allocation exhausted'); });
+    const env = { AI: { run }, LLM_OPENROUTER_KEY: 'sk-or-test' } as unknown as LLMEnv;
+
+    const out = await callLLM('conversation', 'sys', [{ role: 'user', content: 'hi' }], 100, env);
+
+    expect(out.provider).toBe('openrouter');
+    expect(out.content).toBe('from-openrouter');
+    // callWorkersAI tries 70B then the 8B fallback = 2 run() calls, and the
+    // tail-end safety net must NOT re-ask the same exhausted pool afterwards.
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(seen.some(u => u.includes('openrouter.ai'))).toBe(true);
+  });
+
+  it("keeps 'research' hosted-first — Workers AI cannot do live search grounding", async () => {
+    const { seen } = stubFetch([
+      { match: 'generativelanguage.googleapis.com', json: { candidates: [{ content: { parts: [{ text: 'grounded answer' }] } }] } },
+    ]);
+    const run = vi.fn(async () => ({ response: 'from-workers-ai' }));
+    const env = { AI: { run }, LLM_GEMINI_KEY: 'AIza-test' } as unknown as LLMEnv;
+
+    const out = await callLLM('research', 'sys', [{ role: 'user', content: 'hi' }], 100, env);
+
+    expect(out.provider).toBe('gemini');
+    expect(run).not.toHaveBeenCalled();
+    expect(seen.some(u => u.includes('generativelanguage.googleapis.com'))).toBe(true);
+  });
+});
+
 describe('callExtraFreeTiers — Groq is reached as a free fallback tier', () => {
   it('falls through to Groq when OpenRouter fails and LLM_GROQ_KEY is set', async () => {
     const { seen } = stubFetch([
