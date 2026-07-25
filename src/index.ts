@@ -265,16 +265,21 @@ function semanticChunks(text: string, targetTokens = 400, overlap = 1): string[]
 // blowing the context budget of the free OpenRouter models.
 const FULL_DOC_CHAR_CAP = 24000;
 
-async function ragSearch(query: string, limit: number, env: Env): Promise<string> {
+export async function ragSearch(query: string, limit: number, env: Env): Promise<string> {
   try {
     const embedding = await embed(query, env);
     const results   = await env.VECTORIZE.query(embedding, { topK: limit, returnMetadata: 'all' });
     if (!results.matches.length) return '';
     const ids  = results.matches.map(m => m.id);
     const rows = await env.DB.prepare(
-      `SELECT c.chunk_text, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ids.map(() => '?').join(',')})`
+      `SELECT c.chunk_text, p.id AS paper_id, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ids.map(() => '?').join(',')})`
     ).bind(...ids).all();
-    return rows.results.map(r => `[${r.title} — ${r.series}]\n${(r.chunk_text as string).slice(0, 800)}`).join('\n\n---\n\n');
+    // `· id X` matches find_document's header format exactly (router.ts) —
+    // one convention for "this observation names a real corpus paper,
+    // openable by id," so the chat UI's trace renderer only needs one
+    // pattern to recognize a corpus reference regardless of which tool
+    // surfaced it.
+    return rows.results.map(r => `[${r.title} — ${r.series} · id ${r.paper_id}]\n${(r.chunk_text as string).slice(0, 800)}`).join('\n\n---\n\n');
   } catch { return ''; }
 }
 
