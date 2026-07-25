@@ -54,7 +54,7 @@ const KNOWN_HOSPITALITY_TOOLS = new Set([
 const KNOWN_MEMBER_TOOLS = new Set([
   ...KNOWN_PUBLIC_TOOLS,
   'deep_research', 'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
-  'self_state', 'remember', 'notebook_write', 'self_schedule',
+  'self_state', 'memory_stats', 'remember', 'notebook_write', 'self_schedule',
   'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
 ]);

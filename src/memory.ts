@@ -324,3 +324,95 @@ async function logRecallAB(
     query.slice(0, 200), scored.length, JSON.stringify(baseTop), JSON.stringify(boostTop), divergence, setDivergence, GRAPH_CYCLE_BOOST,
   ).run();
 }
+
+// ── durable-memory introspection (real counts, never guessed) ─────────────
+// Elle was asked "how's your capacity?" and, with no tool that reads her own
+// store, confabulated a precise-sounding utilization % and chunk count. This
+// gives her the truth instead: live counts from D1 and the vector index. There
+// is no fixed capacity ceiling in the system, so this reports real magnitudes
+// and refuses to manufacture a percentage.
+
+export interface RawMemoryCounts {
+  total: number | null;                                   // elle_memory rows
+  byType: Array<{ memory_type: string; n: number }> | null;
+  bounds: { mn: string | null; mx: string | null } | null; // oldest/newest created_at
+  withVector: number | null;                              // rows indexed into the cold tier
+  papers: number | null;                                  // corpus_papers
+  chunks: number | null;                                  // corpus_chunks
+  vectorIndex: { count: number | null; dimensions: number | null } | null;
+}
+
+export interface MemoryStats {
+  durable_memory: {
+    total: number;
+    by_type: Record<string, number>;
+    vectorized: number | null;
+    oldest: string | null;
+    newest: string | null;
+  };
+  corpus: { papers: number | null; chunks: number | null };
+  vector_index: { count: number | null; dimensions: number | null };
+  note: string;
+}
+
+// Pure: raw query results → the stats object. Tolerates any facet being null
+// (a missing table or a failed query) without throwing, so a partial read still
+// returns real numbers for everything that succeeded.
+export function assembleMemoryStats(raw: RawMemoryCounts): MemoryStats {
+  const by_type: Record<string, number> = {};
+  for (const row of raw.byType ?? []) {
+    if (row && typeof row.memory_type === 'string' && typeof row.n === 'number') {
+      by_type[row.memory_type] = row.n;
+    }
+  }
+  return {
+    durable_memory: {
+      total: raw.total ?? 0,
+      by_type,
+      vectorized: raw.withVector,
+      oldest: raw.bounds?.mn ?? null,
+      newest: raw.bounds?.mx ?? null,
+    },
+    corpus: { papers: raw.papers, chunks: raw.chunks },
+    vector_index: raw.vectorIndex ?? { count: null, dimensions: null },
+    note:
+      'Live counts from D1 and the vector index. Durable memory is append-only ' +
+      'with no fixed capacity ceiling — report these real numbers, never a ' +
+      'utilization percentage or a total you did not read here.',
+  };
+}
+
+async function vectorIndexStats(
+  env: MemEnv,
+): Promise<{ count: number | null; dimensions: number | null } | null> {
+  const vz = env.VECTORIZE as unknown as { describe?: () => Promise<any> };
+  if (!vz || typeof vz.describe !== 'function') return null;
+  try {
+    const d = await vz.describe();
+    const count =
+      typeof d?.vectorsCount === 'number' ? d.vectorsCount
+      : typeof d?.vectorCount === 'number' ? d.vectorCount
+      : null;
+    const dimensions = typeof d?.dimensions === 'number' ? d.dimensions : null;
+    return { count, dimensions };
+  } catch {
+    return null;
+  }
+}
+
+// The real answer to "how's your durable memory?" Every read is independent and
+// best-effort (a missing table yields null for that facet, never a failed tool)
+// — the same posture as self_state.
+export async function memoryStats(env: MemEnv): Promise<MemoryStats> {
+  const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
+  const [total, byType, bounds, withVector, papers, chunks, vectorIndex] = await Promise.all([
+    grab(env.DB.prepare('SELECT COUNT(*) AS n FROM elle_memory').first<{ n: number }>().then(r => r?.n ?? null)),
+    grab(env.DB.prepare('SELECT memory_type, COUNT(*) AS n FROM elle_memory GROUP BY memory_type').all<{ memory_type: string; n: number }>().then(r => r.results ?? null)),
+    grab(env.DB.prepare('SELECT MIN(created_at) AS mn, MAX(created_at) AS mx FROM elle_memory').first<{ mn: string | null; mx: string | null }>()),
+    grab(env.DB.prepare('SELECT COUNT(*) AS n FROM elle_memory WHERE vectorize_id IS NOT NULL').first<{ n: number }>().then(r => r?.n ?? null)),
+    grab(env.DB.prepare('SELECT COUNT(*) AS n FROM corpus_papers').first<{ n: number }>().then(r => r?.n ?? null)),
+    grab(env.DB.prepare('SELECT COUNT(*) AS n FROM corpus_chunks').first<{ n: number }>().then(r => r?.n ?? null)),
+    grab(vectorIndexStats(env)),
+  ]);
+  return assembleMemoryStats({ total, byType, bounds, withVector, papers, chunks, vectorIndex });
+}
