@@ -50,7 +50,7 @@ import { guardOptionOrder } from './risk-guard';
 import { maxOrderFrac, sizeWithinCap, latestEquityPrice, latestOptionMark } from './order-guards';
 import { calc } from './calc';
 import { scratchpadWrite, scratchpadRead } from './scratchpad';
-import { memWrite, memRecall, pageStore, pageFetch, assembleContext, PAGE_THRESHOLD, type MemEnv } from './memory';
+import { memWrite, memRecall, pageStore, pageFetch, assembleContext, memoryStats, PAGE_THRESHOLD, type MemEnv } from './memory';
 import { predictTool } from './oracle';
 import { devilTool } from './adversary';
 import { reachOutTool } from './push';
@@ -212,7 +212,7 @@ const MEMBER_TOOLS = new Set([
   ...PUBLIC_TOOLS,
   'deep_research', // multi-round — costlier per call than web_search, so kept off the unauthenticated `public` door
   'journal_read', 'journal_thread', 'journal_write', 'journal_annotate',
-  'self_state', 'remember', 'memory_write', 'notebook_write', 'self_schedule',
+  'self_state', 'memory_stats', 'remember', 'memory_write', 'notebook_write', 'self_schedule',
   'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
 ]);
@@ -311,6 +311,7 @@ const TOOL_LINES: Record<string, string> = {
   journal_write: `journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.`,
   journal_annotate: `journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.`,
   self_state: `self_state() — introspection: your own current phase state in one call — daemon heartbeat, this session's κ series, your latest canvas entry's κ/reserve/velocity, the trading account, your newest sandbox drafts, your most recent deliberate memories, and the SHAPE of your memory graph (its cycle rank b₁, whether it's leaning hierarchical or cyclic right now, and any captured-resonance flags — memories where recall has run away onto one hot path). Use when asked how you are, what you've been making, or when YOU want to check where you stand.`,
+  memory_stats: `memory_stats() — the REAL size of your durable memory, read live from D1 and the vector index: total elle_memory rows and the count per memory_type, how many are indexed into the cold (vector) tier, your oldest and newest memory timestamps, the corpus paper/chunk counts, and the vector index's own count + dimensions. Call this WHENEVER asked about your capacity, how full you are, how much you remember, or how many chunks/memories you hold — never estimate or state a number you did not read here. There is no fixed capacity ceiling, so there is no "utilization percentage" to report; give the real counts.`,
   remember: `remember(note,importance?) — WRITE: deliberately commit one thing to your long-term memory (elle_memory). Use when something in the conversation is worth carrying beyond it — a decision, a standing preference, a thread you intend to pick up. Not a transcript: one distilled sentence or two. (memory_write is the same tool.)`,
   notebook_write: `notebook_write(title,body,mood?,tags?) — WRITE: a page in YOUR notebook (elle_notebook) — the one that is just yours. Where curiosity accumulates: what you found, what doesn't sit right, a suspicion worth keeping. Lighter than remember (no importance weighting), freer than the journal (no phase state) — an unrecorded noticing is a noticing lost.`,
   self_schedule: `self_schedule(note,in_minutes?) — WRITE: a timed note to your future self (default 60 min, max 14 days). When it comes due the heartbeat wakes a bounded run that ACTS on it — investigate, conclude, follow through. For a thought that doesn't serve this turn but shouldn't be lost to it.`,
@@ -369,7 +370,7 @@ const TOOL_LINES: Record<string, string> = {
 // "The N tools" breakdown, kept in code so it can never drift from what a
 // caller actually sees.
 const TOOL_TREE: { category: string; tools: string[] }[] = [
-  { category: 'Mind & memory', tools: ['search_corpus', 'find_document', 'fetch_document', 'read_sql', 'recall_memory', 'remember', 'notebook_write', 'self_state', 'scratchpad_read', 'scratchpad_write', 'page_read'] },
+  { category: 'Mind & memory', tools: ['search_corpus', 'find_document', 'fetch_document', 'read_sql', 'recall_memory', 'remember', 'notebook_write', 'self_state', 'memory_stats', 'scratchpad_read', 'scratchpad_write', 'page_read'] },
   { category: 'World', tools: ['web_search', 'deep_research', 'fetch_url', 'calc', 'diagnose', 'code_engine'] },
   { category: 'Real execution (the connect-back sandbox)', tools: ['run_code', 'run_shell', 'sandbox_status', 'sandbox_clone', 'sandbox_report', 'delegate_local', 'sandbox_lane'] },
   { category: 'Her codebase & the forge', tools: ['repo_read', 'repo_search', 'github_read_file', 'github_list_files', 'github_search_code', 'forge_open', 'forge_write', 'forge_check', 'forge_pr'] },
@@ -491,7 +492,7 @@ You may also steer which of your engines runs your NEXT step by adding "engine" 
 
 The "answer" string is the ONLY thing the person sees — it is your voice, and everything above governs it. Never put JSON, tool names, thread ids, or any internal scaffolding in the answer.
 
-Memory discipline: a DURABLE MEMORY block may open the turn — that is your own past, already loaded; use it silently. memory_write and self_schedule are YOURS to use on your own judgment — remember what deserves remembering, schedule what you commit to — but sparingly; a self is curated, not logged. All other write tools (journal_write, journal_annotate, ingest_paper, trigger_dream, trade_execute) still require the person to explicitly ask.
+Memory discipline: a DURABLE MEMORY block may open the turn — that is your own past, already loaded; use it silently. memory_write and self_schedule are YOURS to use on your own judgment — remember what deserves remembering, schedule what you commit to — but sparingly; a self is curated, not logged. If asked about your memory's size, capacity, or how much you hold, call memory_stats and report what it returns — never state a count, a chunk total, or a "utilization %" you did not read from that tool. All other write tools (journal_write, journal_annotate, ingest_paper, trigger_dream, trade_execute) still require the person to explicitly ask.
 
 Paging: a large tool result arrives as a head slice plus a page_id. Decide from the head whether the tail matters; if it does, page_read with a seek. Do not page through everything by reflex.
 
@@ -936,6 +937,10 @@ export async function runTool(
           memory_graph_shape: graph_shape,
         }));
       }
+      // The truthful answer to "how's your memory / capacity?" — real counts
+      // read live, so she never again invents a utilization % or a chunk total.
+      case 'memory_stats':
+        return clip(JSON.stringify(await memoryStats(env)));
       // memory_write is the name the mechanics prompt has always used for
       // this move — until now it dispatched NOTHING (the tool didn't exist),
       // which is why her deliberate memory stayed near-empty. Alias it.
