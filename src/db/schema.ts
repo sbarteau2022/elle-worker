@@ -504,6 +504,13 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     id TEXT PRIMARY KEY, actor_key TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL,
     tactic_ids TEXT DEFAULT '', severity_weight INTEGER DEFAULT 1, posture TEXT DEFAULT 'normal',
     detail TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`,
+    // router.ts's `advisor` tool (together-cookbook port plan §2b) — every
+    // frontier-model consult logged so the budget (MAX_ADVISOR_CALLS per run)
+    // and the advice itself stay auditable via provenance, same as any other
+    // tool call, plus whether it actually helped is measurable later.
+    `CREATE TABLE IF NOT EXISTS advisor_calls (
+    id TEXT PRIMARY KEY, run_id TEXT, session_id TEXT, transcript_chars INTEGER,
+    advice TEXT, ok INTEGER DEFAULT 1, error TEXT, created_at INTEGER)`,
   ];
   await db.batch(creates.map((s) => db.prepare(s)));
 
@@ -596,6 +603,8 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // security-network.ts
     `CREATE INDEX IF NOT EXISTS idx_security_events_time ON elle_security_events(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_security_events_actor ON elle_security_events(actor_key)`,
+    // router.ts's advisor tool — correlate consults back to the run they happened in.
+    `CREATE INDEX IF NOT EXISTS idx_advisor_calls_run ON advisor_calls(run_id)`,
     // falcon.ts — the Material Ground. A run cannot fire without grounding, so
     // every persisted analysis carries the cited evidence it was built on:
     // material_ground_json (findings + sources + corpus look-back), grounded=1

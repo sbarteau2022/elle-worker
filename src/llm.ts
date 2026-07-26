@@ -84,6 +84,14 @@ export interface LLMEnv {
   ANTHROPIC_API_KEY?:  string;
   LLM_BASE_URL?:       string;
   LLM_API_KEY?:        string;
+  // Frontier advisor (router.ts's `advisor` tool — together-cookbook port
+  // plan §2b). Not part of routeLLM's task chain below; called directly and
+  // only by that one tool, deliberately, since it's a paid escalation, not a
+  // free-tier lane. Model id is env-configurable like every other tier here
+  // (LLM_MODEL_PRIMARY etc.) rather than hardcoded, since this codebase has
+  // no live way to verify the exact current API model string — confirm it
+  // against the Anthropic account/docs before relying on this in production.
+  LLM_MODEL_ADVISOR?:  string;
 }
 
 export interface LLMMessage {
@@ -127,6 +135,11 @@ const WORKERS_AI_SMALL   = '@cf/meta/llama-3.1-8b-instruct';
 const DEFAULT_GROQ       = 'llama-3.3-70b-versatile';
 const DEFAULT_GITHUB     = 'gpt-4o-mini';
 const GITHUB_MODELS_URL  = 'https://models.inference.ai.azure.com/chat/completions';
+// The frontier advisor's default model id — set from this Worker's OWN model
+// identity, not guessed from stale training data, but still unverified
+// against the live Anthropic API by this codebase. Confirm before relying on
+// it; override via LLM_MODEL_ADVISOR (Worker secret) if it's wrong.
+const DEFAULT_ADVISOR    = 'claude-opus-5';
 
 // Known-dead / legacy model ids that a stale Worker secret may still carry.
 // They are remapped to the live id at call time so a bad secret can never take
@@ -394,6 +407,58 @@ export async function callGrok(
     model,
     provider: 'grok',
     ...usageOf(data),
+  };
+}
+
+// ── Anthropic (frontier advisor) ───────────────────────────────
+// Together-cookbook port plan §2b: "Frontier advisor... claude-opus via
+// Anthropic API. Same. Keep as-is." Deliberately NOT wired into routeLLM's
+// task chain below — this is a paid, occasional escalation (router.ts's
+// `advisor` tool, budget-capped per run), never a routine free-tier lane.
+export async function callAnthropic(
+  system: string,
+  messages: LLMMessage[],
+  maxTokens: number,
+  env: LLMEnv,
+  temperature = 0.7
+): Promise<LLMResponse> {
+  const key = env.ANTHROPIC_API_KEY || '';
+  if (!key) throw new Error('ANTHROPIC_API_KEY not set');
+  const model = env.LLM_MODEL_ADVISOR || DEFAULT_ADVISOR;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`);
+
+  const data = await res.json() as {
+    content?: Array<{ type: string; text?: string }>;
+    error?: { message: string };
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  if (data.error) throw new Error(`Anthropic error: ${data.error.message}`);
+
+  const content = (data.content || []).filter(p => p.type === 'text').map(p => toText(p.text)).join('');
+  const gnum = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return {
+    content,
+    model,
+    provider: 'anthropic',
+    tokens_in: gnum(data.usage?.input_tokens),
+    tokens_out: gnum(data.usage?.output_tokens),
   };
 }
 

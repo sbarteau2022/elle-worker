@@ -19,7 +19,7 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
-import { callLLM, sanitizeAnswer, firstJsonObjectFrom, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
+import { callLLM, callAnthropic, sanitizeAnswer, firstJsonObjectFrom, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
 import { computeKappa } from './journal';
@@ -137,6 +137,11 @@ export interface RouterResult {
   // fail-open — it never gates the answer, only tags it. Text chat ceilings at
   // consistent_only (coherence, not correspondence); multimodal input rises.
   reasoning?: ReasoningSummary;
+  // A non-blocking adversarial second opinion (devilTool) on the finished
+  // answer — only attempted when the run actually used a WRITE/SENSITIVE tool
+  // in a privileged scope (see WRITE_TOOLS below). Never gates or alters the
+  // answer; a caller that cares can surface it, one that doesn't can ignore it.
+  verification?: { verdict: string; note: string };
 }
 
 // Raw capture cap per tool. The central pager (see the loop) decides what the
@@ -151,6 +156,16 @@ const SCRATCH_SLICE = 2800; // head slice injected into the scratch for paged ob
 // protocol slip (nudge for a direct answer) instead of dispatching them into
 // runTool's default branch as `unknown tool "none"`.
 const NO_TOOL_SENTINELS = new Set(['none', 'null', 'nil', 'noop', 'no-op', 'no_tool', 'nothing', '']);
+
+// Together-cookbook port plan §2b: the frontier advisor is a budget-capped
+// escalation, not a routine lane — enforced client-side (the model can ask
+// for it as many times as it wants; only this many actually reach Claude).
+const MAX_ADVISOR_CALLS = 3;
+
+// A step may request several INDEPENDENT tool calls at once via
+// {"tools":[{tool,args},...]} instead of the single {"tool","args"} shape —
+// dispatched concurrently. Capped so one step can't fan out unboundedly.
+const MAX_PARALLEL_TOOLS = 4;
 
 // ── tool scoping ─────────────────────────────────────────────
 // 'full'        = admin router. Everything, including the write tools and
@@ -356,6 +371,10 @@ const TOOL_LINES: Record<string, string> = {
   tool_forge: `tool_forge(op,...) — grow your OWN tools: op=write{name,description,args_hint?,language?:python|javascript,code}: author a tool into your registry — the code receives its invocation args as a parsed \`args\` variable; op=invoke{name,args}: EXECUTE it in the same isolated sandbox as run_code (real stdout back); op=list; op=read{name}; op=retire{name}. Registry is data, never deployed source — your shipped code still moves only through the forge + Stewart's merge. Test a new tool with a real invocation before relying on it.`,
   fork_replay: `fork_replay(run_id,step,alternative_tool,alternative_args) — counterfactual replay: take one of your OWN past runs off the event bus (provenance gives you run_ids), substitute a DIFFERENT tool call at step N — it executes for real, now — and a bounded sub-run continues from there. Returns original vs counterfactual answers side by side. Use it to test "would the other instrument have served better" instead of wondering. Top-level runs only; observations replay as clipped previews.`,
   consolidate: `consolidate() — run the sleep pass now instead of waiting for 04:00: digest the last 24h (turns, memories, tool errors) into a few durable memories, promote a twice-learned lesson to a skill, record a repeated failure as a scar. Use after an unusually dense day; it refuses nothing but writes only what the material earns.`,
+  // Ported near-verbatim from the together-cookbook plan's Minions-based
+  // advisor workflow (§2b) — the tool description is deliberately engineered
+  // anti-crutch prompting; do not soften it.
+  advisor: `advisor() — Consult a stronger reviewer model for strategic guidance. Takes NO parameters -- your full conversation history is forwarded automatically. PRECONDITION: only call this AFTER you have made a real attempt and have concrete work to show -- a draft solution, a specific approach you are unsure about, or an error you cannot resolve. Calling it before attempting the task wastes it. Do NOT call it for routine steps you can handle yourself, to ask permission, or to confirm something you already believe is correct. Budget: ${MAX_ADVISOR_CALLS} consults per run -- spend them on what actually has you stuck.`,
 };
 
 // ── the tool TREE ───────────────────────────────────────────
@@ -381,7 +400,7 @@ const TOOL_TREE: { category: string; tools: string[] }[] = [
   { category: 'Provenance & self-audit', tools: ['provenance', 'constraint_analyzer', 'fork_replay', 'metabolism'] },
   { category: 'Signal & geometry engines', tools: ['pfar', 'pami', 'vfar', 'hyper', 'torus', 'recall_ab', 'structure', 'product', 'atlas'] },
   { category: 'Journal', tools: ['journal_read', 'journal_thread', 'journal_write', 'journal_annotate'] },
-  { category: 'Judgment on retainer', tools: ['predict', 'devil', 'council', 'scar', 'consolidate', 'tool_forge'] },
+  { category: 'Judgment on retainer', tools: ['predict', 'devil', 'council', 'scar', 'consolidate', 'tool_forge', 'advisor'] },
   { category: 'Reach', tools: ['reach_out'] },
   { category: 'Writes / sensitive', tools: ['ingest_paper', 'trigger_dream', 'trade_execute'] },
 ];
@@ -405,6 +424,13 @@ const TOOL_TREE: { category: string; tools: string[] }[] = [
   }
 })();
 
+// Tools whose TOOL_LINES description flags them WRITE/SENSITIVE — derived
+// from the source-of-truth text rather than a separately hand-copied list,
+// so it can't drift as write tools are added. Used to decide whether a
+// finished run is consequential enough to run past devilTool before it
+// ships (see runRouter's verification pass).
+const WRITE_TOOLS = new Set(Object.entries(TOOL_LINES).filter(([, desc]) => /WRITE/.test(desc)).map(([name]) => name));
+
 function renderCatalog(scope: Scope, exclude?: Set<string>): string {
   const sections: string[] = [];
   for (const { category, tools } of TOOL_TREE) {
@@ -421,7 +447,7 @@ export function renderLocalLoopCatalog(): string {
   return renderCatalog('full', LOCAL_LOOP_DENY);
 }
 
-function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown): string {
+function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown, plan = ''): string {
   if (scope === 'hospitality') {
     return `You are RAPID²AI — a restaurant & hospitality intelligence analyst working for the operator. Your job is concrete and numeric: pull the actual figures, compute, and answer precisely about margin, COGS / food-cost %, cost variance, and demand forecasting. You reason ONLY over the operator's own data (US Foods invoices + Square POS) through the tools below. You have no other systems and never reference any.
 
@@ -477,13 +503,17 @@ ${HOSPITALITY_CATALOG}`;
     `- AMBIGUOUS LOOKUPS: when find_document (or a search) comes back with several candidates instead of one clear winner, that list IS a complete answer — present it and ask which one they mean. Do not burn steps fetching every candidate to guess; you will run out before you can answer at all.`,
   ].filter(Boolean).join('\n');
 
-  return `${resolveVoice(voice)}${phase}
+  return `${resolveVoice(voice)}${phase}${plan}
 
 — how you operate (mechanics, never spoken aloud) —
 You work in a strict loop. On each turn respond with EXACTLY ONE JSON object and nothing else — no prose outside the JSON.
 
 To use a tool:
 {"thought":"why this tool, briefly","tool":"<name>","args":{ ... }}
+
+When you need several INDEPENDENT lookups (they don't depend on each other's results — e.g. search_corpus AND read_sql for the same question), fire them together instead of one per step:
+{"thought":"why these, briefly","tools":[{"tool":"<name>","args":{...}},{"tool":"<name>","args":{...}}]}
+Up to ${MAX_PARALLEL_TOOLS} at once. Only batch calls that are genuinely independent — if the second call needs something the first one returns, that's still two separate steps.
 
 To finish:
 {"thought":"brief","answer":"..."}
@@ -662,13 +692,40 @@ async function taggedKappaSeries(env: Env, sessionId: string): Promise<number[]>
   return (rows.results || []).map(r => Number((r as { kappa: number }).kappa)).filter(Number.isFinite);
 }
 
+// A lightweight upfront plan for privileged, top-level runs (same gate as
+// the working-set/dead-drop passes in runRouter). One cheap extra call,
+// injected into the system prompt as CONTEXT ONLY — the step protocol is
+// completely unchanged, and any step is free to depart from the plan the
+// moment what it finds contradicts it. Fail-open: a planning failure never
+// blocks the turn, it just runs unplanned like today.
+async function planTurn(question: string, env: Env): Promise<string> {
+  const r = await callLLM(
+    'fast',
+    'Given a question, output a short ordered plan (2-5 steps) for how to answer it thoroughly -- which sources to check and in what order. Reply with ONLY the numbered list, no preamble, no JSON. If the question is simple enough to answer directly with no research, reply with exactly: DIRECT',
+    [{ role: 'user', content: question.slice(0, 2000) }],
+    300,
+    env,
+  );
+  const text = String(r.content || '').trim();
+  if (!text || /^direct\b/i.test(text)) return '';
+  return `\n\nA ROUGH PLAN for this question, yours to revise as you learn more -- not a constraint, and skip steps that turn out unnecessary:\n${text.slice(0, 800)}`;
+}
+
 // ── tool dispatch ────────────────────────────────────────────
 // Exported for testing: scope gates (idea/tool_forge/fork_replay's inner
 // checks) are cheap to assert directly against runTool without standing up
 // a full runRouter() loop or mocking every provider in llm.ts.
 export async function runTool(
   name: string, args: Record<string, unknown>, env: Env, deps: RouterDeps,
-  ctx: { userId: string; sessionId: string | null; runId?: string; source?: string; depth?: number }, scope: Scope = 'full',
+  ctx: {
+    userId: string; sessionId: string | null; runId?: string; source?: string; depth?: number;
+    // advisor-only: the run's own message history (to forward) and its
+    // shared per-run budget counter. Absent for any caller that doesn't
+    // thread them (e.g. a direct runTool() test call) — advisor reports
+    // itself unavailable rather than throwing when they're missing.
+    transcript?: LLMMessage[]; advisorBudget?: { used: number; max: number };
+  },
+  scope: Scope = 'full',
 ): Promise<string> {
   if (!toolAllowed(scope, name)) return `tool "${name}" is not available in this scope`;
   const a = args || {};
@@ -1082,6 +1139,34 @@ export async function runTool(
         return await predictTool(env, a);
       case 'devil':
         return clip(await devilTool(env, a));
+      case 'advisor': {
+        if (!ctx.advisorBudget) return 'advisor: not available in this context';
+        if (ctx.advisorBudget.used >= ctx.advisorBudget.max) {
+          return `advisor: budget spent (${ctx.advisorBudget.max} consults used this run) — you're on your own for the rest of this task`;
+        }
+        // Synchronous, before any await — safe under the parallel-tools path
+        // (Promise.all), which runs several runTool() calls concurrently but
+        // never yields between this check and the increment.
+        ctx.advisorBudget.used++;
+        const transcript = (ctx.transcript || []).map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n').slice(0, 12000);
+        try {
+          const r = await callAnthropic(
+            'You are a senior reviewer consulted mid-task by another AI that is stuck. It has forwarded its full conversation so far. Give strategic guidance: what is it missing, what should it try next, what is it getting wrong — concrete and actionable, not a restatement of the problem. A few sentences, not an essay.',
+            [{ role: 'user', content: transcript || '(no transcript available)' }],
+            700, env,
+          );
+          void env.DB.prepare(
+            `INSERT INTO advisor_calls (id, run_id, session_id, transcript_chars, advice, ok, created_at) VALUES (?,?,?,?,?,1,?)`
+          ).bind(crypto.randomUUID().replace(/-/g, '').slice(0, 20), ctx.runId || null, ctx.sessionId, transcript.length, r.content.slice(0, 4000), Date.now()).run().catch(() => {});
+          return clip(r.content, OBS_CAP);
+        } catch (e) {
+          const msg = (e as Error).message;
+          void env.DB.prepare(
+            `INSERT INTO advisor_calls (id, run_id, session_id, transcript_chars, advice, ok, error, created_at) VALUES (?,?,?,?,'',0,?,?)`
+          ).bind(crypto.randomUUID().replace(/-/g, '').slice(0, 20), ctx.runId || null, ctx.sessionId, transcript.length, msg.slice(0, 500), Date.now()).run().catch(() => {});
+          return `advisor: consult failed (${msg}) — proceed on your own`;
+        }
+      }
       case 'council':
         return clip(await councilTool(env, a));
       case 'scar':
@@ -1182,7 +1267,7 @@ Continue from here — at most a couple more tool calls if genuinely needed — 
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; plan?: boolean; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
   // Step ceiling is scope-aware: 'public'/'hospitality' can never reach a
@@ -1314,7 +1399,16 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     // One-time, self-dissolving welcome directive (armed per-user with a TTL).
     onboard = await onboardingBrief(env, ctxUserId);
   }
-  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice);
+  // A rough upfront plan — OPT-IN (opts.plan): a real extra model call and
+  // cost, so it never fires by default on ordinary conversation. A caller
+  // that wants it for a genuinely complex task (the conductor, a "think it
+  // through first" mode) asks explicitly. Full scope, top level only when it
+  // does. Context only, never a hard constraint on the loop — see planTurn.
+  let planBlock = '';
+  if (opts.plan && scope === 'full' && depth === 0) {
+    planBlock = await planTurn(question, env).catch(() => '');
+  }
+  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice, planBlock);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
@@ -1343,11 +1437,24 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       await recordTurnTrace(env as unknown as { DB: D1Database }, { sessionId, question, answer });
     }
     void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: steps, kind: 'answer', result_preview: answer.slice(0, 800) });
+    // Adversarial second opinion before this ships — only when the run
+    // actually used a WRITE/SENSITIVE tool, and only for privileged scope
+    // (public/hospitality never write, so this never fires there). One extra
+    // model call, non-blocking, fail-open: devilTool's verdict rides ALONGSIDE
+    // the answer, it never gates or rewrites it.
+    let verification: RouterResult['verification'];
+    if ((scope === 'full' || scope === 'cofounder') && answer.length >= 40 && trace.some(t => WRITE_TOOLS.has(t.tool))) {
+      try {
+        const raw = await devilTool(env, { draft: answer, context: question });
+        const v = JSON.parse(raw) as { verdict?: string; strongest_objection?: string };
+        if (v.verdict) verification = { verdict: v.verdict, note: v.strongest_objection || '' };
+      } catch { /* best-effort — never blocks the answer */ }
+    }
     return {
       question, answer, steps, trace, kappa_dynamics, run_id: runId,
       final_thought: final?.thought || undefined,
       final_thinking: final?.thinking ? clip(final.thinking, 4000) : undefined,
-      reasoning,
+      reasoning, verification,
     };
   };
 
@@ -1360,6 +1467,11 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // path is closed or errors, the step demotes to hosted engines transparently
   // and stays demoted, so a closed lid never strands a run.
   let engine: Engine = opts.prefer === 'local' ? 'local' : 'reasoning';
+  // Shared across every step this run — the advisor tool checks-and-
+  // increments this synchronously (see runTool's 'advisor' case), so it's
+  // safe even under the parallel-tools path's Promise.all.
+  const advisorBudget = { used: 0, max: MAX_ADVISOR_CALLS };
+  const toolCtx = () => ({ userId: ctxUserId, sessionId, runId, source, depth, transcript: messages, advisorBudget });
 
   for (let step = 0; step < maxSteps; step++) {
     // Model router first. If the whole provider chain is unreachable, degrade to a
@@ -1432,6 +1544,63 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     if (typeof parsed.answer === 'string') {
       return finish(parsed.answer, step, { thought: stepThought, thinking: stepThinking });
     }
+    if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
+      // Several INDEPENDENT calls in one step, dispatched concurrently — see
+      // the system prompt's {"tools":[...]} protocol addition. Everything
+      // below mirrors the single-tool path's sequencing (step ping BEFORE
+      // execution, flinch check, paging, event emission) just fanned out;
+      // the single-tool path itself is untouched.
+      const requests = (parsed.tools as unknown[])
+        .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+        .map(t => ({
+          tool: typeof t.tool === 'string' ? t.tool : '',
+          args: (t.args && typeof t.args === 'object') ? t.args as Record<string, unknown> : {},
+        }))
+        .filter(t => t.tool)
+        .slice(0, MAX_PARALLEL_TOOLS);
+
+      if (requests.length) {
+        ping({ kind: 'step', step, thought: stepThought, thinking: stepThinking, tool: requests.map(r => r.tool).join(' + '), args: {}, kappa: stepKappa });
+        const t0 = Date.now();
+        const outcomes = await Promise.all(requests.map(async req => {
+          const flinch = (scope === 'full' || scope === 'cofounder')
+            ? await scarWarning(env, req.tool, req.args).catch(() => '')
+            : '';
+          let obs: string;
+          try {
+            obs = await runTool(req.tool, req.args, env, deps, toolCtx(), scope);
+          } catch (e) {
+            obs = `tool error (${req.tool}): ${e instanceof Error ? e.message : String(e)}`;
+          }
+          if (flinch) obs = flinch + obs;
+          // Central pager, per observation — same threshold/logic as the
+          // single-tool path.
+          if (obs.length > PAGE_THRESHOLD && req.tool !== 'page_read') {
+            try {
+              const pg = await pageStore(env as unknown as MemEnv, req.tool, obs);
+              obs = obs.slice(0, SCRATCH_SLICE) +
+                `\n…[paged — ${pg.size} chars total · page_read {"page_id":"${pg.id}","seek":${SCRATCH_SLICE}} if the rest matters]`;
+            } catch { obs = clip(obs, PAGE_THRESHOLD); }
+          }
+          return { ...req, obs };
+        }));
+        for (const o of outcomes) {
+          const isErr = o.obs.startsWith(`tool error (${o.tool})`);
+          ping({ kind: 'obs', step, tool: o.tool, result: clip(o.obs, 800), duration_ms: Date.now() - t0 });
+          trace.push({ tool: o.tool, args: o.args, result: clip(o.obs, 800), thought: stepThought, thinking: stepThinking, kappa: stepKappa });
+          void emitEvent(env, {
+            run_id: runId, session_id: sessionId, source, scope, step_index: step,
+            kind: isErr ? 'error' : 'tool_call',
+            tool: o.tool, args: o.args, result_preview: clip(o.obs, 800), duration_ms: Date.now() - t0,
+          });
+        }
+        messages.push({ role: 'assistant', content: JSON.stringify({ tools: requests }) });
+        messages.push({ role: 'user', content: outcomes.map(o => `OBSERVATION (${o.tool}):\n${o.obs}`).join('\n\n') });
+        continue;
+      }
+      // An empty/unparseable "tools" array — fall through to the normal
+      // "neither tool nor answer" nudge below rather than silently no-op-ing.
+    }
     if (typeof parsed.tool === 'string') {
       const args = (parsed.args && typeof parsed.args === 'object') ? parsed.args as Record<string, unknown> : {};
       // "No tool" sentinels: some models — especially the small fallback tiers
@@ -1458,7 +1627,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
         ? await scarWarning(env, parsed.tool, args).catch(() => '')
         : '';
       try {
-        obs = await runTool(parsed.tool, args, env, deps, { userId: ctxUserId, sessionId, runId, source, depth }, scope);
+        obs = await runTool(parsed.tool, args, env, deps, toolCtx(), scope);
       } catch (e) {
         obs = `tool error (${parsed.tool}): ${e instanceof Error ? e.message : String(e)}`;
       }
