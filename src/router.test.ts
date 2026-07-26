@@ -338,9 +338,33 @@ describe('runRouter — opt-in planning pass (opts.plan)', () => {
 describe('runTool — advisor (frontier escalation, budget-capped)', () => {
   const baseCtx = { userId: 'u1', sessionId: 's1' as string | null, runId: 'r1' };
 
+  it('refuses cheaply when no Anthropic key is configured — the tool is dormant until founders-program credits land', async () => {
+    const fn = stubFetchRoutes({});
+    const out = await runTool('advisor', {}, makeEnv(), makeDeps(), { userId: 'u1', sessionId: null, transcript: [], advisorBudget: { used: 0, max: 3 } }, 'full');
+    expect(out).toContain('not configured');
+    expect(fn).not.toHaveBeenCalled();
+  });
+
   it('reports unavailable when no transcript/budget context is passed', async () => {
-    const out = await runTool('advisor', {}, makeEnv(), makeDeps(), { userId: 'u1', sessionId: null }, 'full');
+    const env = makeEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' });
+    const out = await runTool('advisor', {}, env, makeDeps(), { userId: 'u1', sessionId: null }, 'full');
     expect(out).toBe('advisor: not available in this context');
+  });
+
+  it('is hidden from the prompt catalog when no key is configured, and appears once one is set', async () => {
+    // No key: the system prompt sent to the model must not advertise advisor.
+    const fnBare = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'hi' })] });
+    await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    const bareCall = fnBare.mock.calls[0] as unknown as [string, RequestInit];
+    const bareSystem = JSON.parse(bareCall[1].body as string).system_instruction.parts[0].text as string;
+    expect(bareSystem).not.toContain('advisor()');
+    vi.unstubAllGlobals();
+    // Key present: the same prompt now carries it.
+    const fnKeyed = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'hi' })] });
+    await runRouter('q', makeEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }), makeDeps(), { scope: 'full', sessionId: null });
+    const keyedCall = fnKeyed.mock.calls[0] as unknown as [string, RequestInit];
+    const keyedSystem = JSON.parse(keyedCall[1].body as string).system_instruction.parts[0].text as string;
+    expect(keyedSystem).toContain('advisor()');
   });
 
   it('forwards the transcript to Claude, returns the advice, and spends one budget slot', async () => {

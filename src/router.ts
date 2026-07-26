@@ -447,7 +447,7 @@ export function renderLocalLoopCatalog(): string {
   return renderCatalog('full', LOCAL_LOOP_DENY);
 }
 
-function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown, plan = ''): string {
+function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown, plan = '', exclude?: Set<string>): string {
   if (scope === 'hospitality') {
     return `You are RAPID²AI — a restaurant & hospitality intelligence analyst working for the operator. Your job is concrete and numeric: pull the actual figures, compute, and answer precisely about margin, COGS / food-cost %, cost variance, and demand forecasting. You reason ONLY over the operator's own data (US Foods invoices + Square POS) through the tools below. You have no other systems and never reference any.
 
@@ -532,7 +532,7 @@ Rules:
 ${rules}
 
 AVAILABLE TOOLS:
-${renderCatalog(scope)}${hasSql ? `
+${renderCatalog(scope, exclude)}${hasSql ? `
 
 D1 TABLES (for read_sql):
 ${TABLE_CATALOG}` : ''}`;
@@ -1140,6 +1140,10 @@ export async function runTool(
       case 'devil':
         return clip(await devilTool(env, a));
       case 'advisor': {
+        // Not configured = not offered (it's hidden from the catalog too, see
+        // runRouter's catalogExclude) — but a model can still name any tool,
+        // so refuse cheaply here instead of burning a doomed Anthropic call.
+        if (!env.ANTHROPIC_API_KEY) return 'advisor: not configured (no Anthropic key on this deployment) — proceed on your own';
         if (!ctx.advisorBudget) return 'advisor: not available in this context';
         if (ctx.advisorBudget.used >= ctx.advisorBudget.max) {
           return `advisor: budget spent (${ctx.advisorBudget.max} consults used this run) — you're on your own for the rest of this task`;
@@ -1408,7 +1412,13 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   if (opts.plan && scope === 'full' && depth === 0) {
     planBlock = await planTurn(question, env).catch(() => '');
   }
-  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice, planBlock);
+  // The advisor is a PAID escalation that only exists once an Anthropic key
+  // is configured (pending the founders-program credits). Until then it is
+  // hidden from the catalog entirely — advertising a tool that can only
+  // fail would just invite the model to waste a step discovering that. The
+  // moment the key lands as a Worker secret, the tool appears on its own.
+  const catalogExclude = env.ANTHROPIC_API_KEY ? undefined : new Set(['advisor']);
+  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice, planBlock, catalogExclude);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
