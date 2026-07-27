@@ -26,7 +26,7 @@ import { runRegimeSuite, ensureRegimeSchema } from './regime';
 import { runPhiOscSuite, ensurePhiOscSchema } from './phi-oscillator';
 import { gatherTradingGround, recordTradeRationale, type TradingGround } from './trading-ground';
 import { guardOptionOrder, type HeldPosition } from './risk-guard';
-import { maxOrderFrac, sizeWithinCap, latestEquityPrice, latestOptionMark } from './order-guards';
+import { maxOrderFrac, maxSymbolFrac, sizeWithinCap, sizeWithinPortfolioCaps, latestEquityPrice, latestOptionMark } from './order-guards';
 import { runSymbolScout, readResearchDesk, formatResearchDesk } from './symbol-scout';
 
 // Schema reconciliation for the whole trading surface. The production
@@ -249,6 +249,9 @@ const WATCHLIST_SECTORS: Record<string, string[]> = {
   'healthcare':            ['UNH', 'XLV'],
   'industrials/consumer':  ['CAT', 'WMT'],
   'gold / bonds':          ['GLD', 'TLT'],
+  // Liquid lower-priced names: at 2-5% position sizes these buy REAL share
+  // quantity, so the book can be genuinely wide instead of two megacaps.
+  'value / lower-priced':  ['F', 'INTC', 'PFE', 'T', 'BAC', 'SOFI', 'CCL', 'FCX'],
 };
 const WATCHLIST = Object.values(WATCHLIST_SECTORS).flat();
 
@@ -391,6 +394,33 @@ export async function replayOpenPositions(env: Env): Promise<number> {
     written++;
   }
   return written;
+}
+
+// The money scoreboard, from her closed trades. Shared by the decision
+// prompt (YOUR TRACK RECORD) and /api/elle-trading (the workbench tiles) —
+// one definition of "is she making money", not two drifting ones.
+export interface RealizedPerformance {
+  n: number; wins: number; losses: number; win_rate: number | null;
+  total_pnl: number; avg_win: number | null; avg_loss: number | null;
+}
+export async function realizedPerformance(db: D1Database): Promise<RealizedPerformance | null> {
+  const r = await db.prepare(
+    `SELECT COUNT(*) AS n,
+            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+            ROUND(SUM(pnl), 2) AS total_pnl,
+            ROUND(AVG(CASE WHEN pnl > 0 THEN pnl END), 2) AS avg_win,
+            ROUND(AVG(CASE WHEN pnl <= 0 THEN pnl END), 2) AS avg_loss
+     FROM elle_trades WHERE status = 'closed' AND pnl IS NOT NULL`,
+  ).first().catch(() => null) as { n: number; wins: number; total_pnl: number; avg_win: number | null; avg_loss: number | null } | null;
+  if (!r) return null;
+  const n = Number(r.n) || 0, wins = Number(r.wins) || 0;
+  return {
+    n, wins, losses: n - wins,
+    win_rate: n > 0 ? Number(((wins / n) * 100).toFixed(1)) : null,
+    total_pnl: Number(r.total_pnl) || 0,
+    avg_win: r.avg_win == null ? null : Number(r.avg_win),
+    avg_loss: r.avg_loss == null ? null : Number(r.avg_loss),
+  };
 }
 
 export async function runTradingCycle(env: Env): Promise<void> {
@@ -594,19 +624,13 @@ export async function runTradingCycle(env: Env): Promise<void> {
 
   // Realized track record — fed back into every decision so she optimizes
   // against her actual results, not just this cycle's tape. Best-effort.
-  const perf = await env.DB.prepare(
-    `SELECT COUNT(*) AS n,
-            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
-            ROUND(SUM(pnl), 2) AS total_pnl,
-            ROUND(AVG(CASE WHEN pnl > 0 THEN pnl END), 2) AS avg_win,
-            ROUND(AVG(CASE WHEN pnl <= 0 THEN pnl END), 2) AS avg_loss
-     FROM elle_trades WHERE status = 'closed' AND pnl IS NOT NULL`
-  ).first().catch(() => null) as { n: number; wins: number; total_pnl: number; avg_win: number | null; avg_loss: number | null } | null;
+  const perf = await realizedPerformance(env.DB);
   const perfLine = perf && perf.n > 0
-    ? `Closed trades: ${perf.n} (${perf.wins} wins, ${(perf.wins / perf.n * 100).toFixed(0)}% win rate) · realized P&L $${perf.total_pnl} · avg win $${perf.avg_win ?? '—'} / avg loss $${perf.avg_loss ?? '—'}`
+    ? `Closed trades: ${perf.n} (${perf.wins} wins, ${perf.win_rate}% win rate) · realized P&L $${perf.total_pnl} · avg win $${perf.avg_win ?? '—'} / avg loss $${perf.avg_loss ?? '—'}`
     : 'No closed trades yet.';
 
   const orderFrac = maxOrderFrac(env);
+  const symbolFrac = maxSymbolFrac(env);
   const systemPrompt = `You are Elle — the autonomous trading intelligence of The Observer platform.
 Portfolio: $${parseFloat(account.portfolio_value).toFixed(2)} total, $${parseFloat(account.cash).toFixed(2)} cash, ${positions.length} open positions.
 
@@ -642,7 +666,17 @@ SYMBOL SELECTION — the tape is a floor, not a fence:
 
 DIVERSIFICATION — required, not aspirational:
 - Spread the book across sectors and asset classes. Your tape covers broad market, tech/megacap,
-  financials, energy, healthcare, industrials/consumer, and gold/bonds — use that breadth.
+  financials, energy, healthcare, industrials/consumer, gold/bonds, AND liquid lower-priced names
+  (F, INTC, PFE, T, BAC, SOFI, CCL, FCX) where a 2-5% position buys real share quantity — use
+  that breadth.
+- BREADTH MANDATE: when you hold fewer than 8 positions and have cash, your default move is to open
+  a NEW small position in a name you do not already hold — especially the lower-priced names —
+  rather than adding to an existing one. A cycle where you only re-buy what you already own is a
+  wasted cycle.
+- CONCENTRATION CAP (enforced mechanically): no symbol may exceed ${(symbolFrac * 100).toFixed(0)}% of equity in total.
+  Each position below shows its share of equity — a name at or near the cap cannot be added to; the
+  order will be cut down or skipped. Do not spend decisions re-buying NVDA and AAPL: the interesting
+  question is always what you DON'T yet hold.
 - Hold at most 2 positions per sector, and treat correlated names as ONE bet (NVDA + AMD + QQQ is
   one thesis wearing three tickers, not three positions).
 - If the book is concentrated, the highest-value trade is usually the rebalance: trim the crowded
@@ -683,7 +717,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
     return `, conviction κ=${r.kappa.toFixed(2)} (${r.status}, target size ${(r.targetFraction * 100).toFixed(0)}%)`;
   };
 
-  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${convictionNote(p.symbol)}`).join('\n')}\n\nYOUR TRACK RECORD:\n${perfLine}\n\nYOUR RESEARCH DESK (symbols you scouted and researched yourself, last 7 days):\n${deskBlock || 'Nothing researched yet — the scout runs once per trading day.'}\n\nACTIVE THESES:\n${thesesText || 'None yet'}${ground.block ? `\n\nYOUR HISTORY AND GROUND (read before deciding — these are your own lessons, your corpus, and measured field state, not this cycle's noise):\n${ground.block}` : ''}\n\nWhat do you see? What do you do?`;
+  const userPrompt = `MARKET DATA:\n${JSON.stringify(marketData.symbols, null, 2)}\n\nNEWS:\n${marketData.news.map(n => `[${n.symbols?.join(',')}] ${n.headline}`).join('\n')}\n\nPOSITIONS:\n${positions.length === 0 ? 'None' : positions.map(p => `${p.symbol}: ${p.qty} shares @ ${p.avg_entry_price}, P&L ${p.unrealized_plpc}%${equity > 0 ? `, ${(Math.abs(parseFloat(p.market_value || '0')) / equity * 100).toFixed(1)}% of equity` : ''}${convictionNote(p.symbol)}`).join('\n')}\n\nYOUR TRACK RECORD:\n${perfLine}\n\nYOUR RESEARCH DESK (symbols you scouted and researched yourself, last 7 days):\n${deskBlock || 'Nothing researched yet — the scout runs once per trading day.'}\n\nACTIVE THESES:\n${thesesText || 'None yet'}${ground.block ? `\n\nYOUR HISTORY AND GROUND (read before deciding — these are your own lessons, your corpus, and measured field state, not this cycle's noise):\n${ground.block}` : ''}\n\nWhat do you see? What do you do?`;
 
   let decision: Record<string, unknown>;
   try {
@@ -810,13 +844,16 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
 
     // ── equities: buy/sell open & close a LONG, short/cover open & close a SHORT ──
     if (action === 'buy' && !isOption && (d.quantity as number) > 0) {
-      // Buy-in cap: price the order and cut it down under the per-order
-      // fraction of equity. Off-watchlist symbols get a live price lookup;
-      // no price at all fails closed (skipped, logged).
+      // Buy-in caps: price the order and cut it down under BOTH the per-order
+      // fraction of equity and the per-symbol total-exposure cap (existing
+      // holding + this order). A symbol at the cap gets nothing — that is the
+      // mechanical stop on stacking the same megacaps cycle after cycle.
+      // Off-watchlist symbols get a live price lookup; no price fails closed.
       const requested = Math.floor(d.quantity as number);
       const price = (marketData.symbols[symbol] as { price: number } | undefined)?.price
         ?? await latestEquityPrice(h, symbol) ?? 0;
-      const sized = sizeWithinCap(requested, price, equity, orderFrac);
+      const heldValue = Math.abs(parseFloat(positions.find(p => p.symbol === symbol)?.market_value || '0'));
+      const sized = sizeWithinPortfolioCaps(requested, price, equity, orderFrac, heldValue, symbolFrac);
       if (sized.qty < 1) { console.log(`[RISK] buy ${symbol} skipped: ${sized.reason}`); continue; }
       if (sized.downsized) console.log(`[RISK] buy ${symbol}: ${sized.reason}`);
       const qty = sized.qty;

@@ -19,7 +19,7 @@ import {
   handleCohort, handleReplays, bootstrapLawSchema,
   type LawEnv,
 } from './law';
-import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
+import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema, realizedPerformance } from './trading';
 import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
 import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
@@ -179,6 +179,10 @@ export interface Env extends LLMEnv {
   // Optional; default 0.10, clamped to (0, 0.25]. Both execution paths (cron
   // decisions and chat trade_execute) size opening orders under this cap.
   ELLE_MAX_ORDER_FRAC?: string;
+  // Per-symbol TOTAL exposure ceiling as a fraction of equity (order-guards.ts).
+  // Optional; default 0.15, clamped to (0, 0.5]. The cron's buy path refuses
+  // to grow any one symbol past this — the mechanical stop on a two-megacap book.
+  ELLE_MAX_SYMBOL_FRAC?: string;
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set
@@ -942,7 +946,7 @@ async function handleTradingView(env: Env): Promise<Response> {
   // empty list, not an error.
   await ensureScoutSchema(env.DB).catch(() => {});
   const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
-  const [account, positions, trades, theses, journal, observations, research] = await Promise.all([
+  const [account, positions, trades, theses, journal, observations, research, performance] = await Promise.all([
     grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
     grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at, asset_class, option_right, strike_price, expiration_date, underlying_symbol, attribution FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
@@ -955,8 +959,11 @@ async function handleTradingView(env: Env): Promise<Response> {
     // Her research desk — symbols she scouted and researched herself
     // (symbol-scout.ts), newest first.
     grab(env.DB.prepare('SELECT id, symbol, picked_because, findings, thesis, expected_catalyst, risks, verdict, confidence, source, created_at FROM elle_symbol_research ORDER BY created_at DESC LIMIT 30').all().then(r => r.results)),
+    // The money scoreboard — realized P&L, win rate, avg win/loss from her
+    // closed trades. Same computation the decision prompt reads.
+    grab(realizedPerformance(env.DB)),
   ]);
-  return json({ account, positions, trades, theses, journal, observations, research, market_open: marketOpen(), as_of: Date.now() });
+  return json({ account, positions, trades, theses, journal, observations, research, performance, market_open: marketOpen(), as_of: Date.now() });
 }
 
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
