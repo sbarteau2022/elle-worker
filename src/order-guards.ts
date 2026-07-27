@@ -16,13 +16,23 @@
 import { guardNotional } from './risk-guard';
 
 export const DEFAULT_MAX_ORDER_FRAC = 0.10;
+export const DEFAULT_MAX_SYMBOL_FRAC = 0.15;
 const ALPACA_DATA = 'https://data.alpaca.markets';
 
-export interface SizingEnv { ELLE_MAX_ORDER_FRAC?: string }
+export interface SizingEnv { ELLE_MAX_ORDER_FRAC?: string; ELLE_MAX_SYMBOL_FRAC?: string }
 
 export function maxOrderFrac(env: SizingEnv): number {
   const raw = Number(env.ELLE_MAX_ORDER_FRAC);
   return Number.isFinite(raw) && raw > 0 && raw <= 0.25 ? raw : DEFAULT_MAX_ORDER_FRAC;
+}
+
+// Per-symbol TOTAL exposure ceiling (fraction of equity). Where maxOrderFrac
+// bounds one order, this bounds the book: a symbol already at the cap gets no
+// further adds, however small the order — the answer to a desk that keeps
+// stacking the same two megacaps. Clamped to (0, 0.5].
+export function maxSymbolFrac(env: SizingEnv): number {
+  const raw = Number(env.ELLE_MAX_SYMBOL_FRAC);
+  return Number.isFinite(raw) && raw > 0 && raw <= 0.5 ? raw : DEFAULT_MAX_SYMBOL_FRAC;
 }
 
 export interface SizedOrder {
@@ -46,6 +56,39 @@ export function sizeWithinCap(qty: number, unitPrice: number, equity: number, ma
     return { qty: 0, downsized: true, reason: `even 1 unit @ $${unitPrice.toFixed(2)} exceeds the ${(maxFrac * 100).toFixed(0)}% per-order cap on $${equity.toFixed(0)} equity` };
   }
   return { qty: fit, downsized: true, reason: `downsized ${q} → ${fit} to fit the ${(maxFrac * 100).toFixed(0)}% per-order cap ($${(equity * maxFrac).toFixed(0)} on $${equity.toFixed(0)} equity)` };
+}
+
+// Fit a requested quantity under BOTH ceilings: the per-order cap and the
+// per-symbol total-exposure cap (existing holding + this order must stay
+// under symbolFrac of equity). heldValue is the symbol's current market
+// value, 0 when unheld. Same fail-closed semantics as sizeWithinCap.
+export function sizeWithinPortfolioCaps(
+  qty: number, unitPrice: number, equity: number,
+  orderFrac: number, heldValue: number, symbolFrac: number,
+): SizedOrder {
+  const q = Math.floor(Number(qty) || 0);
+  if (q <= 0) return { qty: 0, downsized: false, reason: 'qty must be a positive integer' };
+  if (!(Number(unitPrice) > 0) || !(Number(equity) > 0)) {
+    return { qty: 0, downsized: true, reason: 'price or equity unknown — refusing to size blind' };
+  }
+  const held = Math.max(0, Number(heldValue) || 0);
+  const room = symbolFrac * equity - held;
+  if (room < unitPrice) {
+    return {
+      qty: 0, downsized: true,
+      reason: `symbol already at $${held.toFixed(0)} of $${(symbolFrac * equity).toFixed(0)} exposure cap (${(symbolFrac * 100).toFixed(0)}% of equity) — no room to add`,
+    };
+  }
+  const sized = sizeWithinCap(q, unitPrice, equity, orderFrac);
+  if (sized.qty < 1) return sized;
+  const fitRoom = Math.floor(room / unitPrice);
+  if (fitRoom < sized.qty) {
+    return {
+      qty: fitRoom, downsized: true,
+      reason: `downsized ${q} → ${fitRoom} to keep total exposure under the ${(symbolFrac * 100).toFixed(0)}% per-symbol cap (already holding $${held.toFixed(0)})`,
+    };
+  }
+  return sized;
 }
 
 // Latest trade price for an equity, from the data API (same for paper/live).
