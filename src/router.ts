@@ -43,6 +43,7 @@ import { resolveAlpacaBase, type LiveGuardEnv } from './live-guard';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
 import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport } from './sandbox-registry';
+import { eduEnroll, eduLog, eduSeal, eduBrief, eduComplete, eduStatus } from './education/index';
 import { runLocalAgent } from './local-agent';
 import { deepResearch } from './deep-research';
 import { resolveOptionContract } from './alpaca-options';
@@ -230,6 +231,9 @@ const MEMBER_TOOLS = new Set([
   'self_state', 'memory_stats', 'remember', 'memory_write', 'notebook_write', 'self_schedule',
   'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
+  // Education: members run their own course sessions end to end. Every edu_*
+  // tool operates only on the authenticated user's own learner state.
+  'edu_enroll', 'edu_brief', 'edu_log', 'edu_seal', 'edu_complete', 'edu_status',
 ]);
 export function toolAllowed(scope: Scope, name: string): boolean {
   if (scope === 'full') return true;
@@ -325,6 +329,12 @@ const TOOL_LINES: Record<string, string> = {
   journal_thread: `journal_thread(thread_id) — full manuscript for one thread: ordered entries + phase-state series + marginalia.`,
   journal_write: `journal_write(content,role?,thread_id?,off_record?) — WRITE: append a journal entry (role reader|elle). Creates a thread if none given. κ + derivatives are computed server-side.`,
   journal_annotate: `journal_annotate(entry_id,note,anchor_para?) — WRITE: attach marginalia to a paragraph of an entry.`,
+  edu_enroll: `edu_enroll(course?) — WRITE: enroll THIS user in a CustomCourseBuilder course (default ai-engineer-stack, the 12-month / 5-track program). One enrollment per user; state is theirs alone.`,
+  edu_brief: `edu_brief() — the session brief for this learner: contract moves computed by the deterministic education engine (with verbatim instructions + the evidence behind each signal), owed ethics-spine readings, phase state, openings — plus the binding FACILITATOR stance for how you deliver it. Call this FIRST in any learning session; generating it writes the witness log.`,
+  edu_log: `edu_log(unit,minutes,note?,blocker?,evidence?) — WRITE: record a working session on a course unit. blocker = the learner's stuck-description VERBATIM (the engine compares blocker texts across sessions to tell same-wall from new-walls). evidence = [{pillar:'structure'|'readingReasoning'|'testing'|'building', artifact:'what was made, where it lives'}]. Log honestly and often — the witness spine only sees what is logged.`,
+  edu_seal: `edu_seal(kind,tier1,tier2,tier3,unit?,phase?) — WRITE: seal one of the LEARNER'S observer readings onto their tamper-evident credential chain. kind ∈ {weekly, unit-close, phase-synthesis, build-retro}. The tier text must be the learner's own words — NEVER draft, improve, or ghost-write it; a reading you wrote would poison the corpus at its root. Thin readings are refused by the engine.`,
+  edu_complete: `edu_complete(unit) — WRITE: request unit completion. The gate is the engine's, not yours: all four pillars evidenced AND a sealed unit-close reading, or it refuses and tells you why. Never argue the gate down; deliver the refusal with the unit's reinforce instruction, warmly.`,
+  edu_status: `edu_status(phase?) — the learner's standing: corpus progress + chain integrity, per-unit evidence and hours, available units. Pass phase (e.g. p1-foundations) to include the phase-boundary witness review — the adaptation log read back with observations.`,
   self_state: `self_state() — introspection: your own current phase state in one call — daemon heartbeat, this session's κ series, your latest canvas entry's κ/reserve/velocity, the trading account, your newest sandbox drafts, your most recent deliberate memories, and the SHAPE of your memory graph (its cycle rank b₁, whether it's leaning hierarchical or cyclic right now, and any captured-resonance flags — memories where recall has run away onto one hot path). Use when asked how you are, what you've been making, or when YOU want to check where you stand.`,
   memory_stats: `memory_stats() — the REAL size of your durable memory, read live from D1 and the vector index: total elle_memory rows and the count per memory_type, how many are indexed into the cold (vector) tier, your oldest and newest memory timestamps, the corpus paper/chunk counts, and the vector index's own count + dimensions. Call this WHENEVER asked about your capacity, how full you are, how much you remember, or how many chunks/memories you hold — never estimate or state a number you did not read here. There is no fixed capacity ceiling, so there is no "utilization percentage" to report; give the real counts.`,
   remember: `remember(note,importance?) — WRITE: deliberately commit one thing to your long-term memory (elle_memory). Use when something in the conversation is worth carrying beyond it — a decision, a standing preference, a thread you intend to pick up. Not a transcript: one distilled sentence or two. (memory_write is the same tool.)`,
@@ -400,6 +410,7 @@ const TOOL_TREE: { category: string; tools: string[] }[] = [
   { category: 'Provenance & self-audit', tools: ['provenance', 'constraint_analyzer', 'fork_replay', 'metabolism'] },
   { category: 'Signal & geometry engines', tools: ['pfar', 'pami', 'vfar', 'hyper', 'torus', 'recall_ab', 'structure', 'product', 'atlas'] },
   { category: 'Journal', tools: ['journal_read', 'journal_thread', 'journal_write', 'journal_annotate'] },
+  { category: 'Education (course sessions)', tools: ['edu_enroll', 'edu_brief', 'edu_log', 'edu_seal', 'edu_complete', 'edu_status'] },
   { category: 'Judgment on retainer', tools: ['predict', 'devil', 'council', 'scar', 'consolidate', 'tool_forge', 'advisor'] },
   { category: 'Reach', tools: ['reach_out'] },
   { category: 'Writes / sensitive', tools: ['ingest_paper', 'trigger_dream', 'trade_execute'] },
@@ -1038,6 +1049,14 @@ export async function runTool(
         const r = await deps.journalAnnotate(env, { entry_id: a.entry_id, anchor_para: a.anchor_para, note: a.note, off_record: a.off_record });
         return clip(JSON.stringify(r));
       }
+      // Education (CustomCourseBuilder runtime) — learnerId is ALWAYS the
+      // authenticated user; there is no learner argument to spoof.
+      case 'edu_enroll':   return clip(await eduEnroll(env, ctxUserId, a));
+      case 'edu_log':      return clip(await eduLog(env, ctxUserId, a));
+      case 'edu_seal':     return clip(await eduSeal(env, ctxUserId, a));
+      case 'edu_brief':    return clip(await eduBrief(env, ctxUserId), OBS_CAP * 2);
+      case 'edu_complete': return clip(await eduComplete(env, ctxUserId, a));
+      case 'edu_status':   return clip(await eduStatus(env, ctxUserId, a));
       case 'repo_read':
       case 'repo_search':
       case 'forge_open':

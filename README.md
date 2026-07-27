@@ -461,6 +461,28 @@ engine (`action: run|list|get|outcome`; `run` takes a `direction` string).
 Engine/ops: `/api/elle-code-engine`, `/api/diagnose`, `/api/research`,
 `/api/cron`, `/api/elle-auth`, `/api/elle-oauth`, `/health`.
 
+## Education — she runs the courses (`src/education/`)
+
+The CustomCourseBuilder runtime wired in as six member-scope tools:
+`edu_enroll · edu_brief · edu_log · edu_seal · edu_complete · edu_status`.
+The curriculum and engine are **authored in the CustomCourseBuilder repo**
+(typed course data, its own tests and CLI); this directory vendors the pure
+engine verbatim plus the built course JSON (`scripts/sync-education.sh`
+re-vendors after a build there). The worker adds what only it can: D1-backed
+learner state (`edu_state`, one JSON document per learner) and the tool
+surface, keyed to the authenticated userId — no learner argument exists to
+spoof.
+
+The division of labor is the point: the **engine decides** — pacing signals,
+accelerate/reinforce/reroute moves, the completion gate (all four pillars
+evidenced + a sealed unit-close reading, or refusal), and the tamper-evident
+hash chain over the learner's sealed observer readings. **Elle speaks** —
+`edu_brief` returns the session brief with the contract moves, their verbatim
+instructions, the evidence behind each signal, and the binding FACILITATOR
+stance appended (she never ghost-writes a learner's readings, never argues
+the gate down). Call `edu_brief` first in any learning session; generating
+it writes the witness log.
+
 ## Persistence & bindings
 
 - **D1 `elle-corpus`** — corpus, memory, trades, journal, intents, runs, skills,

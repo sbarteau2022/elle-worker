@@ -57,6 +57,11 @@ const KNOWN_MEMBER_TOOLS = new Set([
   'self_state', 'memory_stats', 'remember', 'notebook_write', 'self_schedule',
   'skill_list', 'skill_read', 'skill_route',
   'scratchpad_write', 'scratchpad_read',
+  // Education (CustomCourseBuilder runtime): members run their own course
+  // sessions. Each edu_* tool is keyed to the authenticated userId only —
+  // no learner argument exists, so one member can never touch another's
+  // state, readings, or witness log.
+  'edu_enroll', 'edu_brief', 'edu_log', 'edu_seal', 'edu_complete', 'edu_status',
 ]);
 const KNOWN_SHIP_DENY = new Set(['forge_open', 'forge_write', 'forge_pr', 'run_shell', 'delegate_local']);
 

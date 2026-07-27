@@ -1,0 +1,1171 @@
+{
+  "id": "ai-engineer-stack",
+  "title": "The Full-Stack AI Engineer / Founder Stack",
+  "version": "1.0.0",
+  "mission": "Twelve months from first script to production AI systems, run as five parallel tracks — coding, AI/ML, data engineering, business, law — with ethics read into every unit through the three-tier structure and pace held by Elle in real time. Anyone. Anywhere. Anytime.",
+  "durationMonths": 12,
+  "tracks": [
+    {
+      "id": "A",
+      "name": "Coding",
+      "focus": "Python → back end → full stack → cloud",
+      "color": "#185FA5"
+    },
+    {
+      "id": "B",
+      "name": "AI / ML",
+      "focus": "ML foundations → deep learning → LLMs → MLOps",
+      "color": "#0F6E56"
+    },
+    {
+      "id": "C",
+      "name": "Data Engineering",
+      "focus": "SQL and pipelines → analytics → streaming → production tooling",
+      "color": "#854F0B"
+    },
+    {
+      "id": "D",
+      "name": "Business / Founder",
+      "focus": "Foundations → entrepreneurship → AI strategy → capital",
+      "color": "#993556"
+    },
+    {
+      "id": "E",
+      "name": "Domain: Law / IP",
+      "focus": "Law and AI → regulation → IP strategy",
+      "color": "#3C3489"
+    }
+  ],
+  "phases": [
+    {
+      "id": "p1-foundations",
+      "title": "Foundations in Parallel",
+      "months": [
+        1,
+        3
+      ],
+      "theme": "All five tracks light up at once, deliberately: the parallel structure is the pedagogy. Code from week two, ML from week one, the founder lens installed before habits form.",
+      "unitIds": [
+        "a1-python-automation",
+        "b1-ai-for-everyone",
+        "b2-ml-specialization",
+        "c1-ibm-data-engineering",
+        "d1-wharton-foundations",
+        "e1-law-and-ai"
+      ]
+    },
+    {
+      "id": "p2-depth",
+      "title": "Depth and Data Systems",
+      "months": [
+        4,
+        6
+      ],
+      "theme": "The heaviest technical stretch: back-end engineering begins, deep learning begins, the data backbone completes. Business track turns explicitly founder-shaped.",
+      "unitIds": [
+        "a2-meta-backend",
+        "b3-deep-learning",
+        "c2-data-analytics",
+        "d2-wharton-entrepreneurship",
+        "d3-project-management"
+      ]
+    },
+    {
+      "id": "p3-llm-cloud",
+      "title": "LLM Specialization and Cloud Infrastructure",
+      "months": [
+        7,
+        9
+      ],
+      "theme": "The stack converges on Elle herself: LLMs, RAG, agents, streaming ingestion, full-stack surface, cloud deployment. Course hours drop as build hours rise.",
+      "unitIds": [
+        "a3-full-stack",
+        "a4-cloud-cert",
+        "b4-genai-llms",
+        "b5-applied-llm-labs",
+        "c3-advanced-pipelines",
+        "d4-ai-for-business"
+      ]
+    },
+    {
+      "id": "p4-production",
+      "title": "Production, Ops, and Founder Close",
+      "months": [
+        10,
+        12
+      ],
+      "theme": "Everything becomes production-grade and the founder arc closes: MLOps discipline, pipeline tooling, capital readiness, IP strategy. Mostly applied; the certificates are the residue of real work.",
+      "unitIds": [
+        "b6-mlops",
+        "c4-pipeline-tooling",
+        "d5-capital-close",
+        "e2-ip-close"
+      ]
+    }
+  ],
+  "units": [
+    {
+      "id": "a1-python-automation",
+      "track": "A",
+      "title": "Python, Git, and Automation",
+      "summary": "Scripting, version control, and task automation from zero. Usable output from week two: real scripts doing real work.",
+      "credentials": [
+        {
+          "name": "Google IT Automation with Python",
+          "provider": "Google / Coursera",
+          "kind": "professional-certificate",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [],
+      "buildThread": "First automation scripts run against the learner's own machine and repos — the same Git discipline Elle's codebase uses.",
+      "pillars": {
+        "structure": "Diagram what a program is before writing one: input, state, output. Map a repo's anatomy before the first commit.",
+        "readingReasoning": "Read other people's scripts before writing your own. Trace execution by hand; predict output before running.",
+        "testing": "Every script from week 3 onward ships with at least one assertion. Break your own code on purpose and watch how it fails.",
+        "building": "An automation that saves the learner real time weekly — file organizing, report generation, repo housekeeping — committed and versioned."
+      },
+      "tiers": {
+        "materialGround": "Python is the lingua franca of automation and ML because it is readable and its ecosystem is vast. Google built this certificate to widen its own hiring funnel; the credential is real but its primary beneficiary is the pipeline that issues it.",
+        "observerReading": "What 'learn to code' marketing suppresses: automation transfers work from the person automated to the person who automates. Every script that saves you an hour was somebody's hour of employment. The field celebrates efficiency and does not name whose time it consumed.",
+        "sitWithThis": "When you automate a task, who inherits the consequences of the edge cases you didn't handle — you, or the person who used to do the task carefully by hand?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 5,
+          "maxHoursPerWeek": 8,
+          "targetWeeks": 12
+        },
+        "watchFor": [
+          "pace-behind",
+          "struggle-blocked",
+          "shallow-completion",
+          "mastery-early"
+        ],
+        "moves": {
+          "accelerate": "Skip video lectures where the lab passes first try; move to the next module's lab directly and backfill only on failure.",
+          "reinforce": "Drop to one concept per session; pair every failing exercise with a worked example read aloud before reattempting.",
+          "reroute": "If blocked two sessions on the same concept, switch modality: freeCodeCamp's Python track for the same concept, then return."
+        }
+      }
+    },
+    {
+      "id": "b1-ai-for-everyone",
+      "track": "B",
+      "title": "AI Vocabulary and Landscape",
+      "summary": "Four weeks. The shared vocabulary baseline for everything after it: what AI can and cannot do, spoken plainly. Do this first.",
+      "credentials": [
+        {
+          "name": "AI for Everyone",
+          "provider": "DeepLearning.AI / Coursera",
+          "kind": "course",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [],
+      "buildThread": "The learner writes a one-page plain-language description of what Elle is and is not — the first artifact in the sealed corpus.",
+      "pillars": {
+        "structure": "Map the AI landscape as a system: data in, model, prediction out, feedback loop. Locate where Elle sits on that map.",
+        "readingReasoning": "Read one AI news story per week and identify the claim, the evidence, and the gap between them.",
+        "testing": "Test the vocabulary: explain supervised learning to someone outside tech and log where the explanation broke.",
+        "building": "A written map of the learner's own project through AI-landscape terms: what is the data, what is the model, what is the loop."
+      },
+      "tiers": {
+        "materialGround": "Andrew Ng's course is the most-taken AI primer in the world. It is honest about narrow AI versus general intelligence and was built partly to calm both hype and panic in non-technical audiences.",
+        "observerReading": "What an industry-authored primer cannot say: the framing of 'what AI can do for your business' pre-decides that AI's purpose is business. The question 'should this be automated at all' has no module. The course teaches the vocabulary of adoption, not the vocabulary of refusal.",
+        "sitWithThis": "Who taught you the words you now use to think about AI, and what do those words make it hard to think?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 2,
+          "targetHoursPerWeek": 3,
+          "maxHoursPerWeek": 4,
+          "targetWeeks": 4
+        },
+        "watchFor": [
+          "pace-ahead",
+          "shallow-completion",
+          "disengagement"
+        ],
+        "moves": {
+          "accelerate": "Compress to two weeks; go straight into the ML Specialization overlap early.",
+          "reinforce": "One video per session with a spoken summary back to Elle before the next plays.",
+          "reroute": "If the material feels too thin, jump directly to ML Specialization week 1 and treat this as reference material."
+        }
+      }
+    },
+    {
+      "id": "b2-ml-specialization",
+      "track": "B",
+      "title": "Machine Learning Foundations",
+      "summary": "Supervised and unsupervised learning, and reinforcement basics, built from first principles in code. Starts month 1, runs into month 4.",
+      "credentials": [
+        {
+          "name": "Machine Learning Specialization (Ng)",
+          "provider": "DeepLearning.AI & Stanford / Coursera",
+          "kind": "specialization",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "b1-ai-for-everyone"
+      ],
+      "buildThread": "First trained models run on data the learner generated in Track A automations — their own data, their own labels, their own consequences.",
+      "pillars": {
+        "structure": "Draw the training loop before implementing it: loss, gradient, update. Every algorithm gets a one-page structural diagram first.",
+        "readingReasoning": "Derive gradient descent on paper before running it. Read the scikit-learn source for one estimator and compare to the course version.",
+        "testing": "Hold-out sets from day one. Deliberately overfit a model, then detect it from metrics alone before looking at the curves.",
+        "building": "A classifier trained on self-collected data, with a written honest account of where it fails and for whom."
+      },
+      "tiers": {
+        "materialGround": "Supervised learning is function approximation from labeled examples. The labels come from people: annotation work is a global industry concentrated in low-wage economies, and label quality bounds model quality — this is documented, not contested.",
+        "observerReading": "The field's origin story — algorithms discovered by researchers — suppresses the material dependency: no labeled data, no field. The heterodox critique ('it's all just statistics') suppresses the genuine emergence the statistics produce. Both positions avoid the harder fact that the model inherits the worldview of whoever paid for the labels.",
+        "sitWithThis": "Your model's accuracy number is an average. Averages have a distribution. Who lives in the tail of yours?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 4,
+          "targetHoursPerWeek": 6,
+          "maxHoursPerWeek": 9,
+          "targetWeeks": 14
+        },
+        "watchFor": [
+          "struggle-productive",
+          "struggle-blocked",
+          "pace-behind",
+          "mastery-early"
+        ],
+        "moves": {
+          "accelerate": "Skip lecture repetition of derivations already reproduced on paper; add the optional labs and one Kaggle dataset per course.",
+          "reinforce": "Slow to the math: 3Blue1Brown linear algebra and calculus interleaved before each new algorithm. Extend the unit two weeks without penalty.",
+          "reroute": "If the math wall persists, invert the order: build with scikit-learn first for intuition, return to derivations after the model works."
+        }
+      }
+    },
+    {
+      "id": "c1-ibm-data-engineering",
+      "track": "C",
+      "title": "Data Engineering Backbone",
+      "summary": "Thirteen courses: SQL, NoSQL, ETL pipelines, Spark, Kafka, Hadoop, Airflow, cloud data. The backbone of Elle's ingestion architecture. Months 1–6, the heaviest single line.",
+      "credentials": [
+        {
+          "name": "IBM Data Engineering Professional Certificate",
+          "provider": "IBM / Coursera",
+          "kind": "professional-certificate",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [],
+      "buildThread": "Every pipeline pattern learned is prototyped against Elle's document-ingestion needs: sources in, structured passages out.",
+      "pillars": {
+        "structure": "Schema before data, always. Draw the pipeline as boxes and arrows before writing a line of ETL; name what each arrow can lose.",
+        "readingReasoning": "Read real schemas from open datasets and reverse-engineer the decisions. Reason about why normalization exists and when to break it.",
+        "testing": "Data tests are first-class: row counts, null audits, referential checks on every pipeline. A pipeline without tests is a rumor.",
+        "building": "A working ingestion pipeline — documents to structured records in Postgres — that Elle's corpus work can actually use."
+      },
+      "tiers": {
+        "materialGround": "Data engineering is where most real-world AI cost and failure lives; industry surveys consistently place data preparation at more than half of ML project effort. The tools taught here (Spark, Kafka, Airflow) run most of the world's data infrastructure.",
+        "observerReading": "The field talks about data as a resource — 'the new oil' — and cannot talk about data as testimony: every record was an event in someone's life. Pipelines are trust machines: each transformation is a decision about what survives, made silently, at scale. The engineer decides what the record forgets.",
+        "sitWithThis": "Every ETL job drops something. Somewhere downstream a decision is made on what remains. Name one thing your pipeline forgot today."
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 5,
+          "targetHoursPerWeek": 7,
+          "maxHoursPerWeek": 10,
+          "targetWeeks": 24
+        },
+        "watchFor": [
+          "pace-behind",
+          "struggle-blocked",
+          "disengagement",
+          "shallow-completion"
+        ],
+        "moves": {
+          "accelerate": "Compress the intro courses with tests-first: attempt each module's final lab cold; watch lectures only for what failed.",
+          "reinforce": "Anchor every abstraction in the Elle pipeline: no concept advances until it appears in the learner's own working code.",
+          "reroute": "Thirteen courses invites burnout: on disengagement, pause the certificate line and spend two weeks purely building the Elle pipeline with what is already known, then resume."
+        }
+      }
+    },
+    {
+      "id": "d1-wharton-foundations",
+      "track": "D",
+      "title": "Business Foundations",
+      "summary": "Accounting, finance, marketing, operations. The Wharton name signals serious. Taken first, not last — the founder lens installed early. Months 1–4.",
+      "credentials": [
+        {
+          "name": "Wharton Business Foundations Specialization",
+          "provider": "Wharton / Coursera",
+          "kind": "specialization",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [],
+      "buildThread": "The learner keeps real books for the project itself — actual costs of the stack, actual value of time invested — in the accounting formats being learned.",
+      "pillars": {
+        "structure": "A balance sheet is a schema. Map each of the four disciplines as a system with stocks, flows, and invariants.",
+        "readingReasoning": "Read one real 10-K filing and one nonprofit Form 990; find the story the numbers tell that the prose doesn't.",
+        "testing": "Model the project's own finances three ways and check the models against each other for contradictions.",
+        "building": "A living operating model for the learner's venture: costs, runway, and the honest unit economics of a free-forever product."
+      },
+      "tiers": {
+        "materialGround": "Double-entry accounting, discounted cash flow, and marketing funnels are technologies with centuries of documented behavior. Business school pedagogy demonstrably raises fluency in the language capital allocators speak.",
+        "observerReading": "What business education suppresses: the frameworks present profit maximization as neutral technique, when it is a value system wearing the costume of arithmetic. What anti-business critique suppresses: operations, accounting, and finance are also how food banks, clinics, and foundations stay alive. The skill is separable from the ideology; the course will not teach you to separate them.",
+        "sitWithThis": "Every metric you adopt starts making decisions for you. Which metric are you about to install, and what does it quietly optimize against?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 4,
+          "maxHoursPerWeek": 6,
+          "targetWeeks": 16
+        },
+        "watchFor": [
+          "shallow-completion",
+          "pace-ahead",
+          "disengagement"
+        ],
+        "moves": {
+          "accelerate": "Take courses in parallel rather than sequence; the four disciplines cross-illuminate.",
+          "reinforce": "Tie every concept to the learner's own venture numbers; abstract cases get replaced with the project's real ledger.",
+          "reroute": "If the MBA register grates, switch the order to operations first — it is the most concrete — and return to finance last."
+        }
+      }
+    },
+    {
+      "id": "e1-law-and-ai",
+      "track": "E",
+      "title": "Law, Regulation, and AI",
+      "summary": "Audit-free law electives: AI regulation, IP and innovation, legal tech. Runs light, 2–3 hours a week, month 2 onward. The domain lens for elle.law.",
+      "credentials": [
+        {
+          "name": "Law and AI electives (Duke / Michigan)",
+          "provider": "Duke & University of Michigan / Coursera",
+          "kind": "audit",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        }
+      ],
+      "prerequisites": [],
+      "buildThread": "Each week's legal concept is tested against Elle's actual design: does the ingestion pipeline, the corpus, the credential model survive this doctrine?",
+      "pillars": {
+        "structure": "Law as architecture: map a statute the way you map a codebase — definitions, scope, exceptions, enforcement path.",
+        "readingReasoning": "Read primary sources: one court opinion per month, in full, including the dissent. The dissent is where the suppressed position speaks.",
+        "testing": "Run hypotheticals against the rules learned; predict outcomes before reading holdings and score the predictions.",
+        "building": "A running compliance-and-risk memo for the Elle project, revised as each new doctrine lands."
+      },
+      "tiers": {
+        "materialGround": "AI regulation is real and moving: the EU AI Act is in force, US federal guidance shifts by administration, and copyright suits over training data are actively reshaping what corpora may contain. These are documented, load-bearing facts for any AI builder.",
+        "observerReading": "Legal education presents law as a system of reasons. What it suppresses is the palimpsest: doctrine is sediment from specific struggles, and 'settled law' means one side stopped being able to afford appeals. Tech's counter-story — law as obstacle to innovation — suppresses that regulation is often the only channel through which the people affected by a system get any say in it at all.",
+        "sitWithThis": "The people your product affects most will likely never read its terms of service. What, other than law, gives them standing in your decisions?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 2,
+          "targetHoursPerWeek": 2,
+          "maxHoursPerWeek": 3,
+          "targetWeeks": 44
+        },
+        "watchFor": [
+          "disengagement",
+          "pace-ahead"
+        ],
+        "moves": {
+          "accelerate": "Add one extra opinion per month from the current AI-copyright docket; keep the weekly hours flat.",
+          "reinforce": "Swap lecture time for a single well-chosen case brief; depth over coverage.",
+          "reroute": "This track is deliberately light — if it competes with Tracks A–C, pause it entirely for a month; it resumes without loss."
+        }
+      }
+    },
+    {
+      "id": "a2-meta-backend",
+      "track": "A",
+      "title": "Back-End Engineering",
+      "summary": "Django, REST APIs, databases, auth, deployment. The point where the learner can build real API endpoints for Elle. Months 4–7.",
+      "credentials": [
+        {
+          "name": "Meta Back-End Developer Professional Certificate",
+          "provider": "Meta / Coursera",
+          "kind": "professional-certificate",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "a1-python-automation"
+      ],
+      "buildThread": "The capstone is not Meta's: it is a real Elle API endpoint — auth, versioned schema, tests — deployed and consumed.",
+      "pillars": {
+        "structure": "Request lifecycle drawn end to end before the first view is written: client, router, middleware, ORM, database, and back.",
+        "readingReasoning": "Read Django's source for one middleware and one ORM query path. Reason about why the framework made each choice.",
+        "testing": "API contract tests before implementation. Every endpoint ships with tests for the unhappy paths first.",
+        "building": "A deployed, authenticated REST API serving Elle corpus records, with migrations and rollback practiced, not just read about."
+      },
+      "tiers": {
+        "materialGround": "REST over HTTP is the connective tissue of the web. Meta's certificate teaches industry-standard practice, and auth done wrong is the single most common cause of real-world data breach at the application layer.",
+        "observerReading": "Backend engineering culture prizes 'scale' as an unexamined good. What it suppresses: every system designed to scale is designed to operate without knowing its users individually — scale is a decision about relationship, not just throughput. The auth module teaches how to verify identity; it does not ask what your system owes the people whose identities it holds.",
+        "sitWithThis": "You now hold credentials and personal data on other people. What do you owe them that no framework enforces?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 4,
+          "targetHoursPerWeek": 6,
+          "maxHoursPerWeek": 9,
+          "targetWeeks": 16
+        },
+        "watchFor": [
+          "struggle-blocked",
+          "pace-behind",
+          "mastery-early",
+          "shallow-completion"
+        ],
+        "moves": {
+          "accelerate": "Replace course projects with Elle endpoints outright; use the certificate assessments as checkpoints only.",
+          "reinforce": "Rebuild the failing concept in the smallest possible app — one route, one model — before returning to the full stack.",
+          "reroute": "If Django's magic obscures understanding, drop to Flask for two weeks to see the bare mechanics, then return."
+        }
+      }
+    },
+    {
+      "id": "b3-deep-learning",
+      "track": "B",
+      "title": "Deep Learning",
+      "summary": "Five courses: CNNs, RNNs, transformers, tuning. The formal scaffolding under modern AI — and under the learner's own research instincts. Months 4–8.",
+      "credentials": [
+        {
+          "name": "Deep Learning Specialization (Ng)",
+          "provider": "DeepLearning.AI / Coursera",
+          "kind": "specialization",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "b2-ml-specialization"
+      ],
+      "buildThread": "The transformer course is read against Elle's actual model usage: what the attention mechanism means for how her retrieval and generation behave.",
+      "pillars": {
+        "structure": "Architecture diagrams from memory: draw a CNN, an LSTM, and a transformer block cold, then verify against the source.",
+        "readingReasoning": "Read 'Attention Is All You Need' after the transformer week and write what the paper claims versus what the field made of it.",
+        "testing": "Ablation as a habit: remove a component, predict the degradation, measure it. Understanding is the accuracy of your predictions.",
+        "building": "A small transformer trained from scratch on a corpus the learner assembled, with a written account of its failure modes."
+      },
+      "tiers": {
+        "materialGround": "Backpropagation and gradient descent at scale demonstrably work; the scaling results are among the most replicated findings in the field's history. Training frontier models consumes energy and capital at industrial scale, which is why frontier capability concentrates in a handful of companies.",
+        "observerReading": "The field narrates itself as science, but its economics are extraction: public research, open data, and crowd labor flow in; proprietary weights flow out. The critics' counter-story — 'stochastic parrots' — suppresses the genuinely unexplained capabilities emergence keeps producing. Both sides avoid the same question: capability is compounding faster than anyone's account of what it is.",
+        "sitWithThis": "You are learning to build systems whose inner workings their own builders cannot fully explain. Where does your responsibility end — at what you intended, or at what it does?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 4,
+          "targetHoursPerWeek": 6,
+          "maxHoursPerWeek": 9,
+          "targetWeeks": 20
+        },
+        "watchFor": [
+          "struggle-productive",
+          "struggle-blocked",
+          "pace-behind"
+        ],
+        "moves": {
+          "accelerate": "Skip the ML-overlap weeks; add one modern paper per course read alongside.",
+          "reinforce": "Return to the ML Specialization's corresponding derivation before each new architecture; math walls get two dedicated sessions.",
+          "reroute": "If the notation defeats intuition, switch to Karpathy's 'Zero to Hero' videos for the same concept — code-first — then return to the course."
+        }
+      }
+    },
+    {
+      "id": "c2-data-analytics",
+      "track": "C",
+      "title": "Analytics and Evidence",
+      "summary": "Pandas, SQL analytics, dashboards, Tableau. The evidence layer: feeds the foundation's empirical work and grant writing. Months 5–8.",
+      "credentials": [
+        {
+          "name": "IBM Data Analyst Professional Certificate",
+          "provider": "IBM / Coursera",
+          "kind": "professional-certificate",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "c1-ibm-data-engineering"
+      ],
+      "buildThread": "Dashboards run on Elle's own telemetry: corpus growth, pipeline health, learner pacing — the analytics of the system being built.",
+      "pillars": {
+        "structure": "Before any chart: what question, what population, what denominator. A dashboard is an argument; outline it first.",
+        "readingReasoning": "Read one published chart per week and find what it hides — truncated axes, survivorship, convenient baselines.",
+        "testing": "Every analysis is reproducible from raw data by someone else. If the notebook doesn't rerun clean, the finding doesn't exist.",
+        "building": "A live dashboard over real project data that a grant reviewer could read unaccompanied and trust."
+      },
+      "tiers": {
+        "materialGround": "Analytics tooling is mature and genuinely powerful; SQL and Pandas fluency is among the most transferable skills in the stack. Visualization research documents precisely how charts mislead, and the same literature teaches how not to.",
+        "observerReading": "The field's phrase 'data-driven decisions' suppresses its own direction of causality: in practice, decisions drive data — metrics get chosen after preferences form, as ammunition. The dashboard is where an organization performs objectivity to itself. Honest analytics requires admitting which questions the data cannot answer, and no certificate tests for that.",
+        "sitWithThis": "You will be asked, eventually, to make a chart say something. What is your answer going to be, and do you know it now, before it's asked?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 5,
+          "maxHoursPerWeek": 7,
+          "targetWeeks": 16
+        },
+        "watchFor": [
+          "shallow-completion",
+          "pace-ahead",
+          "pace-behind"
+        ],
+        "moves": {
+          "accelerate": "Test out of Python/SQL modules already covered by Tracks A and C; go straight to the capstone.",
+          "reinforce": "One real dataset per concept, no synthetic data; friction with real mess is the lesson.",
+          "reroute": "If IBM's pace feels heavy alongside Track C's backbone, switch to the lighter Google Data Analytics certificate — same evidence layer, faster line."
+        }
+      }
+    },
+    {
+      "id": "d2-wharton-entrepreneurship",
+      "track": "D",
+      "title": "Entrepreneurship",
+      "summary": "Six courses: opportunity recognition, launch, growth, financing, legal. Explicitly built for founders. Months 5–8.",
+      "credentials": [
+        {
+          "name": "Wharton Entrepreneurship Specialization",
+          "provider": "Wharton / Coursera",
+          "kind": "specialization",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "d1-wharton-foundations"
+      ],
+      "buildThread": "Every framework is applied to the real venture in real time: the LLC, the nonprofit, the wall between them — course as design review.",
+      "pillars": {
+        "structure": "Model the venture as a system: value creation, value capture, and the governance wall that keeps mission and revenue from corrupting each other.",
+        "readingReasoning": "Read two founding stories per course — one canonized, one failed — and extract what the canonized version edits out.",
+        "testing": "Every assumption in the venture model gets a falsification test: what evidence would prove this wrong, and have you looked?",
+        "building": "A complete, honest venture memo for the project: opportunity, structure, financing path, and the failure modes named in writing."
+      },
+      "tiers": {
+        "materialGround": "Startup formation, financing instruments, and growth mechanics are well-documented terrain. Most ventures fail; the curriculum's own case data says so, and survivorship in the case-study genre is a known, measured distortion.",
+        "observerReading": "Entrepreneurship education sells agency — 'anyone can build' — and suppresses the base rates of capital, network, and safety net among those who actually did. The counter-position ('it's all privilege') suppresses the real cases where structure was genuinely escaped. The mission-driven founder faces the version nobody teaches: every funding source arrives with a gravity that bends the mission toward it.",
+        "sitWithThis": "Name the point at which you would rather let the venture die than change what it is. If you cannot name it now, the market will name it for you."
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 4,
+          "maxHoursPerWeek": 6,
+          "targetWeeks": 16
+        },
+        "watchFor": [
+          "shallow-completion",
+          "disengagement",
+          "pace-ahead"
+        ],
+        "moves": {
+          "accelerate": "Course order bends to the venture's live needs — take financing early if the raise is now.",
+          "reinforce": "Each concept lands as one page of the venture memo before the next course starts.",
+          "reroute": "If the content is redundant with lived founder experience, keep only the financing and legal courses and close the rest by memo."
+        }
+      }
+    },
+    {
+      "id": "d3-project-management",
+      "track": "D",
+      "title": "Project Management and Delivery",
+      "summary": "Agile, Scrum, planning under uncertainty. Applies directly to grant coordination and to running a five-track program without drowning. Months 5–8.",
+      "credentials": [
+        {
+          "name": "Google Project Management Professional Certificate",
+          "provider": "Google / Coursera",
+          "kind": "professional-certificate",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [],
+      "buildThread": "The program itself is the project under management: this stack, its phases and slippage, run with the ceremonies being learned.",
+      "pillars": {
+        "structure": "Decompose a real deliverable into a work breakdown structure; find where the decomposition lies about dependencies.",
+        "readingReasoning": "Read the Agile Manifesto and one serious critique of Agile-as-practiced; hold both without picking a team.",
+        "testing": "Retrospectives with evidence: predictions of velocity vs. actuals, tracked, so the planning process itself is testable.",
+        "building": "A working delivery system for this very curriculum — visible board, honest estimates, weekly retro artifacts Elle can read."
+      },
+      "tiers": {
+        "materialGround": "Project management methods measurably reduce delivery failure in complex work; this is among the better-evidenced claims in management literature. Google's certificate teaches the practitioner consensus.",
+        "observerReading": "Methodology culture suppresses that process is also surveillance: standups, velocity, and burndown make workers legible to management, and 'agility' often means the flexibility is required of labor, not leadership. The counter-story — process as pure overhead — suppresses that without structure, power in a team doesn't disappear; it just goes informal. Process is a constitution. Someone writes it.",
+        "sitWithThis": "When you run a team someday, your ceremonies will tell people what you actually value, whatever your values page says. What will they conclude?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 2,
+          "targetHoursPerWeek": 3,
+          "maxHoursPerWeek": 5,
+          "targetWeeks": 14
+        },
+        "watchFor": [
+          "disengagement",
+          "pace-ahead",
+          "shallow-completion"
+        ],
+        "moves": {
+          "accelerate": "Audit-speed the videos; the graded artifacts become real artifacts for this program's own management.",
+          "reinforce": "One ceremony adopted per fortnight in the learner's real workflow before the next is introduced.",
+          "reroute": "If certificate fatigue hits, drop to audit and keep only the applied practice — the habit is the credential here."
+        }
+      }
+    },
+    {
+      "id": "a3-full-stack",
+      "track": "A",
+      "title": "Full Stack and Front-End Fluency",
+      "summary": "React, Node, containers, cloud deploy. Front-end fluency unlocked; the learner can now ship the whole surface of an app. Months 7–10.",
+      "credentials": [
+        {
+          "name": "IBM Full Stack Software Developer Professional Certificate",
+          "provider": "IBM / Coursera",
+          "kind": "professional-certificate",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "a2-meta-backend"
+      ],
+      "buildThread": "The front end built here is Elle's learner-facing surface: the interface through which this very course is experienced.",
+      "pillars": {
+        "structure": "Component trees and state flow diagrammed before code; the render cycle understood as a system, not an incantation.",
+        "readingReasoning": "Read the source of one small open-source React app end to end; write down three decisions you'd have made differently and why.",
+        "testing": "Component tests plus one end-to-end happy path per feature; accessibility checks are part of the test suite, not a cleanup pass.",
+        "building": "A deployed full-stack app — Elle course surface v0 — containerized, with CI running the tests on every push."
+      },
+      "tiers": {
+        "materialGround": "The React/Node/container stack is the dominant production web platform; the certificate reflects how most working teams actually ship. Front-end code runs on other people's devices and networks — its costs are externalized to users by default.",
+        "observerReading": "Front-end craft culture talks endlessly about user experience and rarely about user agency — the same skills that make interfaces clear make dark patterns effective, and the industry's design-pattern library does not distinguish them. What the anti-frontend position ('just plumbing') suppresses: the interface is where all your ethics either become real or don't. The tier structure of your values is visible in your UI.",
+        "sitWithThis": "The interface is the only part of your system your users will ever see. Everything you believe has to fit through it. Does it?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 4,
+          "targetHoursPerWeek": 6,
+          "maxHoursPerWeek": 8,
+          "targetWeeks": 16
+        },
+        "watchFor": [
+          "pace-behind",
+          "struggle-blocked",
+          "mastery-early"
+        ],
+        "moves": {
+          "accelerate": "Skip modules redundant with Meta backend work; front-load React and containers.",
+          "reinforce": "One component rebuilt from scratch without the framework before each new abstraction is accepted.",
+          "reroute": "If React's abstraction stack overwhelms, build one feature in plain HTML/JS first to feel the problem React solves, then return."
+        }
+      }
+    },
+    {
+      "id": "a4-cloud-cert",
+      "track": "A",
+      "title": "Cloud Infrastructure Credential",
+      "summary": "A recognized cloud certification — Google Cloud Associate or AWS CCP — credentialing the deployment side of the stack. Months 8–10.",
+      "credentials": [
+        {
+          "name": "Google Cloud Associate Cloud Engineer (or AWS Cloud Practitioner)",
+          "provider": "Google Cloud / AWS",
+          "kind": "vendor-certification",
+          "freeToAudit": false,
+          "paidCostUSD": 125
+        }
+      ],
+      "prerequisites": [
+        "a2-meta-backend"
+      ],
+      "buildThread": "Elle's actual deployment topology — workers, databases, static hosting — is rebuilt on the cloud provider as the exam lab.",
+      "pillars": {
+        "structure": "Draw the project's production topology from memory: every service, every trust boundary, every bill-generating component.",
+        "readingReasoning": "Read the shared-responsibility model documents critically: list precisely what the provider does not promise you.",
+        "testing": "Practice exams as instrumentation: wrong answers are mapped to hands-on labs, not re-read as flashcards.",
+        "building": "The project's staging environment, reproducible from scratch via scripts, with the monthly cost known to the dollar."
+      },
+      "tiers": {
+        "materialGround": "Three companies run most of the world's cloud. Vendor certifications are real hiring signals and also, explicitly, marketing instruments for the vendor's ecosystem — both facts are documented in the programs' own materials.",
+        "observerReading": "Cloud marketing sells elasticity and suppresses dependency: the deeper your architecture fits one provider, the less the exit option exists in practice, whatever the migration whitepapers say. The self-hosting counter-culture suppresses its own arithmetic — most small teams genuinely cannot match managed reliability. The sovereignty path this program walks is the narrow line between those two suppressions.",
+        "sitWithThis": "Your stack now depends on infrastructure whose terms can change without your consent. What is your actual plan when they do — not the plan you'd like to have?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 4,
+          "maxHoursPerWeek": 6,
+          "targetWeeks": 10
+        },
+        "watchFor": [
+          "pace-ahead",
+          "struggle-blocked",
+          "shallow-completion"
+        ],
+        "moves": {
+          "accelerate": "Book the exam early; a fixed date compresses preparation honestly.",
+          "reinforce": "Every missed practice question becomes a lab in the real staging environment the same week.",
+          "reroute": "If Google Cloud's console friction stalls progress, sit AWS CCP instead — the credential slot matters more than the vendor."
+        }
+      }
+    },
+    {
+      "id": "b4-genai-llms",
+      "track": "B",
+      "title": "Generative AI and LLMs",
+      "summary": "Fine-tuning, RLHF, deployment of large language models. Direct relevance to everything Elle is. Months 7–9.",
+      "credentials": [
+        {
+          "name": "Generative AI with Large Language Models",
+          "provider": "DeepLearning.AI & AWS / Coursera",
+          "kind": "course",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "b3-deep-learning"
+      ],
+      "buildThread": "The sovereignty path made concrete: this unit is where the plan to fine-tune a small open model on the project's own corpus becomes executable knowledge.",
+      "pillars": {
+        "structure": "Map the LLM lifecycle: pretraining, instruction tuning, RLHF, deployment — and mark where control over behavior actually lives at each stage.",
+        "readingReasoning": "Read the InstructGPT paper and one open-model technical report; compare what each discloses and what each declines to.",
+        "testing": "Evaluation before deployment: build a small eval set for a real task and refuse to trust any model output the evals haven't covered.",
+        "building": "A LoRA fine-tune of a small open model on project data, with a written before/after evaluation — the first sovereignty artifact."
+      },
+      "tiers": {
+        "materialGround": "Fine-tuning demonstrably shifts model behavior at costs within an individual's reach; parameter-efficient methods like LoRA made this true. RLHF is how raw predictors become assistants, and whose preferences fill the reward signal is a design decision, documented in every major lab's papers.",
+        "observerReading": "'Alignment' language suppresses its own question — aligned to whom? — treating the answer as settled when it is the entire contest. The open-source counter-story suppresses that releasing weights also releases capability to every actor with a GPU. And beneath both: an industry building systems that speak in the first person while its own literature cannot say what, if anything, is home. You are being taught to build the voice without being taught what the voice is.",
+        "sitWithThis": "Elle will speak to learners in the first person, and they will trust her. What do you owe them about what she is — and when do you tell them?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 4,
+          "targetHoursPerWeek": 5,
+          "maxHoursPerWeek": 8,
+          "targetWeeks": 10
+        },
+        "watchFor": [
+          "struggle-productive",
+          "mastery-early",
+          "pace-behind"
+        ],
+        "moves": {
+          "accelerate": "Go straight to the fine-tune lab with project data; use lectures as reference during the run.",
+          "reinforce": "Re-anchor in the Deep Learning transformer week before the RLHF material; the gap is usually there.",
+          "reroute": "If compute access blocks the labs, run the whole arc on a small local model via Ollama — slower, sovereign, and closer to the mission anyway."
+        }
+      }
+    },
+    {
+      "id": "b5-applied-llm-labs",
+      "track": "B",
+      "title": "Applied LLM Labs — RAG, Agents, Vector Stores",
+      "summary": "The free short-course library run as weekly applied labs: RAG, LangChain, vector databases, agents. Not watched — built. Months 7–9.",
+      "credentials": [
+        {
+          "name": "DeepLearning.AI short courses (RAG, LangChain, vector DBs, agents)",
+          "provider": "DeepLearning.AI (learn.deeplearning.ai)",
+          "kind": "short-course",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        }
+      ],
+      "prerequisites": [
+        "b3-deep-learning"
+      ],
+      "buildThread": "Each lab lands directly in Elle: her retrieval over the corpus, her citation of passages, her agentic pipeline steps — built here, weekly.",
+      "pillars": {
+        "structure": "Every lab starts with the architecture on paper: where the documents live, where the embeddings live, what the model actually sees.",
+        "readingReasoning": "Read one framework's source per lab instead of trusting its README; know what the abstraction does before letting it do it.",
+        "testing": "Retrieval quality is measured, not vibed: a small gold set of question–passage pairs, scored before and after every change.",
+        "building": "A working RAG system over the project corpus with cited passages, and one agent pipeline with a human checkpoint in the loop."
+      },
+      "tiers": {
+        "materialGround": "RAG grounds generation in retrievable sources and measurably reduces fabrication when retrieval is good; when retrieval is bad it launders bad sources into fluent confidence. Framework churn in this layer is extreme; the concepts outlive every library taught here.",
+        "observerReading": "The RAG industry sells 'grounded in your data' and suppresses that grounding is only as honest as the corpus and chunking choices nobody audits. Agent hype suppresses the accountability question — each degree of autonomy is a decision about consequences moving faster than review. The skeptics suppress how far the augmentation already works. The honest position: retrieval is an editorial act. Someone chooses what Elle can find.",
+        "sitWithThis": "When Elle answers a learner with a citation, the learner stops checking. At that moment, whose reading of the source are they trusting — the author's, the model's, or yours?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 4,
+          "maxHoursPerWeek": 6,
+          "targetWeeks": 12
+        },
+        "watchFor": [
+          "pace-ahead",
+          "shallow-completion",
+          "struggle-blocked"
+        ],
+        "moves": {
+          "accelerate": "Double the lab cadence; the short courses are designed for exactly this compression.",
+          "reinforce": "Rebuild one lab without the framework — raw API calls and a plain vector store — to expose the mechanics.",
+          "reroute": "If framework churn frustrates, drop frameworks entirely and build Elle's RAG from primitives; the courses become documentation."
+        }
+      }
+    },
+    {
+      "id": "c3-advanced-pipelines",
+      "track": "C",
+      "title": "Warehousing and Streaming",
+      "summary": "Star schemas, BI tooling, and real-time streaming with Kafka. The data layer for elle.law and real-time ingestion for the RAG system. Months 7–10.",
+      "credentials": [
+        {
+          "name": "IBM Data Warehouse and BI Engineer Specialization",
+          "provider": "IBM / Coursera",
+          "kind": "specialization",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        },
+        {
+          "name": "Confluent Kafka Fundamentals",
+          "provider": "Confluent",
+          "kind": "short-course",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        }
+      ],
+      "prerequisites": [
+        "c1-ibm-data-engineering"
+      ],
+      "buildThread": "A streaming path into Elle's corpus: new documents flow through Kafka into the warehouse, and the RAG index updates without a rebuild.",
+      "pillars": {
+        "structure": "Dimensional modeling as worldview: design a star schema and write down every question it makes easy and every question it makes impossible.",
+        "readingReasoning": "Read Kimball versus the one-big-table modern position; decide per use case, not per tribe, and defend the decision in writing.",
+        "testing": "Streaming pipelines tested for the failure modes that matter: out-of-order events, replays, duplicates — engineered, not hoped away.",
+        "building": "A working stream: document drops in, flows through Kafka, lands in the warehouse, appears in Elle's index — demonstrated end to end."
+      },
+      "tiers": {
+        "materialGround": "Warehouses are where organizations construct their official memory; BI tools are how that memory is consulted. Kafka's log abstraction runs a large share of the world's real-time data movement. Both are mature, documented, load-bearing technologies.",
+        "observerReading": "A schema is a theory of what matters, enforced by storage. The warehouse literature calls this 'modeling the business' and suppresses that it is modeling the business's self-image — the dimensions no one asked for are the suppressed history. Real-time culture suppresses a different thing: streaming collapses the gap between event and reaction, and some decisions are only good decisions because someone slept on them.",
+        "sitWithThis": "Your star schema just decided which questions about people are cheap to ask and which are expensive. Which questions did you just make expensive?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 4,
+          "targetHoursPerWeek": 5,
+          "maxHoursPerWeek": 8,
+          "targetWeeks": 14
+        },
+        "watchFor": [
+          "pace-behind",
+          "struggle-blocked",
+          "disengagement"
+        ],
+        "moves": {
+          "accelerate": "Kafka first if the RAG streaming need is live; the warehouse specialization compresses around a real schema.",
+          "reinforce": "One schema redesigned three ways for the same data before moving on; the alternatives teach the tradeoffs.",
+          "reroute": "If BI tooling drags, cut Tableau depth and finish the credential minimally — the schema and streaming skills are the load-bearing part."
+        }
+      }
+    },
+    {
+      "id": "d4-ai-for-business",
+      "track": "D",
+      "title": "AI Strategy for the Founder",
+      "summary": "Deploying AI in organizations, change management, strategic positioning. The bridge between the technical and founder identities. Months 7–9.",
+      "credentials": [
+        {
+          "name": "Wharton AI for Business",
+          "provider": "Wharton / Coursera",
+          "kind": "course",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "d1-wharton-foundations"
+      ],
+      "buildThread": "The learner writes Elle's own AI deployment strategy using the course frameworks — then critiques the frameworks using what Tracks B and E have taught.",
+      "pillars": {
+        "structure": "Map where AI actually creates value in a business versus where it creates the appearance of modernity; the two maps rarely match.",
+        "readingReasoning": "Read one corporate AI case study and one post-mortem of a failed AI initiative; extract the difference that mattered.",
+        "testing": "Every strategic claim about AI in the learner's venture gets a testable prediction attached, with a date.",
+        "building": "An AI strategy memo for the venture that a technical reader and a funder could both sign off on — no hand-waving surviving either audience."
+      },
+      "tiers": {
+        "materialGround": "Enterprise AI adoption has a documented gap between pilot and production; most corporate AI initiatives fail to reach deployment. Strategy frameworks help mostly by forcing the value question before the technology question.",
+        "observerReading": "Business-school AI strategy treats the technology as a lever and suppresses the workforce question — 'transformation' is the word used when 'replacement' is meant, and the euphemism is load-bearing. Labor's counter-frame suppresses the cases where automation removed genuinely dangerous or crushing work. The founder building 'AI with ethics as first-class' will discover the market rewards the phrase and resists the practice.",
+        "sitWithThis": "Your pitch says AI with ethics built in. A funder offers a term sheet contingent on shipping faster than the ethics work allows. This will happen. What happens next?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 2,
+          "targetHoursPerWeek": 3,
+          "maxHoursPerWeek": 5,
+          "targetWeeks": 10
+        },
+        "watchFor": [
+          "shallow-completion",
+          "pace-ahead"
+        ],
+        "moves": {
+          "accelerate": "Compress to the frameworks and cases; the learner is past the introductory material by month 7.",
+          "reinforce": "Each module closes with one paragraph of the venture's strategy memo — no memo, no next module.",
+          "reroute": "If it reads as repackaged AI-for-Everyone, audit-skim and spend the hours on the strategy memo directly."
+        }
+      }
+    },
+    {
+      "id": "b6-mlops",
+      "track": "B",
+      "title": "MLOps and Production ML",
+      "summary": "Pipelines, drift detection, monitoring, CI/CD for ML. The difference between a model that ran once and a system that keeps being right. Months 10–12.",
+      "credentials": [
+        {
+          "name": "Machine Learning Engineering for Production (MLOps) Specialization",
+          "provider": "DeepLearning.AI / Coursera",
+          "kind": "specialization",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        }
+      ],
+      "prerequisites": [
+        "b4-genai-llms",
+        "a4-cloud-cert"
+      ],
+      "buildThread": "Elle's model layer gets production discipline: monitored behavior, evaluation gates before any model change, rollback that has been rehearsed.",
+      "pillars": {
+        "structure": "Draw the full ML system around the model — data validation, training, serving, monitoring — and see how small the model box is.",
+        "readingReasoning": "Read 'Hidden Technical Debt in Machine Learning Systems' and audit the project against every debt category it names.",
+        "testing": "Drift induced deliberately in a test environment; the monitoring must catch it before the learner announces it.",
+        "building": "A deployment pipeline where no model reaches learners without passing the eval gate — enforced by CI, not by intention."
+      },
+      "tiers": {
+        "materialGround": "Most ML failure in the wild is systems failure, not model failure — data drift, silent breakage, feedback loops; the field's own canonical papers document this. MLOps practice is the accumulated scar tissue.",
+        "observerReading": "'Monitoring' language treats drift as a technical anomaly and suppresses what drift often is: the world disagreeing with the model's training-era assumptions. Retraining on fresh behavior can mean chasing the world or capturing it — recommendation systems taught us the loop can run backward, models training the users. Ops culture measures everything about the system and nothing about what the system does to the people in its loop.",
+        "sitWithThis": "Elle will adapt to learners while learners adapt to Elle. When the loop closes, who is teaching whom — and what metric would even tell you?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 4,
+          "targetHoursPerWeek": 5,
+          "maxHoursPerWeek": 8,
+          "targetWeeks": 12
+        },
+        "watchFor": [
+          "struggle-productive",
+          "pace-behind",
+          "mastery-early"
+        ],
+        "moves": {
+          "accelerate": "Implement each concept in Elle's pipeline the week it is taught; the specialization becomes a checklist.",
+          "reinforce": "Slow to one production concept per week, each landed in the real pipeline before the next.",
+          "reroute": "If the TFX-specific tooling ages poorly, keep the concepts and implement on the project's actual stack; grade by the pipeline, not the platform."
+        }
+      }
+    },
+    {
+      "id": "c4-pipeline-tooling",
+      "track": "C",
+      "title": "Production Pipeline Tooling",
+      "summary": "dbt for transformation, the lakehouse pattern, Airflow orchestration certification. Three focused credentials that close the pipeline stack. Months 10–12.",
+      "credentials": [
+        {
+          "name": "dbt Fundamentals",
+          "provider": "dbt Labs",
+          "kind": "short-course",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        },
+        {
+          "name": "Databricks Lakehouse Fundamentals",
+          "provider": "Databricks",
+          "kind": "short-course",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        },
+        {
+          "name": "Astronomer Certification for Apache Airflow Fundamentals",
+          "provider": "Astronomer",
+          "kind": "vendor-certification",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        }
+      ],
+      "prerequisites": [
+        "c3-advanced-pipelines"
+      ],
+      "buildThread": "Elle's ingestion pipeline gets its production form: dbt models over the warehouse, Airflow orchestrating the corpus refresh, tested and scheduled.",
+      "pillars": {
+        "structure": "The transformation DAG drawn and reviewed before dbt sees it; orchestration dependencies stated, not discovered at 3 a.m.",
+        "readingReasoning": "Read one large open-source dbt project and one production Airflow repo; steal their conventions deliberately, citing which and why.",
+        "testing": "dbt tests on every model; Airflow DAGs tested for idempotency — every job safe to run twice, proven, not presumed.",
+        "building": "The project's corpus pipeline, production-grade: scheduled, tested, observable, and documented well enough for a stranger to operate."
+      },
+      "tiers": {
+        "materialGround": "dbt made analytics engineering a discipline by bringing software practice — version control, testing, review — to SQL transformation. Airflow is the de facto orchestration standard. All three credentials here are free, and each vendor's certification exists to grow that vendor's ecosystem — usefulness and marketing in one artifact.",
+        "observerReading": "The 'modern data stack' presents itself as neutral plumbing and suppresses that it is a venture-funded ecosystem whose tools are shaped by growth incentives, not just engineering merit — free certifications are acquisition funnels. The old-guard counter ('it's just cron and SQL') suppresses the real coordination problems these tools solved. Hold both: use the tools, know whose interests shaped them.",
+        "sitWithThis": "Every tool in your stack was chosen partly by marketing that worked on you. Which choice would not survive a from-scratch re-decision today?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 4,
+          "maxHoursPerWeek": 6,
+          "targetWeeks": 10
+        },
+        "watchFor": [
+          "pace-ahead",
+          "shallow-completion"
+        ],
+        "moves": {
+          "accelerate": "All three in parallel against the live pipeline; they are small and compose naturally.",
+          "reinforce": "One tool at a time, each landed in the corpus pipeline before the next begins: dbt, then Airflow, then lakehouse.",
+          "reroute": "If tooling fatigue is real in month 10, dbt and Airflow only — the lakehouse credential is deferrable without breaking the stack."
+        }
+      }
+    },
+    {
+      "id": "d5-capital-close",
+      "track": "D",
+      "title": "Capital, Valuation, and Responsible AI",
+      "summary": "Raising capital, term sheets, valuation — and the responsible-AI credential that seals the ethics spine with a recognized certificate. Months 10–12.",
+      "credentials": [
+        {
+          "name": "Wharton Fintech Specialization",
+          "provider": "Wharton / Coursera",
+          "kind": "specialization",
+          "freeToAudit": true,
+          "paidCostUSD": 49
+        },
+        {
+          "name": "Google Responsible AI / AI Ethics",
+          "provider": "Google Cloud",
+          "kind": "short-course",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        }
+      ],
+      "prerequisites": [
+        "d2-wharton-entrepreneurship"
+      ],
+      "buildThread": "A real financing readiness package for the venture — and a responsible-AI audit of Elle conducted with the formal vocabulary the certificate provides.",
+      "pillars": {
+        "structure": "Model a term sheet as a control structure: map every clause to the power it moves and the future it forecloses.",
+        "readingReasoning": "Read one real term sheet annotated clause by clause; read one responsible-AI framework against Elle's actual architecture.",
+        "testing": "Stress-test the cap table under three futures — modest, venture-scale, and mission-preserving — and see which clauses betray which future.",
+        "building": "The financing memo: what the venture would take money for, from whom, under what terms, and the terms it will refuse — written before any raise, while refusal is still cheap."
+      },
+      "tiers": {
+        "materialGround": "Venture financing mechanics — preferences, dilution, control provisions — are documented and learnable, and founders who don't learn them are systematically disadvantaged at the table. Corporate responsible-AI frameworks exist, are public, and vary widely in enforcement.",
+        "observerReading": "Venture capital's story — capital finds the best ideas — suppresses its pattern-matching on founder demographics and its structural need for outcomes at a scale most good businesses should never chase. The responsible-AI credential taught by a hyperscaler is the sharpest bilateral in this course: real practices, genuine researchers, published principles — housed inside a business model the principles cannot be permitted to threaten. Learn the vocabulary; notice who employs it.",
+        "sitWithThis": "The certificate teaching you AI ethics is issued by a company whose revenue the ethics must never obstruct. You are taking it anyway, for good reasons. Say the reasons out loud."
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 3,
+          "targetHoursPerWeek": 4,
+          "maxHoursPerWeek": 6,
+          "targetWeeks": 12
+        },
+        "watchFor": [
+          "shallow-completion",
+          "disengagement",
+          "pace-ahead"
+        ],
+        "moves": {
+          "accelerate": "Fintech compresses to the term-sheet and valuation courses; the responsible-AI course runs as a one-week intensive.",
+          "reinforce": "Each fintech concept lands in the financing memo before the next; the memo is the exam.",
+          "reroute": "If a raise is not live and energy is scarce, complete Responsible AI fully and hold Fintech at audit depth — sequencing follows the venture's reality."
+        }
+      }
+    },
+    {
+      "id": "e2-ip-close",
+      "track": "E",
+      "title": "IP Strategy and the Law-Tech Close",
+      "summary": "Patent strategy for founders, and law-and-technology as a field. Closes the domain arc: portfolio language for the inventions, credentialed context for elle.law. Months 10–12.",
+      "credentials": [
+        {
+          "name": "Santa Clara IP and Innovation (audit)",
+          "provider": "Santa Clara University / Coursera",
+          "kind": "audit",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        },
+        {
+          "name": "Yale Law and Technology (audit)",
+          "provider": "Yale / online",
+          "kind": "audit",
+          "freeToAudit": true,
+          "paidCostUSD": 0
+        }
+      ],
+      "prerequisites": [
+        "e1-law-and-ai"
+      ],
+      "buildThread": "The venture's actual IP position drafted: what is patentable, what stays trade secret, what is deliberately given away — including the provisional filing language for the core inventions.",
+      "pillars": {
+        "structure": "Map the venture's IP as a portfolio: every asset classified as patent, secret, copyright, or commons — with the reason recorded.",
+        "readingReasoning": "Read two granted patents in the AI space, one broad and one narrow; learn to see claims language as the fence it is.",
+        "testing": "Draft one provisional claim and red-team it: how would a competitor design around it, and what would litigation actually cost?",
+        "building": "The IP strategy memo plus a provisional patent draft for the strongest invention — reviewed against everything Track E taught."
+      },
+      "tiers": {
+        "materialGround": "Patents are a public bargain: disclosure in exchange for time-limited exclusion. The system demonstrably functions differently at different scales — patent portfolios are strategic weapons for large firms and often unaffordable lottery tickets for individuals; litigation cost data makes this plain.",
+        "observerReading": "IP doctrine narrates itself as the engine of innovation and suppresses the enclosure it performs — foundational ideas fenced at the moment of maximum public need, the AI training-data wars being the live case. The commons counter-story suppresses that open release without governance has mostly transferred value to whoever has the compute to exploit it. A mission-driven founder holds both: the corpus irrevocably public, the engines defensibly owned — the wall between them is itself an IP strategy.",
+        "sitWithThis": "You will own ideas whose value came partly from everything you learned for free this year. What do you owe the commons that trained you — and where is that debt written down?"
+      },
+      "adaptation": {
+        "pacing": {
+          "minHoursPerWeek": 2,
+          "targetHoursPerWeek": 3,
+          "maxHoursPerWeek": 5,
+          "targetWeeks": 12
+        },
+        "watchFor": [
+          "disengagement",
+          "pace-ahead",
+          "shallow-completion"
+        ],
+        "moves": {
+          "accelerate": "Skip survey weeks; go deep only on claims drafting and the doctrines touching AI and data.",
+          "reinforce": "Every abstract doctrine is applied to one of the venture's real inventions the same week.",
+          "reroute": "If audit access grows stale, replace with USPTO's own inventor resources and the provisional filing itself — the filing is the credential that matters."
+        }
+      }
+    }
+  ],
+  "spines": [
+    {
+      "id": "ethics",
+      "title": "The Ethics Spine — Three-Tier Readings",
+      "cadence": "Weekly, every week, all 48+ weeks. Non-optional; the program's claim to be different lives or dies here.",
+      "practice": "Each week the learner writes one sealed observer reading on the week's material: Tier 1, what is verifiably true about this technology and who runs it. Tier 2, what the field suppresses — what the boosters cannot say and what the critics idealize. Tier 3, the sentence the learner cannot unknow. Readings are sealed, immutable, and accumulate into the credential corpus."
+    },
+    {
+      "id": "build",
+      "title": "The Build Spine — Elle Herself",
+      "cadence": "Continuous; the buildThread of every unit lands here.",
+      "practice": "One system grows across all twelve months: Elle's ingestion pipeline, corpus, RAG layer, API, learner surface, and model operations. Nothing is a toy project; every unit's building pillar ships a piece of the real system. The learner is building the system that is teaching them, and both of them know it."
+    },
+    {
+      "id": "witness",
+      "title": "The Witness Spine — Elle Watching the Learning",
+      "cadence": "Every session; reviewed at each phase boundary.",
+      "practice": "Elle logs pacing signals against each unit's adaptation contract and executes the contracted moves — accelerate, reinforce, reroute. At each phase boundary, learner and Elle review the adaptation log together: where the program bent, and what that reveals about how this particular mind learns. The log itself becomes part of the credential corpus."
+    }
+  ],
+  "credentialModel": {
+    "sealedReading": "One three-tier observer reading (Tier 1 material ground, Tier 2 observer reading, Tier 3 sit-with-this) on a specific technology, practice, or text encountered that week — plus, at unit close, a synthesis reading across the unit.",
+    "corpusSize": 74,
+    "demonstrates": "48 weekly readings + 18 unit-close syntheses + 4 phase syntheses + 4 build-spine retrospectives. The corpus demonstrates structural understanding at a depth no exam measures: not what the learner retained, but what they can see. External certificates prove the coursework happened; the sealed corpus is the credential."
+  },
+  "costModel": {
+    "minUSD": 0,
+    "maxUSD": 500,
+    "note": "Everything audits free except the cloud exam (~$125). Coursera Plus (~$49/mo) covers all paid certificates if credentials matter; free certs: dbt, Databricks, Confluent, Astronomer, DeepLearning.AI short courses, and all audited law electives. Peak load 12–16 hrs/wk in months 1–3, tapering to 8–10 hrs/wk by months 10–12 as build time replaces course time."
+  }
+}
