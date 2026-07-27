@@ -90,6 +90,7 @@ import { getClientByUser, createClientProfile, resolveVenueForUser } from './atl
 import { ingestAtlasCsv } from './atlas-ingest';
 import { readAtlasEvents } from './atlas-events';
 import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from './retrieval/reembed';
+import { runJudgeBatch, kappaCorrelationReport } from './judge';
 
 // ── /privacy — the door's policy, in plain language ──────────────────────────
 const PRIVACY_HTML = `<!doctype html>
@@ -2162,6 +2163,25 @@ export default {
     if (path === '/api/retrieval/backfill-contextual') {
       if (!svc) return err('Unauthorized', 401);
       return json(await enqueueContextualBackfill(env as unknown as ReembedEnv & { INGEST_QUEUE: Queue }));
+    }
+    // LLM-as-judge harness (src/judge.ts, port plan §4). Batch-judges
+    // historical turns (25/call default, resumable via run_id — the ≥100-turn
+    // acceptance run is a few calls of the same body plus run_id) and reports
+    // the Spearman κ cross-check. Real LLM cost per judged turn; admin-gated,
+    // prefer:'local' spares the hosted quota for bulk runs.
+    if (path === '/api/judge/run') {
+      if (!svc) return err('Unauthorized', 401);
+      const b = body as { session_id?: string; limit?: number; run_id?: string; prefer?: string };
+      return json(await runJudgeBatch(env, {
+        sessionId: b.session_id, limit: b.limit, runId: b.run_id,
+        prefer: b.prefer === 'local' ? 'local' : undefined,
+      }));
+    }
+    if (path === '/api/judge/kappa-correlation') {
+      if (!svc) return err('Unauthorized', 401);
+      const b = body as { run_id?: string };
+      if (!b.run_id) return err('run_id required');
+      return json(await kappaCorrelationReport(env, b.run_id));
     }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/research')          { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
