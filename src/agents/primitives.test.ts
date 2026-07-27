@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { routeStructured } from './primitives';
+import { routeStructured, generateWithEvaluator } from './primitives';
 import type { LLMEnv } from '../llm';
 
 function stubFetch(routes: Array<{ match: string; ok?: boolean; status?: number; json?: unknown }>) {
@@ -46,5 +46,61 @@ describe('routeStructured', () => {
     const env = {} as unknown as LLMEnv;
     await expect(routeStructured(env, 'q', { only: 'one option' })).rejects.toThrow(/at least two options/);
     expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe('generateWithEvaluator — the Looping_Agent_Workflow pattern, capped at 3', () => {
+  // prefer:'local' rides env.AI.run; generator and evaluator alternate calls.
+  function aiSequence(...responses: string[]) {
+    let i = 0;
+    return { run: vi.fn(async () => ({ response: responses[Math.min(i++, responses.length - 1)] })) };
+  }
+
+  it('returns on the first PASS', async () => {
+    const ai = aiSequence('the draft', '{"status":"PASS","feedback":"meets every criterion"}');
+    const env = { AI: ai } as unknown as LLMEnv;
+
+    const out = await generateWithEvaluator(env, 'write X', 'must mention X', { prefer: 'local' });
+
+    expect(out.passed).toBe(true);
+    expect(out.iterations).toBe(1);
+    expect(out.output).toBe('the draft');
+    expect(out.feedback).toEqual([]);
+  });
+
+  it('feeds FAIL feedback back into the generator with the prior attempt attached', async () => {
+    const ai = aiSequence(
+      'draft one',
+      '{"status":"FAIL","feedback":"missing the deadline"}',
+      'draft two with the deadline',
+      '{"status":"PASS","feedback":"good"}',
+    );
+    const env = { AI: ai } as unknown as LLMEnv;
+
+    const out = await generateWithEvaluator(env, 'write X', 'must include the deadline', { prefer: 'local' });
+
+    expect(out.passed).toBe(true);
+    expect(out.iterations).toBe(2);
+    expect(out.feedback).toEqual(['missing the deadline']);
+    // The second generator call must carry both the prior attempt and the feedback.
+    const secondGenPrompt = JSON.stringify(ai.run.mock.calls[2]);
+    expect(secondGenPrompt).toContain('draft one');
+    expect(secondGenPrompt).toContain('missing the deadline');
+  });
+
+  it('stops at 3 iterations and returns the last attempt honestly marked unpassed', async () => {
+    const ai = aiSequence(
+      'd1', '{"status":"FAIL","feedback":"f1"}',
+      'd2', '{"status":"FAIL","feedback":"f2"}',
+      'd3', '{"status":"FAIL","feedback":"f3"}',
+    );
+    const env = { AI: ai } as unknown as LLMEnv;
+
+    const out = await generateWithEvaluator(env, 'write X', 'impossible bar', { prefer: 'local' });
+
+    expect(out.passed).toBe(false);
+    expect(out.iterations).toBe(3);
+    expect(out.feedback).toEqual(['f1', 'f2', 'f3']);
+    expect(ai.run).toHaveBeenCalledTimes(6); // 3 generate + 3 evaluate, then a hard stop
   });
 });

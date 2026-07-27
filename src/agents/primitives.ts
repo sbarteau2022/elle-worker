@@ -22,7 +22,7 @@
 // ============================================================
 
 import { z } from 'zod';
-import { jsonLLM } from '../llm';
+import { jsonLLM, runLLM } from '../llm';
 import type { LLMEnv, LLMTask } from '../llm';
 
 export interface RouteMap {
@@ -62,6 +62,57 @@ export async function routeStructured(
     system: opts.system ?? 'You are a precise router. Return only the requested JSON — no prose.',
   });
   return { selectedRoute: data.selected_route };
+}
+
+// ── Evaluator loop (Looping_Agent_Workflow.ipynb, port plan §4.1) ──────────
+// Generator produces, Evaluator returns structured {status, feedback}; FAIL
+// feedback loops back into the Generator with the prior attempt attached,
+// until PASS or the iteration cap. The cookbook leaves iterations open-ended;
+// the plan says don't — capped at 3, hard.
+
+const EVALUATOR_MAX_ITERATIONS = 3;
+
+const EvalVerdictSchema = z.object({
+  status: z.enum(['PASS', 'FAIL']),
+  feedback: z.string(),
+});
+
+export interface EvaluatorLoopResult {
+  output: string;
+  passed: boolean;
+  iterations: number;
+  feedback: string[]; // one entry per FAIL round, in order
+}
+
+export async function generateWithEvaluator(
+  env: LLMEnv,
+  task: string,
+  criteria: string,
+  opts: { generatorTask?: LLMTask; evaluatorTask?: LLMTask; generatorSystem?: string; prefer?: 'local' } = {}
+): Promise<EvaluatorLoopResult> {
+  const feedback: string[] = [];
+  let output = '';
+  for (let i = 0; i < EVALUATOR_MAX_ITERATIONS; i++) {
+    const genPrompt = feedback.length
+      ? `${task}\n\nYOUR PREVIOUS ATTEMPT:\n${output}\n\nEVALUATOR FEEDBACK (fix these, keep what worked):\n${feedback[feedback.length - 1]}`
+      : task;
+    output = await runLLM(env, genPrompt, {
+      task: opts.generatorTask ?? 'reasoning',
+      system: opts.generatorSystem,
+      prefer: opts.prefer,
+    });
+    const { data: verdict } = await jsonLLM(
+      env,
+      `ACCEPTANCE CRITERIA:\n${criteria}\n\nTHE WORK TO EVALUATE:\n${output.slice(0, 8000)}\n\nDoes the work meet every criterion? Reply {"status":"PASS"|"FAIL","feedback":"specific, actionable — what to fix and how"}.`,
+      EvalVerdictSchema,
+      { task: opts.evaluatorTask ?? 'reasoning', system: 'You are a strict evaluator. PASS only when every criterion is genuinely met — a generous PASS defeats the loop.', prefer: opts.prefer },
+    );
+    if (verdict.status === 'PASS') return { output, passed: true, iterations: i + 1, feedback };
+    feedback.push(verdict.feedback);
+  }
+  // Cap reached: return the last attempt honestly marked unpassed — the
+  // caller decides whether an unpassed draft is still worth using.
+  return { output, passed: false, iterations: EVALUATOR_MAX_ITERATIONS, feedback };
 }
 
 // ── Logged, not implemented (plan's explicit scope for this pass) ──────────
