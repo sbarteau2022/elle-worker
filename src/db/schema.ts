@@ -504,6 +504,23 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     id TEXT PRIMARY KEY, actor_key TEXT NOT NULL, source TEXT NOT NULL, kind TEXT NOT NULL,
     tactic_ids TEXT DEFAULT '', severity_weight INTEGER DEFAULT 1, posture TEXT DEFAULT 'normal',
     detail TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`,
+    // router.ts's `advisor` tool (together-cookbook port plan §2b) — every
+    // frontier-model consult logged so the budget (MAX_ADVISOR_CALLS per run)
+    // and the advice itself stay auditable via provenance, same as any other
+    // tool call, plus whether it actually helped is measurable later.
+    `CREATE TABLE IF NOT EXISTS advisor_calls (
+    id TEXT PRIMARY KEY, run_id TEXT, session_id TEXT, transcript_chars INTEGER,
+    advice TEXT, ok INTEGER DEFAULT 1, error TEXT, created_at INTEGER)`,
+    // judge.ts (port plan §4) — the LLM-as-judge harness's OWN tables. The κ
+    // integrity constraint holds here by construction: the judge reads
+    // elle_conversation_turns.kappa and writes only these two tables.
+    `CREATE TABLE IF NOT EXISTS judge_runs (
+    run_id TEXT PRIMARY KEY, judge_model TEXT, prompt_version TEXT,
+    config_json TEXT, created_at INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS judge_verdicts (
+    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+    verdict REAL, per_criterion_json TEXT, justification TEXT,
+    latency_ms INTEGER, created_at INTEGER)`,
   ];
   await db.batch(creates.map((s) => db.prepare(s)));
 
@@ -596,6 +613,13 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // security-network.ts
     `CREATE INDEX IF NOT EXISTS idx_security_events_time ON elle_security_events(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_security_events_actor ON elle_security_events(actor_key)`,
+    // router.ts's advisor tool — correlate consults back to the run they happened in.
+    `CREATE INDEX IF NOT EXISTS idx_advisor_calls_run ON advisor_calls(run_id)`,
+    // judge.ts — the batch runner's resume path and the correlation report
+    // both look up verdicts by run; the turn index backs the already-judged
+    // NOT IN subquery.
+    `CREATE INDEX IF NOT EXISTS idx_judge_verdicts_run ON judge_verdicts(run_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_judge_verdicts_turn ON judge_verdicts(turn_id)`,
     // falcon.ts — the Material Ground. A run cannot fire without grounding, so
     // every persisted analysis carries the cited evidence it was built on:
     // material_ground_json (findings + sources + corpus look-back), grounded=1

@@ -252,3 +252,202 @@ describe('runTool — dispatch', () => {
     });
   });
 });
+
+describe('runRouter — parallel tool execution ({"tools":[...]})', () => {
+  it('dispatches multiple independent tools concurrently and feeds all observations back in one step', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ thought: 'need two things', tools: [{ tool: 'calc', args: { expression: '1+1' } }, { tool: 'calc', args: { expression: '2+2' } }] }),
+        geminiResponse({ answer: 'got both' }),
+      ],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'public', sessionId: null });
+    expect(result.answer).toBe('got both');
+    expect(result.trace).toHaveLength(2);
+    expect(result.trace.map(t => t.result).sort()).toEqual(['2', '4']);
+    expect(result.steps).toBe(1); // one loop iteration produced both calls
+  });
+
+  it('caps a step at MAX_PARALLEL_TOOLS even if the model requests more', async () => {
+    const requested = Array.from({ length: 6 }, (_, i) => ({ tool: 'calc', args: { expression: `${i}+${i}` } }));
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [geminiResponse({ tools: requested }), geminiResponse({ answer: 'done' })],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'public', sessionId: null });
+    expect(result.trace).toHaveLength(4);
+  });
+
+  it('one failing call in the batch does not take down the others', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ tools: [{ tool: 'calc', args: { expression: '1+1' } }, { tool: 'search_corpus', args: { q: 'x' } }] }),
+        geminiResponse({ answer: 'ok' }),
+      ],
+    });
+    const deps = makeDeps({ ragSearch: vi.fn(async () => { throw new Error('corpus down'); }) });
+    const result = await runRouter('q', makeEnv(), deps, { scope: 'public', sessionId: null });
+    expect(result.trace.find(t => t.tool === 'calc')?.result).toBe('2');
+    // runTool catches this internally (its own try/catch) and returns a
+    // failure STRING rather than throwing — same convention as the
+    // single-tool path; the parallel dispatcher's own catch is a second,
+    // defense-in-depth layer for the rarer case where runTool itself throws.
+    expect(result.trace.find(t => t.tool === 'search_corpus')?.result).toContain('failed');
+  });
+});
+
+describe('runRouter — opt-in planning pass (opts.plan)', () => {
+  it('does not fire by default — no extra call, no behavior change', async () => {
+    const fn = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'hi' })] });
+    await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never fires outside full scope even when explicitly requested', async () => {
+    const fn = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'hi' })] });
+    await runRouter('q', makeEnv(), makeDeps(), { scope: 'public', sessionId: null, plan: true });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('when requested, makes one extra plain-text planning call and injects the plan into the next call\'s system context', async () => {
+    const fn = stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiText('1. search the corpus for background\n2. answer'),
+        geminiResponse({ answer: 'answered with plan' }),
+      ],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null, plan: true });
+    expect(result.answer).toBe('answered with plan');
+    expect(fn).toHaveBeenCalledTimes(2);
+    const secondCall = fn.mock.calls[1] as unknown as [string, RequestInit];
+    const body = JSON.parse(secondCall[1].body as string);
+    expect(body.system_instruction.parts[0].text).toContain('search the corpus for background');
+  });
+
+  it('a DIRECT verdict contributes no plan block (the question needs no research)', async () => {
+    const fn = stubFetchRoutes({
+      'generativelanguage.googleapis.com': [geminiText('DIRECT'), geminiResponse({ answer: 'ok' })],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null, plan: true });
+    expect(result.answer).toBe('ok');
+    const secondCall = fn.mock.calls[1] as unknown as [string, RequestInit];
+    const body = JSON.parse(secondCall[1].body as string);
+    expect(body.system_instruction.parts[0].text).not.toContain('ROUGH PLAN');
+  });
+});
+
+describe('runTool — advisor (frontier escalation, budget-capped)', () => {
+  const baseCtx = { userId: 'u1', sessionId: 's1' as string | null, runId: 'r1' };
+
+  it('refuses cheaply when no Anthropic key is configured — the tool is dormant until founders-program credits land', async () => {
+    const fn = stubFetchRoutes({});
+    const out = await runTool('advisor', {}, makeEnv(), makeDeps(), { userId: 'u1', sessionId: null, transcript: [], advisorBudget: { used: 0, max: 3 } }, 'full');
+    expect(out).toContain('not configured');
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('reports unavailable when no transcript/budget context is passed', async () => {
+    const env = makeEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' });
+    const out = await runTool('advisor', {}, env, makeDeps(), { userId: 'u1', sessionId: null }, 'full');
+    expect(out).toBe('advisor: not available in this context');
+  });
+
+  it('is hidden from the prompt catalog when no key is configured, and appears once one is set', async () => {
+    // No key: the system prompt sent to the model must not advertise advisor.
+    const fnBare = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'hi' })] });
+    await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    const bareCall = fnBare.mock.calls[0] as unknown as [string, RequestInit];
+    const bareSystem = JSON.parse(bareCall[1].body as string).system_instruction.parts[0].text as string;
+    expect(bareSystem).not.toContain('advisor()');
+    vi.unstubAllGlobals();
+    // Key present: the same prompt now carries it.
+    const fnKeyed = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'hi' })] });
+    await runRouter('q', makeEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }), makeDeps(), { scope: 'full', sessionId: null });
+    const keyedCall = fnKeyed.mock.calls[0] as unknown as [string, RequestInit];
+    const keyedSystem = JSON.parse(keyedCall[1].body as string).system_instruction.parts[0].text as string;
+    expect(keyedSystem).toContain('advisor()');
+  });
+
+  it('forwards the transcript to Claude, returns the advice, and spends one budget slot', async () => {
+    stubFetchRoutes({ 'api.anthropic.com': [{ content: [{ type: 'text', text: 'try X instead' }] }] });
+    const env = makeEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' });
+    const ctx = { ...baseCtx, transcript: [{ role: 'user' as const, content: 'stuck on Y' }], advisorBudget: { used: 0, max: 3 } };
+
+    const out = await runTool('advisor', {}, env, makeDeps(), ctx, 'full');
+
+    expect(out).toBe('try X instead');
+    expect(ctx.advisorBudget.used).toBe(1);
+  });
+
+  it('refuses once the budget is spent, without calling Anthropic at all', async () => {
+    const fn = stubFetchRoutes({ 'api.anthropic.com': [{ content: [{ type: 'text', text: 'advice' }] }] });
+    const env = makeEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' });
+    const ctx = { ...baseCtx, transcript: [], advisorBudget: { used: 3, max: 3 } };
+
+    const out = await runTool('advisor', {}, env, makeDeps(), ctx, 'full');
+
+    expect(out).toContain('budget spent');
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('degrades cleanly instead of throwing when the consult itself fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
+    const env = makeEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' });
+    const ctx = { ...baseCtx, transcript: [], advisorBudget: { used: 0, max: 3 } };
+
+    const out = await runTool('advisor', {}, env, makeDeps(), ctx, 'full');
+
+    expect(out).toContain('consult failed');
+    // The budget is spent on a genuine attempt, successful or not — otherwise
+    // a consistently-failing advisor never actually gets capped.
+    expect(ctx.advisorBudget.used).toBe(1);
+  });
+
+  it('logs the consult to advisor_calls', async () => {
+    stubFetchRoutes({ 'api.anthropic.com': [{ content: [{ type: 'text', text: 'advice' }] }] });
+    const statements: string[] = [];
+    const db = { prepare: vi.fn((sql: string) => { statements.push(sql); return { bind: vi.fn(() => ({ run: vi.fn(async () => ({ success: true })) })) }; }) };
+    const env = makeEnv({ ANTHROPIC_API_KEY: 'k', DB: db });
+    const ctx = { ...baseCtx, transcript: [{ role: 'user' as const, content: 'hi' }], advisorBudget: { used: 0, max: 3 } };
+
+    await runTool('advisor', {}, env, makeDeps(), ctx, 'full');
+
+    expect(statements.some(sql => sql.includes('INSERT INTO advisor_calls'))).toBe(true);
+  });
+});
+
+describe('runRouter — verification pass (devilTool second opinion on consequential runs)', () => {
+  it('runs devilTool when a WRITE tool fired in privileged scope, and attaches the verdict without altering the answer', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ tool: 'remember', args: { note: 'a decision worth keeping around for a while' } }),
+        geminiResponse({ answer: 'noted, and I will remember this important decision we just made together here' }),
+        geminiResponse({ verdict: 'holds', strongest_objection: 'none found', missed_case: '', the_tell: '', what_would_change_my_mind: '' }),
+      ],
+    });
+    const result = await runRouter('remember this', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    expect(result.answer).toBe('noted, and I will remember this important decision we just made together here');
+    expect(result.verification?.verdict).toBe('holds');
+  });
+
+  it('skips verification when no WRITE tool was used', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ tool: 'calc', args: { expression: '1+1' } }),
+        geminiResponse({ answer: 'the answer is two, a purely computational result with no state change' }),
+      ],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    expect(result.verification).toBeUndefined();
+  });
+
+  it('skips verification outside privileged scope even when a write tool fires', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ tool: 'remember', args: { note: 'something worth keeping for later reference here' } }),
+        geminiResponse({ answer: 'got it, noted for later use in our ongoing conversation together' }),
+      ],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'member', sessionId: null });
+    expect(result.verification).toBeUndefined();
+  });
+});

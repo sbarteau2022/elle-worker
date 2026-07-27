@@ -194,7 +194,9 @@ export async function runSymbolScout(env: Env, ctx: ScoutContext): Promise<strin
         content:
           `Scan today's US market. Propose up to ${MAX_RESEARCH_PER_DAY} US-listed stock symbols worth deep research RIGHT NOW — ` +
           `earnings movers, sector rotations, catalysts the crowd is mispricing. Favor liquid names and sectors ` +
-          `underrepresented on the desk.\n\n` +
+          `underrepresented on the desk, and lean toward LOWER-PRICED stocks (roughly under $60/share) where a ` +
+          `small position buys real share quantity — the desk is deliberately built on many small positions, ` +
+          `not a few megacaps.\n\n` +
           `Do NOT propose any of these (already covered): ${[...exclude].sort().join(', ')}\n\n` +
           `Current headlines on the desk:\n${ctx.news.slice(0, 8).map(n => `- [${n.symbols?.join(',')}] ${n.headline}`).join('\n') || '(none)'}\n\n` +
           `Active theses:\n${ctx.thesesText || '(none)'}\n\n` +

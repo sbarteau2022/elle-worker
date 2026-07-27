@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { z } from 'zod';
-import { callLLM, runLLM, jsonLLM } from './llm';
+import { callLLM, runLLM, jsonLLM, callAnthropic } from './llm';
 import type { LLMEnv } from './llm';
 
 // A fetch stub that routes by URL substring; records every URL it saw so a test
@@ -113,6 +113,52 @@ describe('callExtraFreeTiers — Groq is reached as a free fallback tier', () =>
     expect(out.content).toBe('from-groq');
     expect(seen.some(u => u.includes('openrouter.ai'))).toBe(true); // tried first
     expect(seen.some(u => u.includes('api.groq.com'))).toBe(true);  // then Groq
+  });
+});
+
+describe('callAnthropic — the frontier advisor path, not part of routeLLM\'s task chain', () => {
+  it('sends the messages verbatim and returns the joined text content', async () => {
+    const { seen, fn } = stubFetch([
+      { match: 'api.anthropic.com', json: { content: [{ type: 'text', text: 'here is my advice' }], usage: { input_tokens: 50, output_tokens: 10 } } },
+    ]);
+    const env = { ANTHROPIC_API_KEY: 'sk-ant-test' } as unknown as LLMEnv;
+
+    const out = await callAnthropic('sys', [{ role: 'user', content: 'stuck on X' }], 500, env);
+
+    expect(out.content).toBe('here is my advice');
+    expect(out.provider).toBe('anthropic');
+    expect(out.tokens_in).toBe(50);
+    expect(out.tokens_out).toBe(10);
+    expect(seen[0]).toContain('api.anthropic.com');
+    const call = fn.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = call[1].headers as Record<string, string>;
+    expect(headers['x-api-key']).toBe('sk-ant-test');
+  });
+
+  it('throws when ANTHROPIC_API_KEY is not set, without making a request', async () => {
+    const { fn } = stubFetch([]);
+    const env = {} as unknown as LLMEnv;
+
+    await expect(callAnthropic('sys', [{ role: 'user', content: 'hi' }], 500, env)).rejects.toThrow(/ANTHROPIC_API_KEY not set/);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an Anthropic-reported error instead of a generic parse failure', async () => {
+    stubFetch([{ match: 'api.anthropic.com', json: { error: { message: 'overloaded' } } }]);
+    const env = { ANTHROPIC_API_KEY: 'sk-ant-test' } as unknown as LLMEnv;
+
+    await expect(callAnthropic('sys', [{ role: 'user', content: 'hi' }], 500, env)).rejects.toThrow(/overloaded/);
+  });
+
+  it('respects LLM_MODEL_ADVISOR when set, falling back to the default otherwise', async () => {
+    const { fn } = stubFetch([{ match: 'api.anthropic.com', json: { content: [{ type: 'text', text: 'ok' }] } }]);
+    const env = { ANTHROPIC_API_KEY: 'k', LLM_MODEL_ADVISOR: 'claude-custom-model' } as unknown as LLMEnv;
+
+    await callAnthropic('sys', [{ role: 'user', content: 'hi' }], 500, env);
+
+    const call = fn.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(call[1].body as string);
+    expect(body.model).toBe('claude-custom-model');
   });
 });
 

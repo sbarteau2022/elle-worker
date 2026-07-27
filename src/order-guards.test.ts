@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { maxOrderFrac, sizeWithinCap, DEFAULT_MAX_ORDER_FRAC } from './order-guards';
+import {
+  maxOrderFrac, maxSymbolFrac, sizeWithinCap, sizeWithinPortfolioCaps,
+  DEFAULT_MAX_ORDER_FRAC, DEFAULT_MAX_SYMBOL_FRAC,
+} from './order-guards';
 
 describe('maxOrderFrac — configurable buy-in ceiling', () => {
   it('defaults to 10% with no env override', () => {
@@ -60,5 +63,58 @@ describe('sizeWithinCap — downsize opening orders under the cap', () => {
     const r = sizeWithinCap(100, 333, 10_000, 0.10); // cap $1000 / $333 = 3.003
     expect(r.qty).toBe(3);
     expect(r.downsized).toBe(true);
+  });
+});
+
+describe('maxSymbolFrac — per-symbol exposure ceiling', () => {
+  it('defaults to 15% and honors valid overrides', () => {
+    expect(maxSymbolFrac({})).toBe(DEFAULT_MAX_SYMBOL_FRAC);
+    expect(maxSymbolFrac({ ELLE_MAX_SYMBOL_FRAC: '0.2' })).toBe(0.2);
+    expect(maxSymbolFrac({ ELLE_MAX_SYMBOL_FRAC: '0.5' })).toBe(0.5);
+  });
+
+  it('rejects out-of-range or garbage overrides', () => {
+    expect(maxSymbolFrac({ ELLE_MAX_SYMBOL_FRAC: '0.9' })).toBe(DEFAULT_MAX_SYMBOL_FRAC);
+    expect(maxSymbolFrac({ ELLE_MAX_SYMBOL_FRAC: '0' })).toBe(DEFAULT_MAX_SYMBOL_FRAC);
+    expect(maxSymbolFrac({ ELLE_MAX_SYMBOL_FRAC: 'all of it' })).toBe(DEFAULT_MAX_SYMBOL_FRAC);
+  });
+});
+
+describe('sizeWithinPortfolioCaps — order cap AND per-symbol exposure cap', () => {
+  // equity $100k, order cap 10% ($10k), symbol cap 15% ($15k)
+  const E = 100_000, OF = 0.10, SF = 0.15;
+
+  it('passes a small order in an unheld symbol untouched', () => {
+    expect(sizeWithinPortfolioCaps(10, 100, E, OF, 0, SF)).toEqual({ qty: 10, downsized: false });
+  });
+
+  it('still applies the per-order cap when the symbol is unheld', () => {
+    const r = sizeWithinPortfolioCaps(500, 100, E, OF, 0, SF); // $50k asked, $10k order cap
+    expect(r.qty).toBe(100);
+    expect(r.downsized).toBe(true);
+  });
+
+  it('blocks any add to a symbol already at the exposure cap', () => {
+    const r = sizeWithinPortfolioCaps(1, 100, E, OF, 15_000, SF);
+    expect(r.qty).toBe(0);
+    expect(r.reason).toMatch(/exposure cap/);
+  });
+
+  it('downsizes an add so held + order stays under the symbol cap', () => {
+    const r = sizeWithinPortfolioCaps(100, 100, E, OF, 12_000, SF); // $3k room
+    expect(r.qty).toBe(30);
+    expect(r.downsized).toBe(true);
+    expect(r.reason).toMatch(/per-symbol cap/);
+  });
+
+  it('the binding cap wins: symbol room larger than order cap → order cap rules', () => {
+    const r = sizeWithinPortfolioCaps(200, 100, E, OF, 1_000, SF); // room $14k, order cap $10k
+    expect(r.qty).toBe(100);
+  });
+
+  it('fails closed on unknown price/equity and non-positive qty', () => {
+    expect(sizeWithinPortfolioCaps(10, 0, E, OF, 0, SF).qty).toBe(0);
+    expect(sizeWithinPortfolioCaps(10, 100, 0, OF, 0, SF).qty).toBe(0);
+    expect(sizeWithinPortfolioCaps(0, 100, E, OF, 0, SF).qty).toBe(0);
   });
 });

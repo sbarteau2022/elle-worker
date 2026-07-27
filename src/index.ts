@@ -19,7 +19,7 @@ import {
   handleCohort, handleReplays, bootstrapLawSchema,
   type LawEnv,
 } from './law';
-import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema } from './trading';
+import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema, realizedPerformance } from './trading';
 import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
 import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
@@ -90,6 +90,7 @@ import { getClientByUser, createClientProfile, resolveVenueForUser } from './atl
 import { ingestAtlasCsv } from './atlas-ingest';
 import { readAtlasEvents } from './atlas-events';
 import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from './retrieval/reembed';
+import { runJudgeBatch, kappaCorrelationReport } from './judge';
 
 // ── /privacy — the door's policy, in plain language ──────────────────────────
 const PRIVACY_HTML = `<!doctype html>
@@ -178,6 +179,10 @@ export interface Env extends LLMEnv {
   // Optional; default 0.10, clamped to (0, 0.25]. Both execution paths (cron
   // decisions and chat trade_execute) size opening orders under this cap.
   ELLE_MAX_ORDER_FRAC?: string;
+  // Per-symbol TOTAL exposure ceiling as a fraction of equity (order-guards.ts).
+  // Optional; default 0.15, clamped to (0, 0.5]. The cron's buy path refuses
+  // to grow any one symbol past this — the mechanical stop on a two-megacap book.
+  ELLE_MAX_SYMBOL_FRAC?: string;
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set
@@ -270,16 +275,21 @@ function semanticChunks(text: string, targetTokens = 400, overlap = 1): string[]
 // blowing the context budget of the free OpenRouter models.
 const FULL_DOC_CHAR_CAP = 24000;
 
-async function ragSearch(query: string, limit: number, env: Env): Promise<string> {
+export async function ragSearch(query: string, limit: number, env: Env): Promise<string> {
   try {
     const embedding = await embed(query, env);
     const results   = await env.VECTORIZE.query(embedding, { topK: limit, returnMetadata: 'all' });
     if (!results.matches.length) return '';
     const ids  = results.matches.map(m => m.id);
     const rows = await env.DB.prepare(
-      `SELECT c.chunk_text, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ids.map(() => '?').join(',')})`
+      `SELECT c.chunk_text, p.id AS paper_id, p.title, p.series FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE c.vectorize_id IN (${ids.map(() => '?').join(',')})`
     ).bind(...ids).all();
-    return rows.results.map(r => `[${r.title} — ${r.series}]\n${(r.chunk_text as string).slice(0, 800)}`).join('\n\n---\n\n');
+    // `· id X` matches find_document's header format exactly (router.ts) —
+    // one convention for "this observation names a real corpus paper,
+    // openable by id," so the chat UI's trace renderer only needs one
+    // pattern to recognize a corpus reference regardless of which tool
+    // surfaced it.
+    return rows.results.map(r => `[${r.title} — ${r.series} · id ${r.paper_id}]\n${(r.chunk_text as string).slice(0, 800)}`).join('\n\n---\n\n');
   } catch { return ''; }
 }
 
@@ -936,7 +946,7 @@ async function handleTradingView(env: Env): Promise<Response> {
   // empty list, not an error.
   await ensureScoutSchema(env.DB).catch(() => {});
   const grab = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
-  const [account, positions, trades, theses, journal, observations, research] = await Promise.all([
+  const [account, positions, trades, theses, journal, observations, research, performance] = await Promise.all([
     grab(env.DB.prepare('SELECT * FROM elle_trading_account WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1').first()),
     grab(env.DB.prepare('SELECT * FROM elle_trading_positions ORDER BY updated_at DESC').all().then(r => r.results)),
     grab(env.DB.prepare('SELECT id, symbol, action, quantity, entry_price, exit_price, pnl, pnl_pct, reasoning, what_she_is_testing, expected_catalyst, expected_timeframe, confidence, status, created_at, closed_at, asset_class, option_right, strike_price, expiration_date, underlying_symbol, attribution FROM elle_trades ORDER BY created_at DESC LIMIT 40').all().then(r => r.results)),
@@ -949,8 +959,11 @@ async function handleTradingView(env: Env): Promise<Response> {
     // Her research desk — symbols she scouted and researched herself
     // (symbol-scout.ts), newest first.
     grab(env.DB.prepare('SELECT id, symbol, picked_because, findings, thesis, expected_catalyst, risks, verdict, confidence, source, created_at FROM elle_symbol_research ORDER BY created_at DESC LIMIT 30').all().then(r => r.results)),
+    // The money scoreboard — realized P&L, win rate, avg win/loss from her
+    // closed trades. Same computation the decision prompt reads.
+    grab(realizedPerformance(env.DB)),
   ]);
-  return json({ account, positions, trades, theses, journal, observations, research, market_open: marketOpen(), as_of: Date.now() });
+  return json({ account, positions, trades, theses, journal, observations, research, performance, market_open: marketOpen(), as_of: Date.now() });
 }
 
 async function handleCodeEngine(body: Record<string, unknown>, env: Env): Promise<Response> {
@@ -2157,6 +2170,25 @@ export default {
     if (path === '/api/retrieval/backfill-contextual') {
       if (!svc) return err('Unauthorized', 401);
       return json(await enqueueContextualBackfill(env as unknown as ReembedEnv & { INGEST_QUEUE: Queue }));
+    }
+    // LLM-as-judge harness (src/judge.ts, port plan §4). Batch-judges
+    // historical turns (25/call default, resumable via run_id — the ≥100-turn
+    // acceptance run is a few calls of the same body plus run_id) and reports
+    // the Spearman κ cross-check. Real LLM cost per judged turn; admin-gated,
+    // prefer:'local' spares the hosted quota for bulk runs.
+    if (path === '/api/judge/run') {
+      if (!svc) return err('Unauthorized', 401);
+      const b = body as { session_id?: string; limit?: number; run_id?: string; prefer?: string };
+      return json(await runJudgeBatch(env, {
+        sessionId: b.session_id, limit: b.limit, runId: b.run_id,
+        prefer: b.prefer === 'local' ? 'local' : undefined,
+      }));
+    }
+    if (path === '/api/judge/kappa-correlation') {
+      if (!svc) return err('Unauthorized', 401);
+      const b = body as { run_id?: string };
+      if (!b.run_id) return err('run_id required');
+      return json(await kappaCorrelationReport(env, b.run_id));
     }
     if (path === '/api/webhooks/research') { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
     if (path === '/api/research')          { if (!svc) return err('Unauthorized', 401); return handleResearch(body, env); }
