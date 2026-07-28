@@ -48,4 +48,35 @@ describe('ssrfGuard — rejects the SSRF classics', () => {
     expect(ssrfGuard('not a url').ok).toBe(false);
     expect(isPrivateOrReservedHost('999.1.1.1')).toBe(true); // malformed → refuse
   });
+
+  it('blocks non-dotted-quad IPv4 encodings of private/loopback addresses', () => {
+    expect(isPrivateOrReservedHost('2130706433')).toBe(true);   // decimal 127.0.0.1
+    expect(isPrivateOrReservedHost('0x7f000001')).toBe(true);   // hex 127.0.0.1
+    expect(isPrivateOrReservedHost('0177.0.0.1')).toBe(true);   // octal 127.0.0.1
+    expect(isPrivateOrReservedHost('127.1')).toBe(true);        // shortened 127.0.0.1
+    expect(isPrivateOrReservedHost('0xa9.0xfe.0xa9.0xfe')).toBe(true); // hex 169.254.169.254
+    expect(isPrivateOrReservedHost('2852039166')).toBe(true);   // decimal 169.254.169.254
+    expect(isPrivateOrReservedHost('0xc0.168.1.1')).toBe(true); // mixed 192.168.1.1
+    expect(isPrivateOrReservedHost('10.1')).toBe(true);         // shortened 10.0.0.1
+    expect(isPrivateOrReservedHost('127.0.0.1.')).toBe(true);   // trailing dot
+    // and the guard end-to-end (URL implementations canonicalize these,
+    // so this holds whether or not the parser above is reached)
+    expect(ssrfGuard('http://2130706433/').ok).toBe(false);
+    expect(ssrfGuard('http://0x7f000001/').ok).toBe(false);
+    expect(ssrfGuard('http://0177.0.0.1/').ok).toBe(false);
+    expect(ssrfGuard('http://127.1/').ok).toBe(false);
+  });
+
+  it('still allows public addresses in alternate encodings and hostnames', () => {
+    expect(isPrivateOrReservedHost('16843009')).toBe(false);  // decimal 1.1.1.1 — public
+    expect(isPrivateOrReservedHost('1.1')).toBe(false);       // shortened 1.0.0.1 — public
+    expect(isPrivateOrReservedHost('example.com')).toBe(false);
+    expect(isPrivateOrReservedHost('127.0.0.1.example.com')).toBe(false); // hostname, not an IP
+  });
+
+  it('refuses numeric-looking hosts that are not valid IPv4', () => {
+    expect(isPrivateOrReservedHost('1.2.3.4.5')).toBe(true);  // five parts
+    expect(isPrivateOrReservedHost('08.0.0.1')).toBe(true);   // invalid octal digit
+    expect(isPrivateOrReservedHost('4294967296')).toBe(true); // > 32 bits
+  });
 });
