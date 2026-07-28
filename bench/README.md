@@ -18,11 +18,14 @@ convention works.
 
 ## Auth — "just the JWT_SECRET"
 
-Sign a JWT with the worker's `JWT_SECRET` (HS256) and send it as
-`Authorization: Bearer <token>`. The worker verifies the signature (+ `exp`)
-but skips the session-revocation check that user logins require — possession of
-`JWT_SECRET` is the authorization. The break-glass service key also opens the
-door. See `real_kernel_client.py` for a zero-dependency signer.
+Sign a JWT with the worker's `JWT_SECRET` (HS256), carrying `scope: "kernel"`
+in the payload, and send it as `Authorization: Bearer <token>`. The worker
+verifies the signature (+ `exp`) and the scope claim but skips the
+session-revocation check that user logins require — possession of `JWT_SECRET`
+is the authorization. The scope claim is required so that ordinary user session
+tokens (signed with the same secret, but never carrying `scope`) can't open the
+kernel door. The break-glass service key also opens the door. See
+`real_kernel_client.py` for a zero-dependency signer (it already sets the scope).
 
 ```bash
 export JWT_SECRET="<same value the worker has>"

@@ -345,6 +345,14 @@ function isServiceRequest(request: Request, env: Env): boolean {
   return timingSafeEqualStr(presented, `Bearer ${env.ELLE_SERVICE_KEY}`);
 }
 
+// The sandbox-bus / duplex / elle-tool shared secret (x-sandbox-key). Full
+// execution scope rides on this header, so it gets the same constant-time
+// treatment as the service key — and the same never-match-when-unset rule.
+function sandboxKeyOk(request: Request, env: Env): boolean {
+  if (!env.SANDBOX_AGENT_KEY) return false;
+  return timingSafeEqualStr(request.headers.get('x-sandbox-key') || '', env.SANDBOX_AGENT_KEY);
+}
+
 // Length-independent constant-time string comparison.
 function timingSafeEqualStr(a: string, b: string): boolean {
   const enc = new TextEncoder();
@@ -370,15 +378,21 @@ async function isAdmin(request: Request, env: Env): Promise<boolean> {
 // We verify that signature (+ exp) but deliberately skip the AUTH_TOKENS
 // revocation check that user sessions require: there is no session to revoke,
 // and possession of JWT_SECRET (needed to mint the token at all) is itself the
-// authorization. The break-glass service key also opens this door. This is why
-// the client only needs "the same JWT_SECRET" and nothing else.
+// authorization. The break-glass service key also opens this door.
+//
+// The token MUST carry `scope: 'kernel'`. Ordinary user sessions are signed
+// with the same JWT_SECRET, and without a distinguishing claim any signed-up
+// standard-tier account's session token would open /mem/* — read and poison
+// the shared memory kernel. The login/signup/oauth mints never set `scope`,
+// so requiring it here cleanly separates "holds JWT_SECRET and minted a
+// kernel token" from "was handed a session token by the login door".
 async function isKernelRequest(request: Request, env: Env): Promise<boolean> {
   if (isServiceRequest(request, env)) return true;
   if (!env.JWT_SECRET) return false;
   const auth = request.headers.get('Authorization') || '';
   if (!auth.startsWith('Bearer ')) return false;
   const pl = await verifyJWT(auth.slice(7), env.JWT_SECRET);
-  return !!pl; // any correctly-signed, unexpired JWT_SECRET token is the kernel
+  return !!pl && pl.scope === 'kernel';
 }
 // Tiers that may open the admin surface (the workbench) and see everything.
 // 'cofounder' is a trusted second admin: full visibility, but the router runs
@@ -403,6 +417,18 @@ async function ensureUserColumns(env: Env): Promise<void> {
 
 async function handleAuth(body: Record<string, string>, env: Env, request: Request): Promise<Response> {
   const { action, email, password } = body;
+
+  // Logout — revoke the presented token's jti so a lingering copy (browser
+  // localStorage, a synced device, an intercepted header) dies the moment the
+  // user signs out, instead of riding out its 30-day exp. Needs no email or
+  // password: the token itself is the thing being surrendered. Idempotent —
+  // revoking an already-revoked or expired token still reports success.
+  if (action === 'logout') {
+    const pl = await verifyJWT(body.token || '', env.JWT_SECRET);
+    if (pl?.jti) await env.AUTH_TOKENS.delete(`token:${pl.jti}`);
+    return json({ success: true });
+  }
+
   if (!email) return err('email required');
   await ensureUserColumns(env);
   // These actions touch no credentials, so they alone may omit the password.
@@ -1928,7 +1954,7 @@ export default {
     // tab reads with its admin JWT. A sovereign 'say' wakes a bounded cloud
     // reply through the full router (source 'duplex').
     if (path === '/api/duplex') {
-      const viaAgentKey = !!env.SANDBOX_AGENT_KEY && request.headers.get('x-sandbox-key') === env.SANDBOX_AGENT_KEY;
+      const viaAgentKey = sandboxKeyOk(request, env);
       if (!svc && !viaAgentKey) return err('Unauthorized', 401);
       return json(await handleDuplex(body as Record<string, unknown>, env, async (prompt) =>
         (await runRouter(prompt, env, routerDeps(), { maxSteps: 4, scope: 'full', sessionId: 'duplex-channel', source: 'duplex' })).answer));
@@ -1950,7 +1976,7 @@ export default {
       if (!sessionBusConfigured(env)) {
         return err('sandbox key not configured on this worker — set SANDBOX_AGENT_KEY (wrangler secret put SANDBOX_AGENT_KEY)', 503);
       }
-      if (request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      if (!sandboxKeyOk(request, env)) return err('Unauthorized', 401);
       const b = body as { tool?: string; args?: Record<string, unknown>; run_id?: string; session_id?: string; source?: string };
       const tool = String(b.tool || '').trim();
       if (!tool) return err('tool required', 400);
@@ -1968,7 +1994,7 @@ export default {
     // the laptop client talking, not the browser workbench.
     if (path === '/api/sandbox-bus/poll') {
       if (!sessionBusConfigured(env)) return err('sandbox bus not configured', 503);
-      if (request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      if (!sandboxKeyOk(request, env)) return err('Unauthorized', 401);
       const b = body as { lane?: string; limit?: number; meta?: Record<string, unknown> };
       const lane = String(b.lane || 'primary');
       const jobs = await busPoll(env, lane, { limit: b.limit, meta: b.meta });
@@ -1976,7 +2002,7 @@ export default {
     }
     if (path === '/api/sandbox-bus/submit') {
       if (!sessionBusConfigured(env)) return err('sandbox bus not configured', 503);
-      if (request.headers.get('x-sandbox-key') !== env.SANDBOX_AGENT_KEY) return err('Unauthorized', 401);
+      if (!sandboxKeyOk(request, env)) return err('Unauthorized', 401);
       const b = body as { lane?: string; items?: Array<{ kind: string; wire: string; replyTo?: string }> };
       const lane = String(b.lane || 'primary');
       const results = await busSubmit(env, lane, Array.isArray(b.items) ? b.items : []);
@@ -2326,7 +2352,7 @@ export default {
     // fell through to a misleading 401 instead of reaching the kernel.
     if (path === '/mem/write' || path === '/mem/recall' || path === '/mem/assemble' || path === '/mem/backfill') {
       if (!await isKernelRequest(request, env)) {
-        return err('Unauthorized — sign a Bearer token with JWT_SECRET (or use the service key)', 401);
+        return err("Unauthorized — sign a Bearer token with JWT_SECRET carrying {scope:'kernel'} (or use the service key)", 401);
       }
 
       if (request.method !== 'POST') return err('POST only', 405);

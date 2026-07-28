@@ -11,7 +11,9 @@
 //   • non-http(s) schemes (no file:, gopher:, data:, blob:, ws:…);
 //   • credentials in the URL (user:pass@host — used to smuggle hosts);
 //   • hostnames that are private/reserved IPs (v4 + v6), loopback,
-//     link-local, or the cloud metadata address 169.254.169.254;
+//     link-local, or the cloud metadata address 169.254.169.254 — including
+//     decimal/hex/octal/shortened IPv4 encodings (2130706433, 0x7f000001,
+//     0177.0.0.1, 127.1) that fetch would resolve to the same address;
 //   • bare hostnames with no dot that resolve internally (localhost, etc.);
 //   • non-standard ports (only 80/443 — closes port-scan/proxy abuse).
 //
@@ -57,13 +59,19 @@ export function ssrfGuard(raw: string): SsrfResult {
 // True for any host that is a private, loopback, link-local, or reserved
 // IP literal (v4 or v6). Non-IP hostnames pass here (resolved by the runtime,
 // which blocks private ranges itself as the backstop).
+//
+// IPv4 is matched through a WHATWG-style parser, not a dotted-quad regex,
+// because fetch treats ANY host whose last label is numeric as an IPv4
+// address: decimal (2130706433), hex (0x7f000001), octal (0177.0.0.1), and
+// shortened (127.1) encodings all reach 127.0.0.1. Spec-compliant URL
+// implementations canonicalize these before we see them, but this guard is
+// pure and exported — it must hold on the raw encoding too. A host that
+// looks numeric but doesn't parse as IPv4 is refused outright.
 export function isPrivateOrReservedHost(host: string): boolean {
-  // IPv4 dotted quad
-  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (v4) {
-    const o = v4.slice(1).map(Number);
-    if (o.some((n) => n > 255)) return true; // malformed → refuse
-    const [a, b] = o;
+  if (looksIpv4Numeric(host)) {
+    const addr = parseIpv4(host);
+    if (addr === null) return true;                 // numeric-looking but malformed → refuse
+    const a = addr >>> 24, b = (addr >>> 16) & 255;
     if (a === 0) return true;                       // 0.0.0.0/8
     if (a === 10) return true;                      // 10/8 private
     if (a === 127) return true;                     // loopback
@@ -85,4 +93,41 @@ export function isPrivateOrReservedHost(host: string): boolean {
     return false;
   }
   return false;
+}
+
+// The WHATWG URL spec routes a host into its IPv4 parser when the last
+// dot-separated label is numeric (decimal, 0x-hex, or 0-octal). Same trigger
+// here — everything else is an ordinary DNS hostname.
+function looksIpv4Numeric(host: string): boolean {
+  const h = host.endsWith('.') ? host.slice(0, -1) : host; // one trailing dot is legal
+  const last = h.split('.').pop() || '';
+  return /^(0x[0-9a-f]*|[0-9]+)$/i.test(last);
+}
+
+// WHATWG-style IPv4 parse: up to 4 numeric parts, each decimal / 0x-hex /
+// 0-octal; the LAST part fills all remaining bytes (so "127.1" = 127.0.0.1
+// and "2130706433" is the whole address). Returns the 32-bit address, or
+// null when the host is numeric-shaped but not a valid IPv4 encoding.
+function parseIpv4(host: string): number | null {
+  const h = host.endsWith('.') ? host.slice(0, -1) : host;
+  const parts = h.split('.');
+  if (!parts.length || parts.length > 4) return null;
+  const nums: number[] = [];
+  for (const p of parts) {
+    const n = parseIpv4Part(p);
+    if (n === null) return null;
+    nums.push(n);
+  }
+  const rest = 4 - (nums.length - 1);
+  for (let i = 0; i < nums.length - 1; i++) if (nums[i] > 255) return null;
+  if (nums[nums.length - 1] >= 256 ** rest) return null;
+  let addr = 0;
+  for (let i = 0; i < nums.length - 1; i++) addr = addr * 256 + nums[i];
+  return (addr * 256 ** rest + nums[nums.length - 1]) >>> 0;
+}
+
+function parseIpv4Part(p: string): number | null {
+  if (/^0x[0-9a-f]*$/i.test(p)) return p.length === 2 ? 0 : parseInt(p.slice(2), 16); // bare "0x" is 0 per spec
+  if (p.length > 1 && p[0] === '0') return /^[0-7]+$/.test(p) ? parseInt(p, 8) : null; // octal; "08" is malformed
+  return /^[0-9]+$/.test(p) ? parseInt(p, 10) : null;
 }
