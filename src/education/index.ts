@@ -27,10 +27,16 @@ import { availableUnits, completeUnit, phaseReview, recordSession, unitById } fr
 import { evidenceFraction } from './signals.ts';
 import { sessionBrief } from './brief.ts';
 import aiEngineerStackJson from './courses/ai-engineer-stack.json';
+import aiEngineerCurriculumJson from './courses/ai-engineer-curriculum.json';
 import facilitatorStance from './FACILITATOR.md';
 
 const COURSES: Record<string, Course> = {
   'ai-engineer-stack': aiEngineerStackJson as unknown as Course,
+  // First-party, ours-to-teach curriculum — descend/build/re-ascend, generated
+  // from curriculum/ai-engineer/ (CustomCourseBuilder) as each tier's modules
+  // are authored and gated. Currently covers the foundation tier only; more
+  // units arrive as later tiers land and this JSON is regenerated + re-synced.
+  'ai-engineer-curriculum': aiEngineerCurriculumJson as unknown as Course,
 };
 const DEFAULT_COURSE = 'ai-engineer-stack';
 
