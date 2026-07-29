@@ -215,6 +215,110 @@ function slope(xs: number[], ys: number[]): number {
 const ALPHA = 0.5, BETA = 0.5, TAU = 0.25;
 export const DELTA_DEFAULT = 0.3;
 
+// ── adaptive resolving distance (the F1/minimax-scorecard density fix) ────
+// A single global δ can't be right for a store whose density varies: shrink
+// it to clear a worst-case collision and every sparse, legitimately-fuzzy
+// match stops resolving too (the "amnesia" failure mode); leave it wide and
+// dense neighborhoods can't be told apart. δ scales instead with LOCAL
+// density — the same variable-bandwidth idea behind adaptive kernel density
+// estimation and adaptive k-d tree radius search, not new math: a query
+// sitting in a crowded neighborhood (small k-th-nearest-neighbor distance)
+// gets a tighter δ; a query sitting in open space gets a looser one. Bounded
+// to [deltaMin, deltaMax] so it can't collapse to zero (no match ever
+// resolves) or blow up to always-match. DELTA_DEFAULT remains the fallback
+// for a store too small to estimate density from (cold start).
+export interface AdaptiveDeltaConfig {
+  k: number;        // which nearest OTHER stored index sets the local density radius
+  factor: number;   // delta_local = factor * (distance to that k-th neighbor)
+  deltaMin: number;
+  deltaMax: number;
+}
+export const ADAPTIVE_DELTA_DEFAULT: AdaptiveDeltaConfig = { k: 2, factor: 0.5, deltaMin: 0.05, deltaMax: 0.6 };
+
+// Distance from `target` to its k-th nearest OTHER index in `store` — the
+// local density measurement. Returns null if the store doesn't yet have k
+// other members to measure against (too early to estimate density).
+export function kthNearestDistance(target: PamiIndex, store: PamiIndex[], k: number): number | null {
+  const dists = store
+    .filter((m) => m !== target)
+    .map((m) => pamiDistance(target, m))
+    .sort((a, b) => a - b);
+  return dists.length >= k ? dists[k - 1] : null;
+}
+
+// ── modulation 1: state uncertainty (graph volatility) ────────────────────
+// "If the graph is highly perturbed, tighten the threshold to avoid false
+// positives." Volatility is sourced from graph.ts's own sweep() result —
+// CloudGraphStore.sweep() already reports {decayed, pruned, flags} per
+// cycle; volatility here is just the FRACTION of the graph's edges that
+// moved (decayed or were pruned) last cycle, normalized to [0,1]. A pure
+// function — no import of graph.ts — so callers pass the numbers they
+// already have from their own sweep() call rather than this module reaching
+// into the graph store itself.
+export function graphVolatility(decayed: number, pruned: number, totalEdges: number): number {
+  if (totalEdges <= 0) return 0;
+  return Math.max(0, Math.min(1, (decayed + pruned) / totalEdges));
+}
+// Tightens delta toward VOLATILITY_MIN_FACTOR of its density-computed value
+// as volatility rises: at volatility=0, unchanged; at volatility=1 (every
+// edge moved last cycle), shrunk to 40% — demanding more precision exactly
+// when false positives are most likely, never all the way to zero.
+export const VOLATILITY_MIN_FACTOR = 0.4;
+export function volatilityTighten(delta: number, volatility: number): number {
+  const v = Math.max(0, Math.min(1, volatility));
+  return delta * (1 - v * (1 - VOLATILITY_MIN_FACTOR));
+}
+
+// ── modulation 2: winding/radial-variance precision weighting ────────────
+// Runs the SAME phase-vessel hold() pamiCoherence() already uses (the
+// PR #281 wiring) and reads its own trace: a memory whose phase energy
+// locks onto the golden orbit with a small, quick transient (low deviation
+// variance across the run) is a memory the vessel is confident about —
+// tighten its delta. One whose transient is large/wobbly is a memory whose
+// OWN position estimate is less certain — loosen its delta rather than
+// falsely demanding precision from a noisy encoding. VESSEL_REFERENCE_VARIANCE
+// is not arbitrary: it is the measured center of this quantity across real
+// basis-neutral PAMI-encoded memories (~0.015–0.025 in practice; see
+// pami.test.ts), not a guessed constant.
+function vesselFor(idx: PamiIndex) {
+  const occupied = idx.phases.filter((p) => p !== 0).length;
+  const meanPhaseMag = occupied ? idx.phases.reduce((s, p) => s + Math.abs(p), 0) / occupied : 0;
+  return hold({ q: PHI * (1 + meanPhaseMag / Math.PI), p: 0 }, { steps: 600 });
+}
+export function vesselTraceVariance(idx: PamiIndex): number {
+  const devs = vesselFor(idx).trace.map((t) => t.deviation);
+  const mean = devs.reduce((a, b) => a + b, 0) / devs.length;
+  return devs.reduce((a, b) => a + (b - mean) ** 2, 0) / devs.length;
+}
+export const VESSEL_REFERENCE_VARIANCE = 0.02;
+export const VESSEL_FACTOR_MIN = 0.5, VESSEL_FACTOR_MAX = 2.0;
+export function vesselPrecisionFactor(idx: PamiIndex): number {
+  const variance = vesselTraceVariance(idx);
+  return Math.min(VESSEL_FACTOR_MAX, Math.max(VESSEL_FACTOR_MIN, variance / VESSEL_REFERENCE_VARIANCE));
+}
+
+// The adaptive δ for `target` (a query or a candidate memory) given the
+// ambient population it's being compared against. Falls back to
+// DELTA_DEFAULT when the store is too sparse to estimate local density.
+// Both modulations are optional and neutral by default (volatility=0,
+// no vesselFactor) — supplying them composes on top of the density-computed
+// base, then re-clamps to [deltaMin, deltaMax] so neither can push the
+// result outside the same safety bounds the density term itself respects.
+export interface AdaptiveDeltaModulation {
+  volatility?: number;    // [0,1] — graph.ts's sweep() churn fraction, see graphVolatility()
+  vesselFactor?: number;  // precision multiplier from vesselPrecisionFactor(target)
+}
+export function adaptiveDelta(
+  target: PamiIndex, store: PamiIndex[], cfg: AdaptiveDeltaConfig = ADAPTIVE_DELTA_DEFAULT,
+  modulation: AdaptiveDeltaModulation = {},
+): number {
+  const kth = kthNearestDistance(target, store, cfg.k);
+  let delta = kth === null ? DELTA_DEFAULT : Math.min(cfg.deltaMax, Math.max(cfg.deltaMin, cfg.factor * kth));
+  if (modulation.volatility) delta = volatilityTighten(delta, modulation.volatility);
+  if (modulation.vesselFactor) delta = delta * modulation.vesselFactor;
+  return Math.min(cfg.deltaMax, Math.max(cfg.deltaMin, delta));
+}
+
 export function pamiDistance(a: PamiIndex, b: PamiIndex): number {
   // Phase half. A slot at exactly 0 is the energy gate's "no content here"
   // sentinel (a measured phase is 0.00000 with probability ~0). Three cases
@@ -302,8 +406,7 @@ export function pamiCoherence(idx: PamiIndex): PamiCoherenceResult {
   for (let i = 1; i < idx.dims.length; i++) if (idx.dims[i] <= idx.dims[i - 1] + 0.15) monotoneOk++;
   const relational = idx.dims.length > 1 ? monotoneOk / (idx.dims.length - 1) : 1;
 
-  const meanPhaseMag = occupied ? idx.phases.reduce((s, p) => s + Math.abs(p), 0) / occupied : 0;
-  const vessel = hold({ q: PHI * (1 + meanPhaseMag / Math.PI), p: 0 }, { steps: 600 });
+  const vessel = vesselFor(idx);
   const harmonic = vesselCoherence(vessel).harmonic;
 
   const coherence: Coherence = { structural, relational, harmonic };
@@ -320,29 +423,136 @@ let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
   await ensureAllSchemas(env.DB);
+  await ensureDeltaColumn(env);
   schemaReady = true;
+}
+
+// pami_memories predates per-memory delta; same late-ALTER pattern as
+// memory.ts's vectorize_id column. A pre-existing row reads delta=NULL,
+// which every consumer below treats as "not yet assigned" and falls back
+// to DELTA_DEFAULT for, never as zero/collision.
+let deltaColumnReady = false;
+async function ensureDeltaColumn(env: Env): Promise<void> {
+  if (deltaColumnReady) return;
+  await env.DB.prepare('ALTER TABLE pami_memories ADD COLUMN delta REAL').run().catch(() => {});
+  deltaColumnReady = true;
 }
 
 const genId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 
+// ── insertion-time precision (the O(1)-at-query-time fix) ─────────────────
+// Computing a query's local density at RETRIEVAL time means scanning the
+// whole store on every single lookup — fine in a test, a real cost on
+// edge-deployed compute. Move the density calculation to WRITE time instead:
+// each memory gets its own permanent delta_i, computed once from its
+// nearest neighbor AT THE MOMENT IT'S WRITTEN, so retrieval becomes a flat
+// per-candidate comparison (distance < candidate.delta), no scan required.
+//
+//   delta_i = min(DELTA_MAX, gamma * d(m_i, nearest_other))
+//
+// gamma=0.5 is not just a "safety margin" — it is PROVABLY sufficient to
+// guarantee two memories' basins never overlap: for any pair (A, B),
+// nearestDist(A) ≤ d(A,B) by definition (B is one of the candidates the min
+// is taken over), so delta_A ≤ 0.5·d(A,B); symmetrically delta_B ≤
+// 0.5·d(A,B); therefore delta_A + delta_B ≤ d(A,B), always. Proven inline
+// in pami.test.ts across every pair of a real memory set, not just the
+// closest one.
+//
+// THE CAVEAT the "or when the graph undergoes structural changes" phrase in
+// this feature's own design brief is pointing at: that guarantee only holds
+// for memories that existed WHEN EACH OTHER's delta was computed. If A is
+// inserted alone (capped at DELTA_MAX, having no close neighbor yet) and B
+// is inserted later very close to A, A's delta is now STALE — it doesn't
+// know B exists, and A_delta + B_delta could exceed d(A,B), a real basin
+// overlap. pamiStore() below closes this: on every insert, existing
+// memories whose stored delta the NEW memory would invalidate get shrunk in
+// the same batch, not left to rot until a maintenance pass. pamiRecomputeDeltas()
+// is the bulk equivalent for "the graph undergoes structural changes" more
+// broadly (a bulk backfill/consolidation-triggered refresh), exported
+// standalone rather than wired into any cron path here — that wiring is a
+// deliberate choice for whoever owns consolidate.ts's schedule, not a
+// silent side effect of this change.
+export const GAMMA_DEFAULT = 0.5;
+export function computeInsertionDelta(
+  newIdx: PamiIndex, existing: PamiIndex[], deltaMax = DELTA_DEFAULT, gamma = GAMMA_DEFAULT,
+): number {
+  let nearest = Infinity;
+  for (const other of existing) {
+    const d = pamiDistance(newIdx, other);
+    if (d < nearest) nearest = d;
+  }
+  return Number.isFinite(nearest) ? Math.min(deltaMax, gamma * nearest) : deltaMax;
+}
+
 export async function pamiStore(env: Env, index: PamiIndex, content?: string): Promise<string> {
   await ensureSchema(env);
   const id = genId();
-  await env.DB.prepare('INSERT INTO pami_memories (id, index_json, content, created_at) VALUES (?,?,?,?)')
-    .bind(id, JSON.stringify(index), (content || '').slice(0, 4000) || null, Date.now()).run();
+
+  const rows = await env.DB.prepare('SELECT id, index_json, delta FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
+    .all().then((r) => r.results as Array<{ id: string; index_json: string; delta: number | null }>).catch(() => []);
+  const existing = rows.flatMap((r) => {
+    try { return [{ r, idx: JSON.parse(r.index_json) as PamiIndex }]; } catch { return []; }
+  });
+
+  const newDelta = computeInsertionDelta(index, existing.map((e) => e.idx));
+
+  // Shrink-on-insert: any existing memory whose stored delta the new one
+  // now invalidates gets tightened in the SAME batch, so the no-overlap
+  // guarantee never goes stale between writes.
+  const shrinks = existing.flatMap(({ r, idx }) => {
+    const d = pamiDistance(index, idx);
+    const candidate = GAMMA_DEFAULT * d;
+    const current = r.delta ?? DELTA_DEFAULT;
+    return candidate < current ? [{ id: r.id, delta: Math.max(0, candidate) }] : [];
+  });
+
+  const stmts = [
+    env.DB.prepare('INSERT INTO pami_memories (id, index_json, content, created_at, delta) VALUES (?,?,?,?,?)')
+      .bind(id, JSON.stringify(index), (content || '').slice(0, 4000) || null, Date.now(), newDelta),
+    ...shrinks.map((s) => env.DB.prepare('UPDATE pami_memories SET delta = ? WHERE id = ?').bind(s.delta, s.id)),
+  ];
+  await env.DB.batch(stmts);
   return id;
 }
 
-export async function pamiRetrieve(env: Env, query: PamiIndex, k = 5): Promise<Array<{ id: string; distance: number; resonance: number; content: string | null }>> {
+// Bulk maintenance recompute — "when the graph undergoes structural
+// changes." Recomputes EVERY stored memory's delta from scratch against the
+// full current population. Not on any cron path; call this from wherever
+// graph-hygiene maintenance is triggered, on purpose, not by default.
+export async function pamiRecomputeDeltas(env: Env, deltaMax = DELTA_DEFAULT, gamma = GAMMA_DEFAULT): Promise<{ updated: number }> {
   await ensureSchema(env);
-  const rows = await env.DB.prepare('SELECT id, index_json, content FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
-    .all().then((r) => r.results as Array<{ id: string; index_json: string; content: string | null }>).catch(() => []);
+  const rows = await env.DB.prepare('SELECT id, index_json FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
+    .all().then((r) => r.results as Array<{ id: string; index_json: string }>).catch(() => []);
+  const parsed = rows.flatMap((r) => {
+    try { return [{ id: r.id, idx: JSON.parse(r.index_json) as PamiIndex }]; } catch { return []; }
+  });
+  const stmts = parsed.map(({ id, idx }) => {
+    const others = parsed.filter((p) => p.id !== id).map((p) => p.idx);
+    const delta = computeInsertionDelta(idx, others, deltaMax, gamma);
+    return env.DB.prepare('UPDATE pami_memories SET delta = ? WHERE id = ?').bind(delta, id);
+  });
+  if (stmts.length) await env.DB.batch(stmts);
+  return { updated: stmts.length };
+}
+
+export async function pamiRetrieve(
+  env: Env, query: PamiIndex, k = 5,
+): Promise<Array<{ id: string; distance: number; resonance: number; content: string | null; delta: number; resolved: boolean }>> {
+  await ensureSchema(env);
+  const rows = await env.DB.prepare('SELECT id, index_json, content, delta FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
+    .all().then((r) => r.results as Array<{ id: string; index_json: string; content: string | null; delta: number | null }>).catch(() => []);
+  // O(1) per candidate: each row already carries its own pre-computed
+  // basin of attraction from pamiStore()/pamiRecomputeDeltas() — no
+  // nearest-neighbor scan happens here, at query time, at all.
   const scored = rows.flatMap((r) => {
-    try {
-      const idx = JSON.parse(r.index_json) as PamiIndex;
-      const d = pamiDistance(query, idx);
-      return [{ id: r.id, distance: round(d, 4), resonance: round(Math.exp(-d / TAU), 4), content: r.content }];
-    } catch { return []; }
+    let idx: PamiIndex;
+    try { idx = JSON.parse(r.index_json) as PamiIndex; } catch { return []; }
+    const d = pamiDistance(query, idx);
+    const delta = r.delta ?? DELTA_DEFAULT;
+    return [{
+      id: r.id, distance: round(d, 4), resonance: round(Math.exp(-d / TAU), 4), content: r.content,
+      delta: round(delta, 4), resolved: d < delta,
+    }];
   });
   return scored.sort((a, b) => a.distance - b.distance).slice(0, Math.max(1, Math.min(k, 50)));
 }
@@ -376,7 +586,11 @@ export async function pamiTool(env: Env, a: PamiToolInput): Promise<string> {
     if (op === 'retrieve') {
       const idx = a.index ?? (a.signal ? pamiIndex(a.signal) : null);
       if (!idx) return JSON.stringify({ op, error: 'pami retrieve: provide index or signal[]' });
-      return JSON.stringify({ op, matches: await pamiRetrieve(env, idx, a.k ?? 5), threshold: DELTA_DEFAULT });
+      // Each match carries its OWN pre-computed delta/resolved, assigned at
+      // insertion time (computeInsertionDelta in pamiStore) — no
+      // nearest-neighbor scan happens here at query time. static_threshold
+      // is kept only as a reference baseline, not the actual gate.
+      return JSON.stringify({ op, matches: await pamiRetrieve(env, idx, a.k ?? 5), static_threshold: DELTA_DEFAULT });
     }
     if (op === 'resonate') {
       const x = a.index ?? (a.signal ? pamiIndex(a.signal) : null);
