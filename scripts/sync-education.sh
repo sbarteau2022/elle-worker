@@ -25,6 +25,10 @@ vendor src/runtime/engine.ts  engine.ts
 vendor src/runtime/seal.ts    seal.ts
 vendor src/runtime/brief.ts   brief.ts
 cp "$CCB/dist/courses/ai-engineer-stack.json" "$DEST/courses/ai-engineer-stack.json"
+# ai-engineer-curriculum is GENERATED in CCB (src/generate-course-from-curriculum.ts)
+# from curriculum/ai-engineer/ — `npm run build` there regenerates it from
+# whatever materials have landed before this script vendors the JSON.
+cp "$CCB/dist/courses/ai-engineer-curriculum.json" "$DEST/courses/ai-engineer-curriculum.json"
 cp "$CCB/docs/FACILITATOR.md" "$DEST/FACILITATOR.md"
 
 echo "education vendored from $CCB — run: npx tsc --noEmit && npx vitest run src/education"
