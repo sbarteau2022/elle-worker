@@ -6,13 +6,17 @@ perturbation — the way it visibly did not on the static retrieval task in
 `pami-basis-ablation.test.ts`? Tested against the same rival ratios (silver
 ratio, √2, e, π, a rational), using the real dynamical machinery already in
 this codebase (`phase-vessel.ts`'s `vesselStep`, `regulator.ts`'s
-perturbation-escape mechanism) rather than new math. The honest answer, three
-ways: recovery speed and escape-kick amplitude turn out to be structurally
-independent of the winding/perturbation base entirely — not a φ-specific
-result, a fact about how these two mechanisms are built — and the one probe
-that does depend on the base (periodic-perturbation phase clustering) gives a
-ranking that flips depending on sample depth, meaning it's too noisy at the
-scales tested to confirm or kill the claim either way.**
+perturbation-escape mechanism) rather than new math. Recovery speed and
+escape-kick amplitude turn out to be structurally independent of the
+winding/perturbation base entirely — not a φ-specific result, a fact about
+how those two mechanisms are built. The one probe that does depend on the
+base (periodic-perturbation phase clustering) first showed a ranking that
+flipped with sample depth — traced to the Three-Gap Theorem, not noise — then
+got replaced with two analytic metrics (star discrepancy, a closed-form Weyl
+spectral envelope) that fixed the instability without flipping the
+conclusion in φ's favor: rational ratios collapse unambiguously (now proven
+three ways, one of them exactly), but among the irrationals tested, φ is
+solid, middle-of-the-pack — not the winner.**
 
 Code: `src/rcrb-001.test.ts` (self-contained; does not modify `regulator.ts`
 or `phase-vessel.ts`) · companion to `PAMI_PHI_WIRING.md` (static retrieval)
@@ -114,27 +118,88 @@ Two honest findings, not one:
    about φ's relative standing among irrationals; it only rules out rational
    ratios convincingly.
 
+## Part 4 — replacing the noisy metric with two analytic ones
+
+Part 3's instability has a name: the **Three-Gap Theorem** (Steinhaus). For
+any irrational α and any K, the points `{kα mod 1 : k=1..K}` always split the
+circle into exactly two or three distinct gap lengths, and the worst gap only
+shrinks in discrete **steps** — flat until some k happens to bisect the
+largest gap, then a jump down. Different candidate ratios hit their
+step-downs at different K, so "worst gap across many periods, at one fixed
+K" can rank them however those steps happen to have landed at that specific
+K. That's exactly why φ read worst at K=500 and best at K=2000 with nothing
+else changed — not simulation noise, a structural property of the statistic
+itself.
+
+Two replacements, both smoother because both look at the whole point set
+instead of the single worst gap, added to `rcrb-001.test.ts` without
+touching Part 3 (kept as the honest record of what the naive metric does):
+
+**4a. Star discrepancy `D*_K`** — the Koksma–Hlawka object: the max deviation
+between the empirical CDF of `{kβ mod 1}` and the ideal uniform CDF. Six
+candidates, six K depths, worst-case over the same 60 periods:
+
+| basis | K=100 | K=200 | K=400 | K=800 | K=1600 | K=3200 |
+|---|---|---|---|---|---|---|
+| **φ** | 0.23315 | 0.14888 | 0.07133 | 0.04550 | **0.01316** | 0.01003 |
+| silver | 0.24999 | 0.10409 | 0.08243 | 0.03910 | 0.02161 | 0.01279 |
+| √2 | 0.21762 | 0.12061 | 0.07871 | 0.01998 | 0.01797 | 0.01313 |
+| e | 0.26343 | 0.04070 | 0.02947 | 0.02401 | 0.01539 | 0.00705 |
+| π | 0.71825 | 0.43650 | 0.10050 | 0.08600 | 0.05701 | 0.01370 |
+| rational | 1.00000 | 1.00000 | 1.00000 | 1.00000 | 1.00000 | 1.00000 |
+
+Smoother, and the rational is now unambiguous — pinned at exactly 1.0 at
+every depth, no step-function ambiguity at all. φ solidly beats π at every
+single depth (the category claim holding up cleanly). But φ does **not**
+beat e cleanly: e is lower at K=200, 400, 800, and 3200; φ only edges back
+ahead at K=1600. Still not a stable φ win, just a much less chaotic
+non-win than Part 3's total ranking inversion.
+
+**4b. Weyl spectral envelope** — closed-form, zero simulation:
+`S_K(β) = |sin(πKβ)| / (K·|sin(πβ)|)`. The raw value still oscillates in K
+(the numerator does), but its K-**independent** envelope, `1/|sin(πβ)|`, is
+exactly what governs the worst case over all K, and it reduces to the same
+`n·‖nω‖` Hurwitz-constant family already validated analytically in
+`pami-basis-ablation.test.ts`, now applied to `β = P·ω` for many P instead of
+ω alone:
+
+| basis | worst-case envelope (lower = better) |
+|---|---|
+| silver ratio | **26.11** ← best |
+| e | 30.94 |
+| √2 | 36.92 |
+| φ | 39.15 |
+| π | 112.98 |
+| rational | ∞ — exact, not approximate |
+
+An exact trigonometric identity, no K, no sampling, no step-function artifact
+of any kind — and it agrees with 4a: φ sits **fourth of five**, solidly
+ahead of π, solidly behind silver, e, and √2.
+
 ## What this does and doesn't establish
 
-- **Confirmed, dynamically, not just statically:** rational (well-approxima
-  ble) winding numbers are a real liability — they produce recovery-
-  independent but resonance-dependent collapse under periodic perturbation.
-  This is the one place in this whole line of testing (static retrieval,
-  basis ablation, and now this) where φ's *category* — "be irrational, don't
-  be rational" — earns its claim outright.
-- **Not confirmed:** that φ specifically, as opposed to any other well-
-  chosen irrational, is the better choice for this architecture's dynamics.
-  Two of three probes (recovery speed, escape efficiency) show the winding/
-  perturbation base doesn't matter at all for those particular mechanisms as
-  currently built; the one probe that does show base-dependence (Part 3) is
-  too noisy at the scales tested to say which irrational wins.
-- **A cleaner Part 3** would need either an analytic discrepancy bound
-  instead of a worst-single-gap statistic, or a much larger, denser period
-  sweep averaged rather than maxed — neither of which this benchmark
-  attempts. Flagged as the natural next step rather than quietly left out.
+- **Confirmed, dynamically, not just statically, and now three ways:**
+  rational (well-approximable) winding numbers are a real, unambiguous
+  liability — max-gap, star discrepancy, and the Weyl envelope all agree the
+  rational collapses (the Weyl envelope even gives an *exact*, non-simulated
+  certificate: infinite). This is the one place in this whole line of
+  testing (static retrieval, basis ablation, and now this) where φ's
+  *category* — "be irrational, don't be rational" — earns its claim outright,
+  and the smoother metrics only strengthened that conclusion.
+- **Not confirmed, even after replacing the noisy metric with two analytic
+  ones:** that φ specifically, as opposed to another well-chosen irrational,
+  is the better choice for this architecture's dynamics. Both replacements
+  agree with each other and with Part 3's tentative read: φ is solid,
+  middle-of-the-pack among the five irrationals tested, consistently beating
+  π, consistently behind (or split with) silver ratio and e. The Three-Gap
+  instability was real and is now fixed; fixing it did not flip the result
+  in φ's favor.
+- Recovery speed and escape efficiency (Parts 1–2) remain unaffected by any
+  of this — those two mechanisms are structurally decoupled from the
+  winding/perturbation base entirely, smoother metric or not.
 
-This joins `pami-basis-ablation.test.ts`'s F1 finding as a third piece of
-evidence that the *applied*, architecture-specific claims about φ need real
-follow-up work to stand on their own — while the underlying pure Hurwitz
+This joins `pami-basis-ablation.test.ts`'s F1 finding as a third and fourth
+piece of evidence that the *applied*, architecture-specific claims about φ
+need real follow-up work to stand on their own — while the underlying pure Hurwitz
 mathematics, confirmed independently in that same file, is untouched by any
 of this.
