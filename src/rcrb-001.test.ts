@@ -236,3 +236,124 @@ describe('RCRB-001 Part 3 — periodic-perturbation phase clustering: rational c
     // be needed before treating this as evidence in either direction.
   });
 });
+
+// ── Part 4: replacing the noisy metric — WHY it was noisy, and two analytic
+// fixes instead of one more simulation. ──────────────────────────────────
+//
+// Part 3's instability is not simulation noise — it is the Three-Gap Theorem
+// (Steinhaus): for ANY irrational α and any K, the points {kα mod 1 : k=1..K}
+// split the circle into exactly two or three distinct gap lengths, and the
+// worst gap only shrinks in discrete STEPS — flat until some k happens to
+// bisect the largest gap, then a jump down. Different candidate ratios hit
+// their step-downs at different K, so "worst gap across many periods, at one
+// fixed K" can rank them in whatever order those steps happen to have landed
+// at that specific K — not a stable property of the ratio. This is why φ
+// ranked worst at K=500 and best at K=2000 with nothing else changed.
+//
+// Two replacements, both K-smoother because both look at the WHOLE point set
+// rather than the single worst gap:
+//
+//   4a. Star discrepancy D*_K — the Koksma–Hlawka object: max deviation
+//   between the empirical CDF of {kβ mod 1} and the ideal uniform CDF,
+//   compared across K depths to check the ranking actually stabilizes.
+//
+//   4b. Weyl spectral envelope — closed-form (geometric series), no
+//   simulation at all: S_K(β) = |sin(πKβ)| / (K·|sin(πβ)|). The raw value
+//   still oscillates in K (the numerator does), but its K-INDEPENDENT
+//   envelope, 1/|sin(πβ)|, is exactly the quantity that governs the worst
+//   case over all K — and it reduces to the same n·‖nω‖ Hurwitz-constant
+//   family already validated analytically in pami-basis-ablation.test.ts,
+//   now applied to β = P·ω for many P instead of to ω alone.
+
+function starDiscrepancy(samples: number[]): number {
+  const s = [...samples].sort((a, b) => a - b);
+  const n = s.length;
+  let D = 0;
+  for (let i = 0; i < n; i++) {
+    D = Math.max(D, (i + 1) / n - s[i], s[i] - i / n);
+  }
+  return D;
+}
+function worstCaseDiscrepancy(winding: number, periods: number[], K: number): number {
+  let worst = 0;
+  for (const P of periods) {
+    const samples: number[] = [];
+    for (let k = 1; k <= K; k++) samples.push(frac(k * P * winding));
+    worst = Math.max(worst, starDiscrepancy(samples));
+  }
+  return worst;
+}
+function weylEnvelope(beta: number): number {
+  const denom = Math.abs(Math.sin(Math.PI * beta));
+  return denom < 1e-15 ? Infinity : 1 / denom;
+}
+function worstCaseWeylEnvelope(winding: number, periods: number[]): number {
+  let worst = 0;
+  for (const P of periods) worst = Math.max(worst, weylEnvelope(P * winding));
+  return worst;
+}
+
+describe('RCRB-001 Part 4a — star discrepancy: smoother than max-gap, still no clean φ win', () => {
+  const PERIODS = Array.from({ length: 60 }, (_, i) => i + 2);
+
+  it('rational (0.6) is UNAMBIGUOUS at every K — discrepancy pinned at exactly 1.0, no step-function ambiguity at all', () => {
+    for (const K of [100, 3200]) {
+      expect(worstCaseDiscrepancy(RATIONAL, PERIODS, K)).toBe(1);
+    }
+  });
+
+  it('PINS the six-candidate table across six K depths — the ranking is smoother but STILL does not crown φ', () => {
+    const KS = [100, 200, 400, 800, 1600, 3200];
+    const table = {
+      phi: KS.map((K) => Number(worstCaseDiscrepancy(PHI_INV, PERIODS, K).toFixed(5))),
+      silver: KS.map((K) => Number(worstCaseDiscrepancy(SILVER_INV, PERIODS, K).toFixed(5))),
+      sqrt2: KS.map((K) => Number(worstCaseDiscrepancy(SQRT2_INV, PERIODS, K).toFixed(5))),
+      e: KS.map((K) => Number(worstCaseDiscrepancy(E_INV, PERIODS, K).toFixed(5))),
+      pi: KS.map((K) => Number(worstCaseDiscrepancy(PI_INV, PERIODS, K).toFixed(5))),
+    };
+    expect(table.phi).toEqual([0.23315, 0.14888, 0.07133, 0.0455, 0.01316, 0.01003]);
+    expect(table.e).toEqual([0.26343, 0.0407, 0.02947, 0.02401, 0.01539, 0.00705]);
+    expect(table.pi).toEqual([0.71825, 0.4365, 0.1005, 0.086, 0.05701, 0.0137]);
+    // φ solidly beats π at every depth — the badly-approximable-vs-not
+    // category claim holds up cleanly here.
+    for (let i = 0; i < KS.length; i++) expect(table.phi[i]).toBeLessThan(table.pi[i]);
+    // e beats φ at 4 of 5 later depths (K=200,400,800,3200) but φ edges back
+    // ahead at K=1600 — smoother than Part 3's total reversal, but still not
+    // a stable, monotonic φ win. Precise, not rounded to a clean story:
+    expect(table.e[1]).toBeLessThan(table.phi[1]); // K=200: e wins
+    expect(table.e[2]).toBeLessThan(table.phi[2]); // K=400: e wins
+    expect(table.e[3]).toBeLessThan(table.phi[3]); // K=800: e wins
+    expect(table.phi[4]).toBeLessThan(table.e[4]); // K=1600: φ wins
+    expect(table.e[5]).toBeLessThan(table.phi[5]); // K=3200: e wins
+  });
+});
+
+describe('RCRB-001 Part 4b — Weyl spectral envelope: closed-form, zero simulation, same conclusion', () => {
+  const PERIODS = Array.from({ length: 60 }, (_, i) => i + 2);
+
+  it('the rational winding has an infinite envelope — an exact analytic certificate of total resonance, not an approximation', () => {
+    expect(worstCaseWeylEnvelope(RATIONAL, PERIODS)).toBe(Infinity);
+  });
+
+  it('PINS the K-independent envelope for all five irrationals — φ is mid-pack, not best, not worst', () => {
+    const envelopes = {
+      phi: Number(worstCaseWeylEnvelope(PHI_INV, PERIODS).toFixed(2)),
+      silver: Number(worstCaseWeylEnvelope(SILVER_INV, PERIODS).toFixed(2)),
+      sqrt2: Number(worstCaseWeylEnvelope(SQRT2_INV, PERIODS).toFixed(2)),
+      e: Number(worstCaseWeylEnvelope(E_INV, PERIODS).toFixed(2)),
+      pi: Number(worstCaseWeylEnvelope(PI_INV, PERIODS).toFixed(2)),
+    };
+    expect(envelopes).toEqual({ phi: 39.15, silver: 26.11, sqrt2: 36.92, e: 30.94, pi: 112.98 });
+    // Ranked best (lowest envelope, least resonance-prone) to worst:
+    // silver < e < sqrt2 < φ < π. φ sits fourth of five — solidly ahead of
+    // π, solidly behind silver, e, and √2. This is the cleanest metric run
+    // (exact trigonometric identity, no K-dependence, no sampling, no
+    // step-function artifact of any kind) and it agrees with 4a: φ is not
+    // the empirical winner among these irrationals for the specific question
+    // "how bad can the worst of many unknown periods be." The categorical
+    // claim (irrational beats rational) is airtight across all three
+    // methods now tried (max-gap, discrepancy, Weyl envelope). The
+    // specific claim (φ beats other well-chosen irrationals) is not, across
+    // all three.
+  });
+});
