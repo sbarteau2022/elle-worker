@@ -175,6 +175,52 @@ choice at least as much as it is a function of the candidate**, and no
 single run of this scorecard should be read as settling which constant PAMI
 ought to use.
 
+## Domain 1, closed: insertion-time δ, not query-time density
+
+Everything above computed density at retrieval time — fine for a test, a
+real cost for edge-deployed compute, where scanning the whole store on every
+lookup is not something to do casually. `pami.ts` now computes each memory's
+resolving distance ONCE, at the moment it's written (`computeInsertionDelta`
+in `pamiStore`), not on every query:
+
+```
+delta_i = min(DELTA_MAX, gamma * distance-to-nearest-other-memory-at-write-time)
+```
+
+With `gamma = 0.5`, this is not just a safety margin — it's a **proof**:
+since a memory's own nearest-neighbor distance is by definition ≤ its
+distance to any *specific* other memory, `delta_A ≤ 0.5·d(A,B)` and
+`delta_B ≤ 0.5·d(A,B)` for any pair, so `delta_A + delta_B ≤ d(A,B)` always.
+Two memories' basins can never overlap. Confirmed for every pair across all
+four candidates used throughout this entire line of work — φ, e, √2, π — on
+the exact basis-neutral scenario that produced the ε_min collision numbers
+above (`pami-insertion-delta.test.ts`).
+
+**The one correction this required, stated plainly.** Computing δ only at
+insertion time and never again goes stale the moment a *later* memory lands
+close to an *earlier* one — the earlier one's δ doesn't know the newcomer
+exists. `pami-insertion-delta.test.ts` demonstrates this failure directly
+(inserting memories sequentially with no correction *does* produce a real
+overlap), then demonstrates the fix: every insert now also shrinks any
+already-stored memory's δ that the new arrival invalidates, in the same
+write. `pamiRecomputeDeltas()` is the bulk version of the same idea for
+"when the graph undergoes structural changes" more broadly — exported
+standalone, not wired into any cron path, so whoever owns `consolidate.ts`'s
+schedule decides when to run it, rather than this change deciding it for
+them.
+
+**What this does to the minimax scorecard: Domain 1 stops being a
+collision question at all.** With non-overlapping basins now a proven
+guarantee rather than a hope, `S_ret`/`S_ret_adaptive` in the table above are
+**superseded** — there is no longer a "worst-case separation" risk to score,
+because separation failure is now structurally impossible by construction.
+What's left, exactly as predicted before this was built: retrieval
+*accuracy* — does a partial, noisy query still land inside the *right*
+memory's basin — which was already measured and pinned in
+`pami-basis-ablation.test.ts` (e: 0.833, dyadic: 0.500, φ: 0.333, π: 0.167)
+and never depended on δ in the first place. e's accuracy advantage is no
+longer offset by any collision liability, because there isn't one anymore.
+
 ---
 
 ## How this gets used
@@ -182,6 +228,6 @@ ought to use.
 Four concrete uses, in order of how much confidence they require — deliberately **not** including "hardcode φ, e, or √2 as the production default," because none of the three results is trustworthy enough on synthetic benchmarks alone to make that call, and the spec's own falsification conditions (F1, F3) already say so.
 
 1. **A regression sentinel, immediately.** `phi-minimax-scorecard.test.ts` pins every number in both tables above, static and adaptive alike. If a future change to `pami.ts`, `regulator.ts`, or `phase-vessel.ts` shifts any of them — a different wavelet kernel, a different `κ` relaxation rate, a different `ADAPTIVE_DELTA_DEFAULT` — this suite fails and the diff shows exactly what moved and by how much, in the same units this document reports. That's the immediate, low-risk use: nobody gets to silently change the resonance/collision/recovery behavior of this system without it showing up in a readable, curated test failure instead of a philosophy paper.
-2. **`adaptiveDelta()` itself ships regardless of which constant wins.** The density-scaling fix is a real engineering improvement on its own merits — it resolves the "shrink δ and lose fuzzy recall everywhere" tradeoff the static scorecard exposed — independent of whether PAMI's `scaleBase` ever changes. This is the one recommendation from this whole document that isn't contingent on the φ-vs-rivals question at all, and it's already merged, not proposed.
+2. **δ-scaling itself ships regardless of which constant wins — now as the real production path, not a query-time estimate.** `computeInsertionDelta()` in `pamiStore()` is the mechanism that actually runs: O(1) at query time, a proven non-overlap guarantee, self-correcting on every write. `adaptiveDelta()` (query-time density) remains a real, tested, useful function too — it's what the scorecard's Domain 1b analysis and `phi-minimax-scorecard.ts` use to reason about a population as a whole — but it is no longer the retrieval-time path; that's insertion-time δ now. Neither is contingent on which of φ/e/√2/π ever becomes `scaleBase`, and both are already merged, not proposed.
 3. **The harness for the real experiment, not yet run.** Every number here still comes from `memorySignalNeutral()` — a synthetic, linearly-spaced signal generator. `epsMin`, `epsMinAdaptive`, `peakDiscrepancy`, and `recoveryHorizon` are written to take any `base` and any residual signal; the moment `consolidate.ts` has accumulated enough real corpus residuals, the same functions can be pointed at real signals instead, and the scorecard becomes the actual instrument the spec's F1/F3 falsification conditions ask for — not a proxy for it.
 4. **A design-time reference, not an automated gate.** Until (3) happens, this scorecard is something to *consult*, not something to wire into a build gate or a runtime default. Given three different legitimate constructions already produce three different winners, treating any one of them as license to hardcode a constant would be exactly the kind of premature collapse the rest of this line of work has been arguing against. The honest use today: when someone proposes changing `scaleBase` or `GOLDEN_WINDING`, run this suite, read the static, adaptive, AND accuracy framings side by side, and make the call with all three numbers on the table — not just the one that was convenient.

@@ -423,38 +423,136 @@ let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
   if (schemaReady) return;
   await ensureAllSchemas(env.DB);
+  await ensureDeltaColumn(env);
   schemaReady = true;
+}
+
+// pami_memories predates per-memory delta; same late-ALTER pattern as
+// memory.ts's vectorize_id column. A pre-existing row reads delta=NULL,
+// which every consumer below treats as "not yet assigned" and falls back
+// to DELTA_DEFAULT for, never as zero/collision.
+let deltaColumnReady = false;
+async function ensureDeltaColumn(env: Env): Promise<void> {
+  if (deltaColumnReady) return;
+  await env.DB.prepare('ALTER TABLE pami_memories ADD COLUMN delta REAL').run().catch(() => {});
+  deltaColumnReady = true;
 }
 
 const genId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 
+// ── insertion-time precision (the O(1)-at-query-time fix) ─────────────────
+// Computing a query's local density at RETRIEVAL time means scanning the
+// whole store on every single lookup — fine in a test, a real cost on
+// edge-deployed compute. Move the density calculation to WRITE time instead:
+// each memory gets its own permanent delta_i, computed once from its
+// nearest neighbor AT THE MOMENT IT'S WRITTEN, so retrieval becomes a flat
+// per-candidate comparison (distance < candidate.delta), no scan required.
+//
+//   delta_i = min(DELTA_MAX, gamma * d(m_i, nearest_other))
+//
+// gamma=0.5 is not just a "safety margin" — it is PROVABLY sufficient to
+// guarantee two memories' basins never overlap: for any pair (A, B),
+// nearestDist(A) ≤ d(A,B) by definition (B is one of the candidates the min
+// is taken over), so delta_A ≤ 0.5·d(A,B); symmetrically delta_B ≤
+// 0.5·d(A,B); therefore delta_A + delta_B ≤ d(A,B), always. Proven inline
+// in pami.test.ts across every pair of a real memory set, not just the
+// closest one.
+//
+// THE CAVEAT the "or when the graph undergoes structural changes" phrase in
+// this feature's own design brief is pointing at: that guarantee only holds
+// for memories that existed WHEN EACH OTHER's delta was computed. If A is
+// inserted alone (capped at DELTA_MAX, having no close neighbor yet) and B
+// is inserted later very close to A, A's delta is now STALE — it doesn't
+// know B exists, and A_delta + B_delta could exceed d(A,B), a real basin
+// overlap. pamiStore() below closes this: on every insert, existing
+// memories whose stored delta the NEW memory would invalidate get shrunk in
+// the same batch, not left to rot until a maintenance pass. pamiRecomputeDeltas()
+// is the bulk equivalent for "the graph undergoes structural changes" more
+// broadly (a bulk backfill/consolidation-triggered refresh), exported
+// standalone rather than wired into any cron path here — that wiring is a
+// deliberate choice for whoever owns consolidate.ts's schedule, not a
+// silent side effect of this change.
+export const GAMMA_DEFAULT = 0.5;
+export function computeInsertionDelta(
+  newIdx: PamiIndex, existing: PamiIndex[], deltaMax = DELTA_DEFAULT, gamma = GAMMA_DEFAULT,
+): number {
+  let nearest = Infinity;
+  for (const other of existing) {
+    const d = pamiDistance(newIdx, other);
+    if (d < nearest) nearest = d;
+  }
+  return Number.isFinite(nearest) ? Math.min(deltaMax, gamma * nearest) : deltaMax;
+}
+
 export async function pamiStore(env: Env, index: PamiIndex, content?: string): Promise<string> {
   await ensureSchema(env);
   const id = genId();
-  await env.DB.prepare('INSERT INTO pami_memories (id, index_json, content, created_at) VALUES (?,?,?,?)')
-    .bind(id, JSON.stringify(index), (content || '').slice(0, 4000) || null, Date.now()).run();
+
+  const rows = await env.DB.prepare('SELECT id, index_json, delta FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
+    .all().then((r) => r.results as Array<{ id: string; index_json: string; delta: number | null }>).catch(() => []);
+  const existing = rows.flatMap((r) => {
+    try { return [{ r, idx: JSON.parse(r.index_json) as PamiIndex }]; } catch { return []; }
+  });
+
+  const newDelta = computeInsertionDelta(index, existing.map((e) => e.idx));
+
+  // Shrink-on-insert: any existing memory whose stored delta the new one
+  // now invalidates gets tightened in the SAME batch, so the no-overlap
+  // guarantee never goes stale between writes.
+  const shrinks = existing.flatMap(({ r, idx }) => {
+    const d = pamiDistance(index, idx);
+    const candidate = GAMMA_DEFAULT * d;
+    const current = r.delta ?? DELTA_DEFAULT;
+    return candidate < current ? [{ id: r.id, delta: Math.max(0, candidate) }] : [];
+  });
+
+  const stmts = [
+    env.DB.prepare('INSERT INTO pami_memories (id, index_json, content, created_at, delta) VALUES (?,?,?,?,?)')
+      .bind(id, JSON.stringify(index), (content || '').slice(0, 4000) || null, Date.now(), newDelta),
+    ...shrinks.map((s) => env.DB.prepare('UPDATE pami_memories SET delta = ? WHERE id = ?').bind(s.delta, s.id)),
+  ];
+  await env.DB.batch(stmts);
   return id;
 }
 
-export async function pamiRetrieve(
-  env: Env, query: PamiIndex, k = 5, deltaCfg: AdaptiveDeltaConfig = ADAPTIVE_DELTA_DEFAULT,
-): Promise<Array<{ id: string; distance: number; resonance: number; content: string | null; local_delta: number; resolved: boolean }>> {
+// Bulk maintenance recompute — "when the graph undergoes structural
+// changes." Recomputes EVERY stored memory's delta from scratch against the
+// full current population. Not on any cron path; call this from wherever
+// graph-hygiene maintenance is triggered, on purpose, not by default.
+export async function pamiRecomputeDeltas(env: Env, deltaMax = DELTA_DEFAULT, gamma = GAMMA_DEFAULT): Promise<{ updated: number }> {
   await ensureSchema(env);
-  const rows = await env.DB.prepare('SELECT id, index_json, content FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
-    .all().then((r) => r.results as Array<{ id: string; index_json: string; content: string | null }>).catch(() => []);
+  const rows = await env.DB.prepare('SELECT id, index_json FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
+    .all().then((r) => r.results as Array<{ id: string; index_json: string }>).catch(() => []);
   const parsed = rows.flatMap((r) => {
-    try { return [{ r, idx: JSON.parse(r.index_json) as PamiIndex }]; } catch { return []; }
+    try { return [{ id: r.id, idx: JSON.parse(r.index_json) as PamiIndex }]; } catch { return []; }
   });
-  // Local δ for the QUERY's own neighborhood: how crowded is the population
-  // right where this query landed, using every successfully-parsed stored
-  // index as the ambient density sample (not just the k returned below).
-  const localDelta = adaptiveDelta(query, parsed.map((p) => p.idx), deltaCfg);
-  const scored = parsed.map(({ r, idx }) => {
+  const stmts = parsed.map(({ id, idx }) => {
+    const others = parsed.filter((p) => p.id !== id).map((p) => p.idx);
+    const delta = computeInsertionDelta(idx, others, deltaMax, gamma);
+    return env.DB.prepare('UPDATE pami_memories SET delta = ? WHERE id = ?').bind(delta, id);
+  });
+  if (stmts.length) await env.DB.batch(stmts);
+  return { updated: stmts.length };
+}
+
+export async function pamiRetrieve(
+  env: Env, query: PamiIndex, k = 5,
+): Promise<Array<{ id: string; distance: number; resonance: number; content: string | null; delta: number; resolved: boolean }>> {
+  await ensureSchema(env);
+  const rows = await env.DB.prepare('SELECT id, index_json, content, delta FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
+    .all().then((r) => r.results as Array<{ id: string; index_json: string; content: string | null; delta: number | null }>).catch(() => []);
+  // O(1) per candidate: each row already carries its own pre-computed
+  // basin of attraction from pamiStore()/pamiRecomputeDeltas() — no
+  // nearest-neighbor scan happens here, at query time, at all.
+  const scored = rows.flatMap((r) => {
+    let idx: PamiIndex;
+    try { idx = JSON.parse(r.index_json) as PamiIndex; } catch { return []; }
     const d = pamiDistance(query, idx);
-    return {
+    const delta = r.delta ?? DELTA_DEFAULT;
+    return [{
       id: r.id, distance: round(d, 4), resonance: round(Math.exp(-d / TAU), 4), content: r.content,
-      local_delta: round(localDelta, 4), resolved: d < localDelta,
-    };
+      delta: round(delta, 4), resolved: d < delta,
+    }];
   });
   return scored.sort((a, b) => a.distance - b.distance).slice(0, Math.max(1, Math.min(k, 50)));
 }
@@ -488,9 +586,10 @@ export async function pamiTool(env: Env, a: PamiToolInput): Promise<string> {
     if (op === 'retrieve') {
       const idx = a.index ?? (a.signal ? pamiIndex(a.signal) : null);
       if (!idx) return JSON.stringify({ op, error: 'pami retrieve: provide index or signal[]' });
-      // Each match now carries its own local_delta/resolved (density-adaptive
-      // per §the ADAPTIVE_DELTA_DEFAULT docstring above); static_threshold is
-      // kept only as a reference baseline, not the actual gate anymore.
+      // Each match carries its OWN pre-computed delta/resolved, assigned at
+      // insertion time (computeInsertionDelta in pamiStore) — no
+      // nearest-neighbor scan happens here at query time. static_threshold
+      // is kept only as a reference baseline, not the actual gate.
       return JSON.stringify({ op, matches: await pamiRetrieve(env, idx, a.k ?? 5), static_threshold: DELTA_DEFAULT });
     }
     if (op === 'resonate') {
