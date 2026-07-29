@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { pamiIndex, pamiDistance, PHI, type PamiConfig } from './pami';
 import {
-  CANDIDATES, epsMin, retrievalRisk, peakDiscrepancy, resonanceRisk,
-  recoveryHorizon, recoveryRisk, scorecard, minimaxWinner,
+  CANDIDATES, epsMin, retrievalRisk, epsMinAdaptive, retrievalRiskAdaptive,
+  peakDiscrepancy, resonanceRisk, recoveryHorizon, recoveryRisk,
+  scorecard, minimaxWinner, minimaxWinnerAdaptive,
 } from './phi-minimax-scorecard';
 
 describe('φ minimax scorecard — Domain 1 (retrieval collision risk)', () => {
@@ -21,6 +22,26 @@ describe('φ minimax scorecard — Domain 1 (retrieval collision risk)', () => {
     const risks = CANDIDATES.map((c) => ({ name: c.name, risk: retrievalRisk(c.base) }));
     const phiRisk = risks.find((r) => r.name === 'phi')!.risk;
     for (const r of risks) if (r.name !== 'phi') expect(phiRisk).toBeLessThanOrEqual(r.risk);
+  });
+});
+
+describe('φ minimax scorecard — Domain 1b (adaptive δ, pami.ts\'s real fix, not a hypothetical)', () => {
+  it('pins each candidate\'s local density-scaled δ around its own closest pair', () => {
+    expect(epsMinAdaptive(PHI).localDelta).toBeCloseTo(0.05258, 4);
+    expect(epsMinAdaptive(Math.E).localDelta).toBeCloseTo(0.09009, 4);
+    expect(epsMinAdaptive(Math.SQRT2).localDelta).toBeCloseTo(0.05000, 4);
+    expect(epsMinAdaptive(Math.PI).localDelta).toBeCloseTo(0.07516, 4);
+  });
+
+  it('φ\'s collision RESOLVES under adaptive δ (zero risk) — the other three still collide, just less severely', () => {
+    expect(retrievalRiskAdaptive(PHI)).toBe(0); // eps_min > local_delta: no collision at all
+    expect(retrievalRiskAdaptive(Math.E)).toBeCloseTo(0.2033, 3);
+    expect(retrievalRiskAdaptive(Math.SQRT2)).toBeCloseTo(0.0376, 3);
+    expect(retrievalRiskAdaptive(Math.PI)).toBeCloseTo(0.0889, 3);
+    // all four drop dramatically versus the static-delta reading (0.74-0.84) —
+    // most of what looked like "collision risk" was the static threshold,
+    // exactly as predicted before this was implemented and measured.
+    for (const { base } of CANDIDATES) expect(retrievalRiskAdaptive(base)).toBeLessThan(retrievalRisk(base));
   });
 });
 
@@ -70,6 +91,26 @@ describe('φ minimax scorecard — P_final and the winner', () => {
     const winner = minimaxWinner();
     expect(winner.name).toBe('phi');
     expect(winner.P_final).toBeLessThan(0.75);
+  });
+});
+
+describe('φ minimax scorecard — the winner under adaptive δ: a THIRD different answer', () => {
+  it('pins P_final_adaptive for all four — every domain-1 risk collapses once δ scales with density', () => {
+    const rows = scorecard();
+    const byName = Object.fromEntries(rows.map((r) => [r.name, r]));
+    expect(byName.phi.P_final_adaptive).toBeCloseTo(0.2743, 3);   // now bound by Domain 2 (resonance), not retrieval
+    expect(byName.e.P_final_adaptive).toBeCloseTo(0.3099, 3);     // still bound by Domain 2
+    expect(byName.sqrt2.P_final_adaptive).toBeCloseTo(0.2700, 3); // Domain 1's risk stopped being sqrt2's problem
+    expect(byName.pi.P_final_adaptive).toBeCloseTo(0.8450, 3);    // unchanged — pi's failure was never retrieval
+  });
+
+  it('√2 edges out φ by a hair once retrieval collision is fixed — a THIRD winner, not confirmation of the first', () => {
+    const winner = minimaxWinnerAdaptive();
+    expect(winner.name).toBe('sqrt2');
+    const rows = scorecard();
+    const phi = rows.find((r) => r.name === 'phi')!;
+    // the margin is real but thin — sub-0.005 apart, not a decisive win
+    expect(phi.P_final_adaptive - winner.P_final_adaptive).toBeCloseTo(0.0043, 3);
   });
 });
 

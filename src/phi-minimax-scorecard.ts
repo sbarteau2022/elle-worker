@@ -19,7 +19,10 @@
 // result is NOT robust to.
 // ============================================================
 
-import { pamiIndex, pamiDistance, pamiCoherence, PHI, DELTA_DEFAULT, type PamiConfig } from './pami';
+import {
+  pamiIndex, pamiDistance, pamiCoherence, adaptiveDelta,
+  PHI, DELTA_DEFAULT, ADAPTIVE_DELTA_DEFAULT, type PamiConfig,
+} from './pami';
 
 export interface Candidate { name: string; base: number }
 export const CANDIDATES: Candidate[] = [
@@ -83,6 +86,33 @@ export function retrievalRisk(base: number): number {
   return Math.max(0, Math.min(1, 1 - eps / DELTA_DEFAULT));
 }
 
+// ── Domain 1b: the SAME collision, re-scored against a density-adaptive δ
+// instead of the flat DELTA_DEFAULT (pami.ts's adaptiveDelta, added directly
+// in response to this scorecard's own finding that a static δ can't be
+// shrunk without crippling fuzzy recall everywhere else). For the two
+// closest memories in the store, compute member A's local δ from the OTHER
+// five (density around A, not self-referential to the pair being tested),
+// and re-score risk against THAT instead of the global constant.
+export function epsMinAdaptive(base: number): { epsMin: number; localDelta: number } {
+  const cfg = configFor(base);
+  const idxs = [1, 2, 3, 4, 5, 6].map((s) => pamiIndex(memorySignalNeutral(N, s), cfg));
+  if (idxs.some((x) => x === null)) return { epsMin: 0, localDelta: DELTA_DEFAULT };
+  let min = Infinity, ai = -1;
+  for (let i = 0; i < idxs.length; i++) {
+    for (let j = i + 1; j < idxs.length; j++) {
+      const d = pamiDistance(idxs[i]!, idxs[j]!);
+      if (d < min) { min = d; ai = i; }
+    }
+  }
+  const others = idxs.filter((_, i) => i !== ai).map((x) => x!);
+  const localDelta = adaptiveDelta(idxs[ai]!, others, ADAPTIVE_DELTA_DEFAULT);
+  return { epsMin: min, localDelta };
+}
+export function retrievalRiskAdaptive(base: number): number {
+  const { epsMin: eps, localDelta } = epsMinAdaptive(base);
+  return Math.max(0, Math.min(1, 1 - eps / localDelta));
+}
+
 // ── Domain 2: dynamic resonance risk ──────────────────────────────────────
 // Peak star discrepancy across a sweep of unknown perturbation periods, at
 // the sample depth where transient behavior is worst (K=100 — see
@@ -144,21 +174,40 @@ export function recoveryRisk(base: number): number {
 }
 
 // ── The scorecard ──────────────────────────────────────────────────────────
+// S_ret/P_final use the STATIC DELTA_DEFAULT (unchanged from the original
+// scorecard, so prior pinned numbers stay valid). S_ret_adaptive/P_final_adaptive
+// are additive — the same Domain 1 collision, re-scored against a
+// density-adaptive δ instead. Both are reported side by side, deliberately:
+// which one is "correct" depends on which δ the engine actually uses at
+// retrieval time, and that is now a real, tested choice (adaptiveDelta in
+// pami.ts), not a hypothetical.
 export interface ScorecardRow {
   name: string;
   eps_min: number; S_ret: number;
+  local_delta: number; S_ret_adaptive: number;
   peak_discrepancy: number; S_res: number;
   recovery_steps: number; S_rcrb: number;
   P_final: number;
+  P_final_adaptive: number;
 }
 export function scorecard(candidates: Candidate[] = CANDIDATES): ScorecardRow[] {
   return candidates.map(({ name, base }) => {
     const eps_min = epsMin(base), S_ret = retrievalRisk(base);
+    const { localDelta } = epsMinAdaptive(base);
+    const S_ret_adaptive = retrievalRiskAdaptive(base);
     const peak_discrepancy = peakDiscrepancy(1 / base), S_res = resonanceRisk(base);
     const recovery_steps = recoveryHorizon(base), S_rcrb = recoveryRisk(base);
-    return { name, eps_min, S_ret, peak_discrepancy, S_res, recovery_steps, S_rcrb, P_final: Math.max(S_ret, S_res, S_rcrb) };
+    return {
+      name, eps_min, S_ret, local_delta: localDelta, S_ret_adaptive,
+      peak_discrepancy, S_res, recovery_steps, S_rcrb,
+      P_final: Math.max(S_ret, S_res, S_rcrb),
+      P_final_adaptive: Math.max(S_ret_adaptive, S_res, S_rcrb),
+    };
   });
 }
 export function minimaxWinner(candidates: Candidate[] = CANDIDATES): ScorecardRow {
   return scorecard(candidates).reduce((best, row) => (row.P_final < best.P_final ? row : best));
+}
+export function minimaxWinnerAdaptive(candidates: Candidate[] = CANDIDATES): ScorecardRow {
+  return scorecard(candidates).reduce((best, row) => (row.P_final_adaptive < best.P_final_adaptive ? row : best));
 }

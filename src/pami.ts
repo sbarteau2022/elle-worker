@@ -215,6 +215,46 @@ function slope(xs: number[], ys: number[]): number {
 const ALPHA = 0.5, BETA = 0.5, TAU = 0.25;
 export const DELTA_DEFAULT = 0.3;
 
+// ── adaptive resolving distance (the F1/minimax-scorecard density fix) ────
+// A single global δ can't be right for a store whose density varies: shrink
+// it to clear a worst-case collision and every sparse, legitimately-fuzzy
+// match stops resolving too (the "amnesia" failure mode); leave it wide and
+// dense neighborhoods can't be told apart. δ scales instead with LOCAL
+// density — the same variable-bandwidth idea behind adaptive kernel density
+// estimation and adaptive k-d tree radius search, not new math: a query
+// sitting in a crowded neighborhood (small k-th-nearest-neighbor distance)
+// gets a tighter δ; a query sitting in open space gets a looser one. Bounded
+// to [deltaMin, deltaMax] so it can't collapse to zero (no match ever
+// resolves) or blow up to always-match. DELTA_DEFAULT remains the fallback
+// for a store too small to estimate density from (cold start).
+export interface AdaptiveDeltaConfig {
+  k: number;        // which nearest OTHER stored index sets the local density radius
+  factor: number;   // delta_local = factor * (distance to that k-th neighbor)
+  deltaMin: number;
+  deltaMax: number;
+}
+export const ADAPTIVE_DELTA_DEFAULT: AdaptiveDeltaConfig = { k: 2, factor: 0.5, deltaMin: 0.05, deltaMax: 0.6 };
+
+// Distance from `target` to its k-th nearest OTHER index in `store` — the
+// local density measurement. Returns null if the store doesn't yet have k
+// other members to measure against (too early to estimate density).
+export function kthNearestDistance(target: PamiIndex, store: PamiIndex[], k: number): number | null {
+  const dists = store
+    .filter((m) => m !== target)
+    .map((m) => pamiDistance(target, m))
+    .sort((a, b) => a - b);
+  return dists.length >= k ? dists[k - 1] : null;
+}
+
+// The adaptive δ for `target` (a query or a candidate memory) given the
+// ambient population it's being compared against. Falls back to
+// DELTA_DEFAULT when the store is too sparse to estimate local density.
+export function adaptiveDelta(target: PamiIndex, store: PamiIndex[], cfg: AdaptiveDeltaConfig = ADAPTIVE_DELTA_DEFAULT): number {
+  const kth = kthNearestDistance(target, store, cfg.k);
+  if (kth === null) return DELTA_DEFAULT;
+  return Math.min(cfg.deltaMax, Math.max(cfg.deltaMin, cfg.factor * kth));
+}
+
 export function pamiDistance(a: PamiIndex, b: PamiIndex): number {
   // Phase half. A slot at exactly 0 is the energy gate's "no content here"
   // sentinel (a measured phase is 0.00000 with probability ~0). Three cases
@@ -333,16 +373,25 @@ export async function pamiStore(env: Env, index: PamiIndex, content?: string): P
   return id;
 }
 
-export async function pamiRetrieve(env: Env, query: PamiIndex, k = 5): Promise<Array<{ id: string; distance: number; resonance: number; content: string | null }>> {
+export async function pamiRetrieve(
+  env: Env, query: PamiIndex, k = 5, deltaCfg: AdaptiveDeltaConfig = ADAPTIVE_DELTA_DEFAULT,
+): Promise<Array<{ id: string; distance: number; resonance: number; content: string | null; local_delta: number; resolved: boolean }>> {
   await ensureSchema(env);
   const rows = await env.DB.prepare('SELECT id, index_json, content FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
     .all().then((r) => r.results as Array<{ id: string; index_json: string; content: string | null }>).catch(() => []);
-  const scored = rows.flatMap((r) => {
-    try {
-      const idx = JSON.parse(r.index_json) as PamiIndex;
-      const d = pamiDistance(query, idx);
-      return [{ id: r.id, distance: round(d, 4), resonance: round(Math.exp(-d / TAU), 4), content: r.content }];
-    } catch { return []; }
+  const parsed = rows.flatMap((r) => {
+    try { return [{ r, idx: JSON.parse(r.index_json) as PamiIndex }]; } catch { return []; }
+  });
+  // Local δ for the QUERY's own neighborhood: how crowded is the population
+  // right where this query landed, using every successfully-parsed stored
+  // index as the ambient density sample (not just the k returned below).
+  const localDelta = adaptiveDelta(query, parsed.map((p) => p.idx), deltaCfg);
+  const scored = parsed.map(({ r, idx }) => {
+    const d = pamiDistance(query, idx);
+    return {
+      id: r.id, distance: round(d, 4), resonance: round(Math.exp(-d / TAU), 4), content: r.content,
+      local_delta: round(localDelta, 4), resolved: d < localDelta,
+    };
   });
   return scored.sort((a, b) => a.distance - b.distance).slice(0, Math.max(1, Math.min(k, 50)));
 }
@@ -376,7 +425,10 @@ export async function pamiTool(env: Env, a: PamiToolInput): Promise<string> {
     if (op === 'retrieve') {
       const idx = a.index ?? (a.signal ? pamiIndex(a.signal) : null);
       if (!idx) return JSON.stringify({ op, error: 'pami retrieve: provide index or signal[]' });
-      return JSON.stringify({ op, matches: await pamiRetrieve(env, idx, a.k ?? 5), threshold: DELTA_DEFAULT });
+      // Each match now carries its own local_delta/resolved (density-adaptive
+      // per §the ADAPTIVE_DELTA_DEFAULT docstring above); static_threshold is
+      // kept only as a reference baseline, not the actual gate anymore.
+      return JSON.stringify({ op, matches: await pamiRetrieve(env, idx, a.k ?? 5), static_threshold: DELTA_DEFAULT });
     }
     if (op === 'resonate') {
       const x = a.index ?? (a.signal ? pamiIndex(a.signal) : null);

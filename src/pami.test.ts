@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { pamiIndex, pamiDistance, resonance, kappaCrossModal, indexLength, pamiCoherence, SPEC_CONFIG, PHI, PHI_INV, type PamiConfig } from './pami';
+import {
+  pamiIndex, pamiDistance, resonance, kappaCrossModal, indexLength, pamiCoherence,
+  kthNearestDistance, adaptiveDelta, ADAPTIVE_DELTA_DEFAULT, DELTA_DEFAULT,
+  SPEC_CONFIG, PHI, PHI_INV, type PamiConfig,
+} from './pami';
 import { PHI as REGULATOR_PHI, PHI_INV as REGULATOR_PHI_INV } from './regulator';
 
 // Deterministic synthetic signal generators — every claim below is checked
@@ -169,6 +173,44 @@ describe('wiring — pami.ts, regulator.ts, phase-vessel.ts share ONE φ and are
     const good = pamiCoherence(pamiIndex(phiSignal(N, 4))!);
     const degenerate = pamiCoherence({ phases: new Array(8).fill(0), dims: new Array(13).fill(0) });
     expect(good.regulated.F0).toBeLessThan(degenerate.regulated.F0);
+  });
+});
+
+describe('adaptive resolving distance (density-scaled δ, not a global constant)', () => {
+  it('falls back to DELTA_DEFAULT when the store is too sparse to estimate local density', () => {
+    const target = pamiIndex(phiSignal(N, 1))!;
+    const tinyStore = [pamiIndex(phiSignal(N, 2))!]; // only 1 other member; default k=2 needs 2
+    expect(kthNearestDistance(target, tinyStore, 2)).toBeNull();
+    expect(adaptiveDelta(target, tinyStore)).toBe(DELTA_DEFAULT);
+  });
+
+  it('a query in a DENSE neighborhood gets a TIGHTER δ than one in a SPARSE neighborhood', () => {
+    // Dense cluster: many near-identical structural twins (same generator,
+    // phase-only variation — pami's own invariances mostly ignore this,
+    // so these read as close structural neighbors of each other).
+    const denseCluster = [2, 3, 4, 5, 6].map((s) => pamiIndex(phiSignal(N, s))!);
+    const denseQuery = pamiIndex(phiSignal(N, 7))!;
+
+    // Sparse population: structurally distinct memories, far apart.
+    const sparseCluster = [1, 2, 3, 4, 5].map((s) => pamiIndex(memorySignal(N, s))!);
+    const sparseQuery = pamiIndex(memorySignal(N, 9))!; // a stranger, per the existing P1 test above
+
+    const denseDelta = adaptiveDelta(denseQuery, denseCluster);
+    const sparseDelta = adaptiveDelta(sparseQuery, sparseCluster);
+    expect(denseDelta).toBeLessThan(sparseDelta);
+  });
+
+  it('respects the configured [deltaMin, deltaMax] bounds — never collapses to 0 or blows past the ceiling', () => {
+    const cfg = ADAPTIVE_DELTA_DEFAULT;
+    // A pathologically dense store (identical indices) would drive
+    // kth-nearest distance to ~0; delta must still floor at deltaMin.
+    const target = pamiIndex(phiSignal(N, 1))!;
+    const identicalStore = [2, 3].map(() => pamiIndex(phiSignal(N, 1))!); // same seed = same index
+    expect(adaptiveDelta(target, identicalStore, cfg)).toBeGreaterThanOrEqual(cfg.deltaMin);
+
+    // A pathologically sparse store (maximally different) must still cap at deltaMax.
+    const farStore = [pamiIndex(cascade(N, 101))!, pamiIndex(cascade(N, 202))!];
+    expect(adaptiveDelta(target, farStore, cfg)).toBeLessThanOrEqual(cfg.deltaMax);
   });
 });
 
