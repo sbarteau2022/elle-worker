@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   pamiIndex, pamiDistance, resonance, kappaCrossModal, indexLength, pamiCoherence,
   kthNearestDistance, adaptiveDelta, ADAPTIVE_DELTA_DEFAULT, DELTA_DEFAULT,
+  graphVolatility, volatilityTighten, VOLATILITY_MIN_FACTOR,
+  vesselTraceVariance, vesselPrecisionFactor, VESSEL_REFERENCE_VARIANCE, VESSEL_FACTOR_MIN, VESSEL_FACTOR_MAX,
   SPEC_CONFIG, PHI, PHI_INV, type PamiConfig,
 } from './pami';
 import { PHI as REGULATOR_PHI, PHI_INV as REGULATOR_PHI_INV } from './regulator';
@@ -211,6 +213,68 @@ describe('adaptive resolving distance (density-scaled δ, not a global constant)
     // A pathologically sparse store (maximally different) must still cap at deltaMax.
     const farStore = [pamiIndex(cascade(N, 101))!, pamiIndex(cascade(N, 202))!];
     expect(adaptiveDelta(target, farStore, cfg)).toBeLessThanOrEqual(cfg.deltaMax);
+  });
+});
+
+describe('adaptive δ modulation 1 — state uncertainty (graph volatility)', () => {
+  it('graphVolatility is the fraction of edges that moved, clamped to [0,1]', () => {
+    expect(graphVolatility(0, 0, 100)).toBe(0);
+    expect(graphVolatility(50, 0, 100)).toBeCloseTo(0.5, 10);
+    expect(graphVolatility(80, 40, 100)).toBe(1); // clamped — can't exceed 1 even if it sums past 100%
+    expect(graphVolatility(10, 5, 0)).toBe(0); // no edges at all: no volatility signal, not a divide-by-zero
+  });
+
+  it('volatilityTighten shrinks delta toward VOLATILITY_MIN_FACTOR as volatility rises to 1, and leaves it unchanged at 0', () => {
+    expect(volatilityTighten(0.2, 0)).toBe(0.2);
+    expect(volatilityTighten(0.2, 1)).toBeCloseTo(0.2 * VOLATILITY_MIN_FACTOR, 10);
+    expect(volatilityTighten(0.2, 0.5)).toBeGreaterThan(0.2 * VOLATILITY_MIN_FACTOR);
+    expect(volatilityTighten(0.2, 0.5)).toBeLessThan(0.2);
+  });
+
+  it('adaptiveDelta actually tightens when a volatility modulation is supplied, and is unchanged without one', () => {
+    const target = pamiIndex(memorySignal(N, 1))!;
+    const store = [2, 3, 4, 5].map((s) => pamiIndex(memorySignal(N, s))!);
+    const base = adaptiveDelta(target, store);
+    const tightened = adaptiveDelta(target, store, ADAPTIVE_DELTA_DEFAULT, { volatility: 0.9 });
+    expect(tightened).toBeLessThan(base);
+    expect(tightened).toBeGreaterThanOrEqual(ADAPTIVE_DELTA_DEFAULT.deltaMin); // never below the floor
+  });
+});
+
+describe('adaptive δ modulation 2 — winding/radial-variance precision weighting', () => {
+  it('real basis-neutral memories land in a narrow, measured band around VESSEL_REFERENCE_VARIANCE', () => {
+    const idxs = [1, 2, 3, 4, 5, 6].map((s) => pamiIndex(memorySignal(N, s))!);
+    for (const idx of idxs) {
+      const v = vesselTraceVariance(idx);
+      expect(v).toBeGreaterThan(0.01);
+      expect(v).toBeLessThan(0.03);
+    }
+    // the reference constant sits inside the measured band, not picked blind
+    expect(VESSEL_REFERENCE_VARIANCE).toBeGreaterThan(0.01);
+    expect(VESSEL_REFERENCE_VARIANCE).toBeLessThan(0.03);
+  });
+
+  it('vesselPrecisionFactor is bounded to [VESSEL_FACTOR_MIN, VESSEL_FACTOR_MAX] and centers near 1 for typical memories', () => {
+    const idxs = [1, 2, 3, 4, 5, 6].map((s) => pamiIndex(memorySignal(N, s))!);
+    for (const idx of idxs) {
+      const f = vesselPrecisionFactor(idx);
+      expect(f).toBeGreaterThanOrEqual(VESSEL_FACTOR_MIN);
+      expect(f).toBeLessThanOrEqual(VESSEL_FACTOR_MAX);
+      expect(f).toBeGreaterThan(0.6); // typical real memories: modest deviation from 1, not pinned to a bound
+      expect(f).toBeLessThan(1.3);
+    }
+  });
+
+  it('adaptiveDelta actually composes the vessel factor multiplicatively, and re-clamps to the config bounds', () => {
+    const target = pamiIndex(memorySignal(N, 1))!;
+    const store = [2, 3, 4, 5].map((s) => pamiIndex(memorySignal(N, s))!);
+    const base = adaptiveDelta(target, store);
+    const loosened = adaptiveDelta(target, store, ADAPTIVE_DELTA_DEFAULT, { vesselFactor: 2.0 });
+    const tightened = adaptiveDelta(target, store, ADAPTIVE_DELTA_DEFAULT, { vesselFactor: 0.5 });
+    expect(loosened).toBeGreaterThanOrEqual(base);
+    expect(loosened).toBeLessThanOrEqual(ADAPTIVE_DELTA_DEFAULT.deltaMax);
+    expect(tightened).toBeLessThanOrEqual(base);
+    expect(tightened).toBeGreaterThanOrEqual(ADAPTIVE_DELTA_DEFAULT.deltaMin);
   });
 });
 

@@ -246,13 +246,77 @@ export function kthNearestDistance(target: PamiIndex, store: PamiIndex[], k: num
   return dists.length >= k ? dists[k - 1] : null;
 }
 
+// ── modulation 1: state uncertainty (graph volatility) ────────────────────
+// "If the graph is highly perturbed, tighten the threshold to avoid false
+// positives." Volatility is sourced from graph.ts's own sweep() result —
+// CloudGraphStore.sweep() already reports {decayed, pruned, flags} per
+// cycle; volatility here is just the FRACTION of the graph's edges that
+// moved (decayed or were pruned) last cycle, normalized to [0,1]. A pure
+// function — no import of graph.ts — so callers pass the numbers they
+// already have from their own sweep() call rather than this module reaching
+// into the graph store itself.
+export function graphVolatility(decayed: number, pruned: number, totalEdges: number): number {
+  if (totalEdges <= 0) return 0;
+  return Math.max(0, Math.min(1, (decayed + pruned) / totalEdges));
+}
+// Tightens delta toward VOLATILITY_MIN_FACTOR of its density-computed value
+// as volatility rises: at volatility=0, unchanged; at volatility=1 (every
+// edge moved last cycle), shrunk to 40% — demanding more precision exactly
+// when false positives are most likely, never all the way to zero.
+export const VOLATILITY_MIN_FACTOR = 0.4;
+export function volatilityTighten(delta: number, volatility: number): number {
+  const v = Math.max(0, Math.min(1, volatility));
+  return delta * (1 - v * (1 - VOLATILITY_MIN_FACTOR));
+}
+
+// ── modulation 2: winding/radial-variance precision weighting ────────────
+// Runs the SAME phase-vessel hold() pamiCoherence() already uses (the
+// PR #281 wiring) and reads its own trace: a memory whose phase energy
+// locks onto the golden orbit with a small, quick transient (low deviation
+// variance across the run) is a memory the vessel is confident about —
+// tighten its delta. One whose transient is large/wobbly is a memory whose
+// OWN position estimate is less certain — loosen its delta rather than
+// falsely demanding precision from a noisy encoding. VESSEL_REFERENCE_VARIANCE
+// is not arbitrary: it is the measured center of this quantity across real
+// basis-neutral PAMI-encoded memories (~0.015–0.025 in practice; see
+// pami.test.ts), not a guessed constant.
+function vesselFor(idx: PamiIndex) {
+  const occupied = idx.phases.filter((p) => p !== 0).length;
+  const meanPhaseMag = occupied ? idx.phases.reduce((s, p) => s + Math.abs(p), 0) / occupied : 0;
+  return hold({ q: PHI * (1 + meanPhaseMag / Math.PI), p: 0 }, { steps: 600 });
+}
+export function vesselTraceVariance(idx: PamiIndex): number {
+  const devs = vesselFor(idx).trace.map((t) => t.deviation);
+  const mean = devs.reduce((a, b) => a + b, 0) / devs.length;
+  return devs.reduce((a, b) => a + (b - mean) ** 2, 0) / devs.length;
+}
+export const VESSEL_REFERENCE_VARIANCE = 0.02;
+export const VESSEL_FACTOR_MIN = 0.5, VESSEL_FACTOR_MAX = 2.0;
+export function vesselPrecisionFactor(idx: PamiIndex): number {
+  const variance = vesselTraceVariance(idx);
+  return Math.min(VESSEL_FACTOR_MAX, Math.max(VESSEL_FACTOR_MIN, variance / VESSEL_REFERENCE_VARIANCE));
+}
+
 // The adaptive δ for `target` (a query or a candidate memory) given the
 // ambient population it's being compared against. Falls back to
 // DELTA_DEFAULT when the store is too sparse to estimate local density.
-export function adaptiveDelta(target: PamiIndex, store: PamiIndex[], cfg: AdaptiveDeltaConfig = ADAPTIVE_DELTA_DEFAULT): number {
+// Both modulations are optional and neutral by default (volatility=0,
+// no vesselFactor) — supplying them composes on top of the density-computed
+// base, then re-clamps to [deltaMin, deltaMax] so neither can push the
+// result outside the same safety bounds the density term itself respects.
+export interface AdaptiveDeltaModulation {
+  volatility?: number;    // [0,1] — graph.ts's sweep() churn fraction, see graphVolatility()
+  vesselFactor?: number;  // precision multiplier from vesselPrecisionFactor(target)
+}
+export function adaptiveDelta(
+  target: PamiIndex, store: PamiIndex[], cfg: AdaptiveDeltaConfig = ADAPTIVE_DELTA_DEFAULT,
+  modulation: AdaptiveDeltaModulation = {},
+): number {
   const kth = kthNearestDistance(target, store, cfg.k);
-  if (kth === null) return DELTA_DEFAULT;
-  return Math.min(cfg.deltaMax, Math.max(cfg.deltaMin, cfg.factor * kth));
+  let delta = kth === null ? DELTA_DEFAULT : Math.min(cfg.deltaMax, Math.max(cfg.deltaMin, cfg.factor * kth));
+  if (modulation.volatility) delta = volatilityTighten(delta, modulation.volatility);
+  if (modulation.vesselFactor) delta = delta * modulation.vesselFactor;
+  return Math.min(cfg.deltaMax, Math.max(cfg.deltaMin, delta));
 }
 
 export function pamiDistance(a: PamiIndex, b: PamiIndex): number {
@@ -342,8 +406,7 @@ export function pamiCoherence(idx: PamiIndex): PamiCoherenceResult {
   for (let i = 1; i < idx.dims.length; i++) if (idx.dims[i] <= idx.dims[i - 1] + 0.15) monotoneOk++;
   const relational = idx.dims.length > 1 ? monotoneOk / (idx.dims.length - 1) : 1;
 
-  const meanPhaseMag = occupied ? idx.phases.reduce((s, p) => s + Math.abs(p), 0) / occupied : 0;
-  const vessel = hold({ q: PHI * (1 + meanPhaseMag / Math.PI), p: 0 }, { steps: 600 });
+  const vessel = vesselFor(idx);
   const harmonic = vesselCoherence(vessel).harmonic;
 
   const coherence: Coherence = { structural, relational, harmonic };

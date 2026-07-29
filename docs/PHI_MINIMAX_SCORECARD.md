@@ -99,6 +99,41 @@ Two things are true at once, and both are pinned as tests:
    *own* local neighborhood density, not just relative to a bad global
    constant.
 
+## The other two implementation angles — also real now, not proposals
+
+k-NN density (above) was one of three ways to scale δ. The other two are
+implemented in `pami.ts` as optional, composable modulations on
+`adaptiveDelta()` — neither changes default behavior unless supplied:
+
+**State uncertainty (graph volatility).** `graphVolatility(decayed, pruned,
+totalEdges)` reads the same numbers `graph.ts`'s `CloudGraphStore.sweep()`
+already returns each cycle — the fraction of edges that decayed or were
+pruned — and `volatilityTighten()` shrinks δ toward `VOLATILITY_MIN_FACTOR`
+(0.4×) as that fraction rises to 1, per "if the graph is highly perturbed,
+tighten the threshold to avoid false positives." Pure functions, no import
+of `graph.ts` itself — callers supply the numbers they already have.
+
+**Winding/radial-variance precision weighting.** `vesselPrecisionFactor(idx)`
+runs the exact same `phase-vessel.hold()` call `pamiCoherence()` already
+makes and reads the VARIANCE of `deviation` across the settling trace — a
+memory whose phase energy locks quickly and cleanly (low variance) is one
+the vessel is confident about, so its δ tightens; a wobbly, slow-settling
+trace loosens it instead. `VESSEL_REFERENCE_VARIANCE` (0.02) is not a guess —
+it's the measured center of this quantity across real basis-neutral
+PAMI-encoded memories (observed range ≈0.015–0.025, pinned in
+`pami.test.ts`), and real memories' resulting precision factors land
+between roughly 0.6 and 1.3, a modest effect, not a dramatic swing.
+
+**Both are deliberately NOT folded into the scorecard's Domain 1b numbers
+above.** The scorecard's synthetic memories have no real graph to compute
+volatility from, and deciding how the vessel factor should apply to the
+*specific* closest-pair scenario already scored is a design choice, not a
+mechanical extension — recomputing the table with either dial engaged would
+just be another methodology choice added to the two the scorecard already
+carries. They're real, tested (`pami.test.ts`), and ready to use; they aren't
+pretending to be a fourth verdict on top of the three this document already
+reports honestly.
+
 ## The full table, both ways — and the second flip
 
 | candidate | S_ret | S_ret_adaptive | S_res | S_rcrb | P_final (static) | P_final (adaptive) |
