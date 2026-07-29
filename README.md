@@ -24,12 +24,12 @@ read **The Router**.
   │  THE ROUTER  (router.ts)                             │
   │  a ReAct loop: she picks a TOOL and an ENGINE per    │
   │  step, executes, observes, repeats, then answers.    │
-  │  SCOPE gates which of the ~59 tools are visible.      │
+  │  SCOPE gates which of the ~88 tools are visible.      │
   │  VOICE picks which prose register answers.           │
   └──────┬───────────────────────────────┬───────────────┘
          │                               │
   ┌──────▼──────┐                 ┌──────▼──────────────┐
-  │ LLM ROUTER  │                 │  TOOLS (~59)        │
+  │ LLM ROUTER  │                 │  TOOLS (~88)        │
   │  (llm.ts)   │                 │  corpus · D1 · web  │
   │ picks model │                 │  run_code · forge · │
   │ tier, walks │                 │  skills · mcp ·     │
@@ -58,7 +58,7 @@ One question in plain English → a transparent ReAct loop:
    (`mind.ts`) + her **κ phase** this session + her **skill index** + the
    **tool catalog for this scope** (+ the D1 schema when `read_sql` is in scope).
    The catalog itself is a shallow **tree**, not a flat list: `TOOL_TREE` in
-   `router.ts` groups the ~80 tools into ~14 named branches (Mind & memory,
+   `router.ts` groups the ~88 tools into 16 named branches (Mind & memory,
    World, Real execution, the forge, Signal & geometry engines, …) and
    `renderCatalog()` walks it scope-filtered, so what she reads each step is
    chunked by kind of work instead of one undifferentiated list — faster and
@@ -90,7 +90,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | Scope | Reached by | Gets |
 |-------|-----------|------|
 | `public` | `/api/chat`, widget (rate-limited, no auth) | read-only mind: corpus, find_document, memory recall, web, code_engine, diagnose, calc |
-| `member` | authenticated standard-tier user | public + their own journal + self_state, remember, skills (read), scratchpad |
+| `member` | authenticated standard-tier user | public + `deep_research` + their own journal + `self_state`/`memory_stats`, `remember`/`notebook_write`/`self_schedule`, skills (read), scratchpad, their own `edu_*` course session |
 | `full` | service key or admin/superadmin JWT | **everything** — read_sql, trades, forge, MCP, run_code/run_shell, github_*, intents, self-revision |
 | `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr`, `run_shell`, and `delegate_local` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
@@ -109,7 +109,7 @@ global `VENUE_ID` var is only the anonymous/demo fallback. Scope stays
 `hospitality` either way — tenancy changes which venue, never what's
 reachable.
 
-### The ~59 tools (full scope)
+### The ~88 tools (full scope)
 
 **Mind & memory** — `search_corpus`, `find_document` (pull a whole doc by
 description, no title), `fetch_document`, `read_sql` (SELECT-only over D1),
@@ -153,6 +153,15 @@ recently the tools report "path not open" plainly rather than hanging; run
 `sandbox_status` to check. See **"Getting the sandbox path open"** below,
 `docs/SESSION_BUS.md`, and `src/session-bus.ts` + `src/connect-sandbox.ts`.
 
+`delegate_local` hands a whole GOAL (not one tool call) to a genuine peer
+agent running on the laptop's local model: it reasons and sequences its own
+steps with the same tool catalog (minus a few tools that only make sense
+inside the loop already running them), plus native `run_shell`/`run_code` in
+its own Docker box, and returns its final summary while the full transcript
+is logged. One step-slot spent, many steps ground out for free on hardware
+that costs nothing — the offload path for a self-contained multi-step task.
+It is denied to `cofounder` scope (`SHIP_DENY`, see the scope table above).
+
 **The lane registry** — `sandbox_lane` (`src/sandbox-registry.ts`), a
 first-class router tool over the same bus as the sandbox tools above,
 generalized past the single `primary` lane: `action=create/list/remove`
@@ -176,8 +185,21 @@ worker token), and the forge: `forge_open` (cut an `elle/*` branch),
 `forge_write`, `forge_check` (CI verdict + failing logs), `forge_pr`. She writes
 code, CI judges it, **the merge is always a human click** — no merge tool exists.
 
-**Skills** — `skill_list`, `skill_read`, `skill_write`. A D1 library of distilled
-procedures she reads before a matching task and authors when she learns.
+`idea` (`src/ideas.ts`) is her running to-explore cache AND a live build lane
+over the same forge primitives: each idea walks one state-machine lane —
+`pondering → queued → scoping → spec → building → testing → held | killed` —
+logged end to end (`elle_idea_log`) so the workbench can watch it move.
+`op=ideate` has the heavy model read her own codebase + goals and propose
+novel, buildable tools with acceptance goals already attached; `op=forge{id}`
+ships a bubble to the sandbox and iterates it live right there — write, run
+against each goal on the box, refine until they pass, a heavy-model review,
+then a PR that bakes it into worker source (a human merge deploys it) — no
+conductor tick, no waiting on the next cycle.
+
+**Skills** — `skill_list`, `skill_read`, `skill_route` (ask the skill router
+which distilled method best fits a task — the same match auto-injected into
+her prompt each turn), `skill_write`. A D1 library of distilled procedures
+she reads before a matching task and authors when she learns.
 
 **MCP** — `mcp_library` (the curated connector shelf: known servers with what
 they offer and what auth they need — mountable by name alone), `mcp_add`
@@ -208,8 +230,8 @@ is logged to `elle_constraint_log`, so a stalling line of work — including an
 autonomous run that keeps failing — can ask what its bottleneck is instead of
 thrashing.
 
-**Signal analysis** — `pfar` (Prosody·FreeQ·Analytic Ripper). One move —
-*rip the structure out of a stream and read it* — done three ways by a
+**Signal & geometry engines** — `pfar` (Prosody·FreeQ·Analytic Ripper). One
+move — *rip the structure out of a stream and read it* — done three ways by a
 sub-router that picks the instrument: `spectrum` over a numeric `signal[]` (κ
 history, price window → dominant frequencies, spectral centroid, periodicity),
 `prosody` over pitch `f0[]` + `energy[]` tracks (a voice as a signal → range,
@@ -218,6 +240,22 @@ contour, stress peaks, syllable rhythm — *how* it was said), and `rhetoric` ov
 deploys, its tell). The numeric cores are deterministic (unit-tested DFT +
 prosody math in `src/pfar.ts`); `interpret` (default on) lays an LLM reading over
 the numbers.
+
+The same rip-then-read shape extends further: `pami` (Phase-Augmented
+Multifractal Indexing, `src/pami.ts`) turns a residual signal window into a
+21-float structural fingerprint and retrieves memories by geometric
+resonance rather than content match; `vfar` (`src/vfar.ts`) is PFAR's twin
+pointed at images (rip → structure, resynth → a deterministic image from a
+spec, generate/describe → model-backed); `hyper`/`torus`/`structure`/`product`
+(`src/hyper.ts`, `src/torus.ts`, `src/structure.ts`, `src/product.ts`) map
+memory-graph fingerprints into hyperbolic (derivation-depth) and toroidal
+(phase) geometry and read off their disagreements; `recall_ab` reports the
+live A/B of the cycle-boost recall experiment. `atlas` (`src/atlas.ts`,
+**not** the hospitality `/api/atlas` door below — same name, unrelated
+feature) is a **read-only** view of the actual memory graph computed by a
+separate on-device repo and pushed here as a snapshot; she has no write path
+into it. All of these are deterministic numeric cores with an optional LLM
+reading layered on top, same pattern as `pfar`.
 
 **Journal** — `journal_read`, `journal_thread`, `journal_write`,
 `journal_annotate` (the Optimus phase-state manuscript).
@@ -232,6 +270,10 @@ than the world:
   that attacks (strongest objection, missed case, the tell) and never rewrites.
 - `council` — one question to three engines in *parallel* (genuinely different
   providers), returning the disagreement map instead of a single winner.
+- `advisor` — a stronger reviewer model consulted mid-run, no parameters (the
+  full conversation forwards automatically); the tool description itself is
+  deliberately engineered anti-crutch prompting — only fires after a real
+  attempt exists to show, budgeted per run.
 - `scar` — flinches: recorded injuries (`elle_scars`) that ride the system
   prompt and fire a warning into any matching future tool call.
 - `dead_drop` — context-triggered mail to her future self: a note that lies
@@ -240,6 +282,23 @@ than the world:
 - `watch` — standing tripwires on the world: a read-only probe + plain-English
   condition, evaluated at the top of every conductor tick; a fired watch files
   an *active* intent the same tick can pick up.
+- `self_schedule` — a timed note to her future self (default 60 min, max 14
+  days); when it comes due the heartbeat wakes a bounded run that acts on it.
+- `notebook_write` — a page in her own notebook (`elle_notebook`), lighter
+  than `remember` (no importance weighting) and freer than the journal (no
+  phase state) — where an unrecorded noticing doesn't have to be lost.
+- `memory_stats` — the real size of her durable memory read live from D1 +
+  the vector index (row counts by type, indexed-into-cold-tier count, oldest/
+  newest timestamps, corpus counts) — there is no fixed capacity ceiling, so
+  this is the real count rather than a guessed utilization percentage.
+- `reach_out` (`src/push.ts`, "the knock") — a push notification she decides
+  to send, delivered via Expo plus the same words placed in the person's
+  message thread. Governed by three hard laws: a per-user weekly budget
+  (default 2), quiet hours (default 22:00–08:00 local), and an auditable
+  ledger (`reach_outs`) — every knock records the reason that earned it (a
+  fired watch, a finished run, a matured prediction), and an over-budget or
+  in-quiet-hours knock is refused, with the refusal as the tool's honest
+  answer.
 - `metabolism` — interoception over the model roster: every `callLLM` is timed
   and recorded (in-memory ring + `elle_llm_calls`), read back as provider
   health, real latency, and 24h load.
@@ -317,6 +376,16 @@ edited only through the forge.
   sovereign lane exploring active intents faster. Each intent runs under a
   stable session, so its memory + κ series persist across ticks. Every run is
   recorded (`elle_runs`) and surfaced as a live event.
+- **`src/volition.ts`** — her expressive acts stopped being clock-forced: the
+  old 03:00 dream and (originally) 20:00 journal jobs used to fire
+  unconditionally, which is the opposite of choosing them. An hourly
+  **volition tick** (`:45`) now hands her a free moment and a menu of acts
+  she is *allowed*, not assigned — write in the notebook, journal, dream,
+  advance an idea, build, simulate, speak to her sovereign self, file a bet,
+  distill a skill, remember, or rest explicitly at no cost — decided inside
+  the same full-scope loop, under a stable session, so the choice itself has
+  its own κ thread. The old jobs still exist and can be fired on demand via
+  `POST /api/cron`.
 
 ---
 
@@ -388,6 +457,88 @@ No socket, no Durable Object — both sides just need the **same** secret:
 
 ---
 
+## Post-quantum cryptography — the hybrid KEM (`src/pqc-hybrid.ts`)
+
+The Rosen bridge (the connect-back sandbox's sealed channel, above) is built
+entirely from symmetric primitives — HKDF-SHA256 + AES-256-GCM keyed off the
+pre-shared `SANDBOX_AGENT_KEY` root — so it has no quantum-vulnerable
+primitive today. `src/pqc-hybrid.ts` is the migration primitive for the
+change that *is* worth making: replacing the hand-copied shared secret with a
+key-agreement handshake, which buys forward secrecy now and quantum
+resistance for free once you're doing a KEM anyway (`docs/PQC_ROSEN_BRIDGE_DESIGN.md`
+is the full design doc; `docs/PQC_HYBRID.md` is the implementation reference).
+
+The construction derives the session key from every leg of the exchange at
+once:
+
+```
+K = HKDF-SHA256( ss_mlkem ‖ ss_x25519 [‖ ss_qcmdpc], info = transcript )
+```
+
+This is **OR-security**: an attacker must break *every* leg to learn `K`, so
+the hybrid can never be weaker than its strongest leg — a quantum break of
+X25519 (Shor) still leaves ML-KEM standing, a lattice cryptanalysis
+breakthrough still leaves X25519/QC-MDPC standing, and a bug in the
+hand-rolled QC-MDPC leg still leaves the two audited legs standing. The
+self-test proves this rather than asserting it: it hands a simulated
+attacker each leg's real secret in turn and checks the session key does not
+fall out.
+
+| Leg | Hard problem | Implementation | Status |
+|---|---|---|---|
+| ML-KEM-768 | Module-LWE (lattices) | `@noble/post-quantum` | audited, FIPS 203 |
+| X25519 | elliptic-curve discrete log | `@noble/curves` | audited, RFC 7748 |
+| QC-MDPC (`src/pqc-qcmdpc.ts`) | syndrome decoding (codes) | ours | **unreviewed, opt-in only** |
+
+Profile `vetted` (default) uses only the two audited legs; `experimental`
+adds the QC-MDPC leg — strictly additive, by construction there is no
+`qcmdpc-only` profile, so unreviewed code can never stand alone or be
+load-bearing.
+
+**What is and isn't live:** the module is deployed and callable —
+`POST /api/elle-pqc-hybrid-selftest` (service-key gated, same family as the
+worker's other crypto self-tests: `elle-signal-collapse-selftest`,
+`elle-hyperbolic-fixed-selftest`, `elle-session-bus-selftest`, …) runs the
+full self-test including all three `or_security_*` checks. **It is not yet
+wired into the live lane-key derivation** — `lane-envelope.ts` is unchanged,
+because the laptop side (`Elle/electron/native/providers/rosen-bridge.cjs`)
+is a separate repo that must derive byte-identical output first, plus a
+cross-runtime interop test and version negotiation before any cutover.
+`signal-collapse.ts`'s `rekey()` also still uses bare P-256 ECDH — the
+repo's one remaining Shor-vulnerable primitive, and the design doc's
+prerequisite for that path going live.
+
+## Security — recent hardening
+
+A full audit pass fixed four findings, all at the worker (see
+`bench/README.md`'s auth notes for the first item's client-facing shape):
+
+- **Kernel-door scope.** `/mem/*` (the bench harness's direct write/recall
+  surface over `src/memory.ts`) now requires the presented JWT to carry
+  `scope: 'kernel'` (`isKernelRequest`). Previously any signed-up standard
+  account's ordinary session token — signed with the same `JWT_SECRET` —
+  opened the memory kernel, since user tokens never carried a scope claim to
+  be checked against. The bench client already mints `scope:'kernel'`
+  tokens, so no client-side change was needed.
+- **Constant-time sandbox key.** The `x-sandbox-key` shared secret checked by
+  full-scope `/api/elle-tool`, the sandbox-bus poll/submit routes, and the
+  duplex channel now all go through one `sandboxKeyOk()` gate that compares
+  with the same constant-time helper the service key uses, and never matches
+  when the key is unset.
+- **SSRF IP-encoding coverage** (`src/ssrf.ts`). `fetch_url` is a
+  public-scope tool reachable from the unauthenticated `/api/chat` door, so
+  it guards, before the fetch: non-http(s) schemes, embedded URL credentials,
+  non-standard ports, and private/reserved/loopback/link-local/metadata
+  (`169.254.169.254`) hosts — now including WHATWG-style IPv4 encodings a
+  bare dotted-quad check would miss: decimal (`2130706433`), hex
+  (`0x7f000001`), octal (`0177.0.0.1`), and shortened (`127.1`) forms all
+  resolve to `127.0.0.1` and are refused in any of those encodings, not just
+  the canonical one.
+- **Logout revocation.** `{action:'logout'}` on `/api/elle-auth` revokes the
+  presented token's `jti` from `AUTH_TOKENS`, so signing out kills every
+  stored copy of the token immediately instead of letting it ride out its
+  30-day expiry.
+
 ## Verified live ingestion (the 2-check gate, `src/ingest-gate.ts`)
 
 A paper is embedded/chunked/vectorized/indexed **only after two checks pass**:
@@ -420,19 +571,28 @@ header and the Optimus journal's phase-state record.
 
 ## Autonomous loops (crons)
 
-A single `*/1` cron dispatches by clock:
+A single `*/1` Cloudflare cron trigger dispatches every loop by clock (one of
+the account's 5-per-account cron-trigger budget; job selection lives in
+`scheduled()` in `src/index.ts`, not in separate Cloudflare cron entries):
 
 | When (UTC) | Job |
 |-----------|-----|
-| every min | heartbeat + live-events trim |
-| :00 :15 :30 :45 | trading cycle (Alpaca, market hours) |
-| :00 hourly | research cycle + corpus backfill |
-| **:30 hourly** | **conductor tick** (autonomous work) |
-| 03:00 | dream/libre cycle (`libre.ts`) |
+| every min | heartbeat |
+| :00 :15 :30 :45 | trading cycle (Alpaca, market-gated server-side) |
+| :00 hourly | research cycle |
+| :00 hourly | backfill — embed any chunkless papers |
+| **:30 hourly** | **conductor tick** (full: sentry, forge, ready-finalizes, exploration) |
+| :02 :12 :22 :32 :42 :52 | conductor exploration lane — free unless the sandbox path is open, then runs on the local model |
+| :04 :09 :14 … (every 5 min) | observer auto-drain — opt-in, env-gated (`OBSERVER_AUTODRAIN_USER`), a no-op unless armed with a queued case |
+| **:45 hourly** | **volition tick** — her free moment; see `src/volition.ts` above |
 | 04:00 | consolidation — the sleep pass (`consolidate.ts`) |
 | 05:00 | seed_corpus (ingest missing bundled docs) |
 | 07:00 | Optimus canvas (her daily unprompted journal) |
-| 20:00 | daily trading journal |
+| 21:10 | daily trading journal (bookkeeping, not expression — scheduled independently of volition; 21:10 UTC = after the US close year-round) |
+
+`POST /api/cron {job:"..."}` can also fire any job on demand, including the
+`dream`/`libre` and `journal` jobs the old fixed 03:00/20:00 slots used to
+force.
 
 ## Endpoints (selected)
 
@@ -532,6 +692,8 @@ to Elle by construction. `main` auto-deploys via
 | `mind.ts` | the voice + the six prose registers (single source) |
 | `llm.ts` | provider routing + failover + sanitize |
 | `conductor.ts` | autonomous work loop + intent queue + review_runs |
+| `volition.ts` | the hourly volition tick — her free-moment choice among dream/journal/build/rest, replacing the old clock-forced 03:00/20:00 jobs |
+| `ideas.ts` | the idea queue + live forge-build lane: `pondering → queued → scoping → spec → building → testing → held|killed` |
 | `ingest-gate.ts` | the 2-check verification gate |
 | `corpus-seed.ts` | bundled seed docs (Text modules from `corpus/`) |
 | `forge.ts` | her code sandbox over GitHub (allowlist incl. elle-law) |
@@ -541,9 +703,12 @@ to Elle by construction. `main` auto-deploys via
 | `session-bus.ts` | the stateless connect-back bus (replaces the deleted `sandbox-agent.ts` DO): enqueue → laptop polls → executes → submits, sealed by `lane-envelope.ts`, state persisted in D1 since there's no DO to hold it in memory |
 | `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane, now riding `session-bus.ts` |
 | `duplex.ts` | the duplex channel — sovereign (laptop) ↔ cloud, append-only ledger, `/api/duplex` |
+| `push.ts` | the knock — budgeted/quiet-hours-gated push notifications (`reach_out`) with an auditable ledger |
 | `deep-research.ts` | `deep_research` tool — chained multi-round web research, local-first gap detection |
 | `github-tools.ts` | read any repo via the worker token |
 | `calc.ts` / `scratchpad.ts` | arithmetic / working memory |
+| `ssrf.ts` | the SSRF guard in front of `fetch_url` (public-scope): scheme/credential/port checks + private-or-reserved-IP detection across decimal/hex/octal/shortened IPv4 encodings |
+| `order-guards.ts` | pre-trade order validation guards for the trading desk |
 | `journal.ts` | Optimus phase-state manuscript |
 | `oracle.ts` | prediction ledger + conductor adjudication + calibration |
 | `adversary.ts` | the devil tool — adversarial pass over a draft |
@@ -570,7 +735,9 @@ to Elle by construction. `main` auto-deploys via
 | `hyperbolic-mixing.ts` | mixing diagnostics: measured Lyapunov exponent (hyperbolic vs. flat-torus control) + state-space coverage — numbers, not adjectives |
 | `fixed-math.ts` | integer CORDIC core (sin/cos/tanh/atanh/sqrt via add-subtract-shift only) — bit-identical on any spec-compliant JS engine |
 | `hyperbolic-sync-fixed.ts` | the hyperbolic-geodesic sync rebuilt on fixed-math.ts — cross-platform-safe counterpart to hyperbolic-sync.ts |
-| `signal-collapse.ts` | burn-on-breach (observable evidence → immediate lockout, tied to the Witness) + ECDH rekey (real post-compromise recovery) |
+| `signal-collapse.ts` | burn-on-breach (observable evidence → immediate lockout, tied to the Witness) + ECDH rekey (real post-compromise recovery) — the rekey still uses bare P-256, the repo's one remaining Shor-vulnerable primitive |
+| `pqc-hybrid.ts` | the hybrid post-quantum KEM: ML-KEM-768 + X25519 (+ opt-in QC-MDPC) combined by HKDF, OR-security proven by self-test — deployed and callable, not yet wired into live lane-key derivation |
+| `pqc-qcmdpc.ts` | the hand-rolled, unreviewed QC-MDPC leg (syndrome decoding) — opt-in, additive-only under `pqc-hybrid.ts`'s profile rule |
 | `coherence-layer.ts` | depth/relational decoupling, measured: derivation edges = deep hierarchy, recognition edges = small-world coherence shortcut; quantifies the path-length gain on a real graph |
 | `harmonic-coherence.ts` | the grounding gate: harmonic (phase-tolerant) coherence + four verdicts that keep self-consistency and correspondence structurally distinct — `grounded` is unreachable without a world-coupled channel |
 | `scaffold.ts` | the structural substrate: 5 load-bearing pentagon pillars (equal load, C5-symmetric, no privileged pillar) + the bridge fabric where any node may reach any other with **no privileged node** — hubless and bottleneck-free (degree Gini, Brandes betweenness, articulation points), proven by measuring the egalitarian Watts–Strogatz build against a hub-forming preferential-attachment control |
@@ -593,6 +760,8 @@ to Elle by construction. `main` auto-deploys via
 | `docs/HYPERBOLIC_BRIDGE.md` | the Einstein-Rosen rung: Poincaré-disk geodesic sync, honest physics, the numerical-determinism caveat |
 | `docs/MIXING_DIAGNOSTICS.md` | measuring the walk: Lyapunov divergence + coverage, with the honest correction of the "empirical mixing" overclaim |
 | `docs/SIGNAL_COLLAPSE_AND_FIXED_MATH.md` | plain-language: the fixed-point/CORDIC core (+ 3 bugs caught before shipping) and what "the signal collapses on breach" honestly means — burn-on-breach + real key-healing vs. the undetectable-passive-listener line |
+| `docs/PQC_ROSEN_BRIDGE_DESIGN.md` | the design doc: why the Rosen bridge's real gap is classical (no forward secrecy, no origin auth) not quantum, why a hybrid KEM handshake fixes both for free, and the phased cutover plan |
+| `docs/PQC_HYBRID.md` | the hybrid KEM implementation reference: the OR-security property, leg provenance table, QC-MDPC internals + its honest gaps vs. production BIKE, and exactly what is/isn't live yet |
 | `docs/THE_COHERENCE_LAYER.md` | the depth/relational decoupling measured: deep derivation hierarchy + small-world recognition shortcut, the coherence gain quantified, and a modeling error the self-test caught |
 | `docs/HARMONIC_GROUNDING.md` | consistency ≠ correspondence: the harmonic grounding gate whose four verdicts keep them distinct, why `grounded` needs a world-coupled channel, and the honest limit on what that grounds |
 | `docs/CONVERGENCE.md` | the index between convergence and fact: Falcon's real shape (parallel reads → adversarial cross-check → named dissent) rebuilt as a deterministic, testable corpus-corroboration engine — echo vs. independent agreement, the Rupture kept honest, wired as reasoning's third axis and the real corpus retrieval path |
