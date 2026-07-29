@@ -7,6 +7,7 @@ import { availableUnits, completeUnit, recordSession, unitById } from './engine.
 import { detectSignals } from './signals.ts';
 import { sessionBrief } from './brief.ts';
 import aiEngineerStackJson from './courses/ai-engineer-stack.json';
+import aiEngineerCurriculumJson from './courses/ai-engineer-curriculum.json';
 
 // The vendored engine running against the REAL bundled course artifact —
 // the same object the worker serves. If the JSON drifts out of shape with
@@ -122,5 +123,41 @@ describe('scope', () => {
       expect(toolAllowed('public', t), t).toBe(false);
       expect(toolAllowed('hospitality', t), t).toBe(false);
     }
+  });
+});
+
+describe('ai-engineer-curriculum — the first-party, ours-to-teach course', () => {
+  const curriculumCourse = aiEngineerCurriculumJson as unknown as Course;
+
+  it('is real, generated content covering the foundation tier, with contracts everywhere', () => {
+    expect(curriculumCourse.id).toBe('ai-engineer-curriculum');
+    expect(curriculumCourse.units.length).toBe(39); // 6 foundation courses' worth of module packets
+    for (const u of curriculumCourse.units) {
+      expect(u.adaptation.watchFor.length, u.id).toBeGreaterThan(0);
+      expect(u.tiers.observerReading.length, u.id).toBeGreaterThan(40);
+      // pacing text is EXTRACTED from that module's own authored materials,
+      // not boilerplate — every unit's moves must be non-generic per-unit text.
+      expect(u.adaptation.moves.reroute.length, u.id).toBeGreaterThan(20);
+    }
+  });
+
+  it('schedules the front-door unit first with no prerequisites', () => {
+    const state = newLearnerState('u2', curriculumCourse.id, curriculumCourse.version, T0);
+    const avail = availableUnits(curriculumCourse, state, day(1)).map((u) => u.id);
+    expect(avail).toContain('AIE-100-M01');
+  });
+
+  it('runs the same engine end to end: log, brief, seal, gate', () => {
+    const state = newLearnerState('u3', curriculumCourse.id, curriculumCourse.version, T0);
+    recordSession(curriculumCourse, state, {
+      unitId: 'AIE-100-M01',
+      at: day(1).toISOString(),
+      minutes: 45,
+      evidence: [{ pillar: 'structure', artifact: 'drew the pointer model' }],
+    });
+    const brief = sessionBrief(curriculumCourse, state, day(2));
+    expect(brief.markdown).toContain('AIE-100-M01');
+    const refused = completeUnit(curriculumCourse, state, 'AIE-100-M01', day(3));
+    expect(refused.completed).toBe(false); // only one of four pillars evidenced
   });
 });
