@@ -50,6 +50,7 @@ import { witnessOscillatorSelfTest } from './witness-oscillator';
 import { cognitiveObliquitySelfTest } from './cognitive-obliquity';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
+import { pqcHybridSelfTest } from './pqc-hybrid';
 import { handleLattice, type LatticeEnv } from './lattice';
 import { handleMadmind } from './madmind';
 import { handleMindmapPost, handleMindmapGet } from './mindmap';
@@ -2168,6 +2169,17 @@ export default {
     if (path === '/api/elle-signal-collapse-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await signalCollapseSelfTest());
+    }
+    // Hybrid post-quantum KEM self-test (src/pqc-hybrid.ts). Proves the
+    // OR-security property the whole construction exists for: the session key
+    // is HKDF over EVERY leg's secret, so holding one leg alone — ML-KEM's,
+    // X25519's, or the experimental QC-MDPC leg's — does not yield it. This is
+    // the primitive the PQC migration is built on; it is NOT yet wired into the
+    // live lane derivation, which needs the matching laptop-side port first
+    // (docs/PQC_HYBRID.md).
+    if (path === '/api/elle-pqc-hybrid-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await pqcHybridSelfTest());
     }
     // The Lattice — 32-axis, 3-layer security deduction engine (Seed of Life
     // 7 + Flower of Life 12 + Fruit of Life 11, then Validation + The
