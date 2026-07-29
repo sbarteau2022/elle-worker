@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { pamiIndex, pamiDistance, resonance, kappaCrossModal, indexLength, SPEC_CONFIG, PHI, type PamiConfig } from './pami';
+import { pamiIndex, pamiDistance, resonance, kappaCrossModal, indexLength, pamiCoherence, SPEC_CONFIG, PHI, PHI_INV, type PamiConfig } from './pami';
+import { PHI as REGULATOR_PHI, PHI_INV as REGULATOR_PHI_INV } from './regulator';
 
 // Deterministic synthetic signal generators — every claim below is checked
 // against ground truth the generator controls.
@@ -133,6 +134,41 @@ describe('retrieval by structural resonance', () => {
     const nearestKnown = Math.min(...memories.map((m) => pamiDistance(novel, m)));
     const withinFamily = pamiDistance(memories[0], memories[1]);
     expect(nearestKnown).toBeGreaterThan(withinFamily * 0.8);
+  });
+});
+
+describe('wiring — pami.ts, regulator.ts, phase-vessel.ts share ONE φ and are actually connected', () => {
+  it('pami.ts no longer defines its own PHI: it is bit-identical to regulator.ts\'s', () => {
+    expect(PHI).toBe(REGULATOR_PHI);
+    expect(PHI_INV).toBe(REGULATOR_PHI_INV);
+    expect(PHI * PHI_INV).toBeCloseTo(1, 12);
+  });
+
+  it('pamiCoherence() actually runs a stored index through the phase-vessel AND the regulator', () => {
+    const idx = pamiIndex(phiSignal(N, 2))!;
+    const r = pamiCoherence(idx);
+    // structural/relational come straight from the index's own numbers
+    expect(r.coherence.structural).toBeGreaterThanOrEqual(0);
+    expect(r.coherence.structural).toBeLessThanOrEqual(1);
+    expect(r.coherence.relational).toBeGreaterThanOrEqual(0);
+    expect(r.coherence.relational).toBeLessThanOrEqual(1);
+    // harmonic came from an actual phase-vessel hold() run, not a stub
+    expect(r.vessel.trace.length).toBeGreaterThan(1);
+    expect(r.coherence.harmonic).toBe(r.vessel.locked && r.vessel.area_conserved ? 1 : (r.vessel.product_conserved ? 0.5 : 0));
+    // that coherence was then actually regulated (free-energy descent ran)
+    expect(r.regulated.trace.length).toBeGreaterThan(1);
+    expect(r.regulated.F0).toBeGreaterThanOrEqual(0);
+  });
+
+  it('a well-formed φ-structured index STARTS at lower free energy than a degenerate (empty) one', () => {
+    // regulate() converges any start toward the fixed point (that's its own
+    // proven Lyapunov guarantee — see regulator.test.ts), so the two runs'
+    // FINAL F both settle near 0 regardless of input; the honest comparison
+    // is F0, the free-energy cost of the coherence pamiCoherence() derived
+    // from each index BEFORE any descent runs.
+    const good = pamiCoherence(pamiIndex(phiSignal(N, 4))!);
+    const degenerate = pamiCoherence({ phases: new Array(8).fill(0), dims: new Array(13).fill(0) });
+    expect(good.regulated.F0).toBeLessThan(degenerate.regulated.F0);
   });
 });
 

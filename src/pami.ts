@@ -30,17 +30,27 @@
 
 import { ensureAllSchemas } from './db/schema';
 import type { Env } from './index';
+// Single source of truth for φ/φ⁻¹ — regulator.ts is the canonical definition
+// (also consumed by phase-vessel.ts); pami.ts used to redefine its own local
+// PHI, which meant three independent φ constants existed in the codebase with
+// nothing forcing them to agree. Re-exported so existing `import { PHI } from
+// './pami'` call sites (pami.test.ts) keep working unchanged.
+import { PHI, PHI_INV, regulate, type Coherence, type RegulatorResult } from './regulator';
+import { hold, vesselCoherence, type HoldResult } from './phase-vessel';
+export { PHI, PHI_INV };
 
-export const PHI = (1 + Math.sqrt(5)) / 2;
-
-// ── configuration (the F3 seam) ───────────────────────────────────────────
+// ── configuration (the F2/F3 seam) ────────────────────────────────────────
 
 export interface PamiConfig {
   phaseCount: number;   // F6 = 8 in the spec
   qMax: number;         // 6 in the spec → q ∈ {−6..6} = 13 dimensions (F7)
-  scaleKMin: number;    // φ^k grid, spec §V.2: k ∈ {−4..8} = 13 scales
+  scaleKMin: number;    // scaleBase^k grid, spec §V.2: k ∈ {−4..8} = 13 scales
   scaleKMax: number;
   baseScale: number;    // samples at k = 0
+  scaleBase?: number;   // F1 ablation seam — the wavelet scale ratio the spec
+                         // claims must be φ (§II.3, Hurwitz optimality). Default
+                         // PHI; pami-basis-ablation.test.ts swaps in the spec's
+                         // named rivals to test that claim directly.
 }
 export const SPEC_CONFIG: PamiConfig = { phaseCount: 8, qMax: 6, scaleKMin: -4, scaleKMax: 8, baseScale: 4 };
 
@@ -66,9 +76,10 @@ export function phiWaveletTransform(signalIn: number[], cfg: PamiConfig = SPEC_C
   const mean = x.reduce((a, b) => a + b, 0) / n;
   const rows: ScaleRow[] = [];
   const W0 = 6; // Morlet center frequency (≈3 vanishing moments in effect)
+  const base = cfg.scaleBase ?? PHI;
 
   for (let k = cfg.scaleKMin; k <= cfg.scaleKMax; k++) {
-    const scale = cfg.baseScale * Math.pow(PHI, k);
+    const scale = cfg.baseScale * Math.pow(base, k);
     if (scale < 0.8 || scale * 3 > n) continue; // unresolvable at this length
     const half = Math.max(1, Math.ceil(3 * scale));
     // kernel (conjugate applied in the sum): e^{-t²/2s²} e^{-iω0 t/s} / √s
@@ -253,6 +264,53 @@ export function kappaCrossModal(narrative: number[], physiological: number[], cf
   return resonance(a, b);
 }
 
+// ── wiring seam: PAMI → phase-vessel → regulator ───────────────────────────
+// The three φ-implementations in this codebase (this file's wavelet index,
+// regulator.ts's free-energy descent, phase-vessel.ts's symplectic hold) were
+// each built with a seam for exactly this: regulator.ts exports Coherence for
+// phase-vessel.vesselCoherence() to fill in; phase-vessel.ts's docstring calls
+// itself "the multiplicative twin of the regulator's additive ledger." Until
+// now nothing called across the seam — pami.ts had its own local PHI and
+// neither regulator.ts nor phase-vessel.ts was reachable from a memory index.
+// This is that connection, derived entirely from the index's own numbers (no
+// new free parameters):
+//   structural ← fraction of the 8 phase slots the energy gate actually
+//                filled (an index that's mostly gated-to-zero has little
+//                structure to hold)
+//   relational ← fraction of adjacent D(q) pairs that keep the non-increasing
+//                shape a genuine multifractal cascade must have (the same
+//                check pami.test.ts already runs on cascade() signals)
+//   harmonic   ← feed the index's own mean phase magnitude into the vessel as
+//                an off-orbit start and read back whether it locks — a
+//                well-formed φ-structured residual should fall into the
+//                golden rhythm; a noisy one shouldn't
+// The resulting Coherence is then run through the SAME regulate() the build's
+// scaffold/coherence-layer invariants use, so a PAMI memory's "quality" is
+// measured on the identical φ-weighted free-energy scale as everything else
+// the regulator already governs.
+export interface PamiCoherenceResult {
+  coherence: Coherence;
+  regulated: RegulatorResult;
+  vessel: HoldResult;
+}
+
+export function pamiCoherence(idx: PamiIndex): PamiCoherenceResult {
+  const occupied = idx.phases.filter((p) => p !== 0).length;
+  const structural = idx.phases.length ? occupied / idx.phases.length : 0;
+
+  let monotoneOk = 0;
+  for (let i = 1; i < idx.dims.length; i++) if (idx.dims[i] <= idx.dims[i - 1] + 0.15) monotoneOk++;
+  const relational = idx.dims.length > 1 ? monotoneOk / (idx.dims.length - 1) : 1;
+
+  const meanPhaseMag = occupied ? idx.phases.reduce((s, p) => s + Math.abs(p), 0) / occupied : 0;
+  const vessel = hold({ q: PHI * (1 + meanPhaseMag / Math.PI), p: 0 }, { steps: 600 });
+  const harmonic = vesselCoherence(vessel).harmonic;
+
+  const coherence: Coherence = { structural, relational, harmonic };
+  const regulated = regulate(coherence, { perturb: 0 });
+  return { coherence, regulated, vessel };
+}
+
 // ── the five operations (§VIII.1) over D1 ─────────────────────────────────
 // v1 store: the 21 floats as JSON, linear resonance scan over a bounded
 // recent window. The spec's k-d/LSH structure is the scale-up seam; at
@@ -292,7 +350,7 @@ export async function pamiRetrieve(env: Env, query: PamiIndex, k = 5): Promise<A
 // ── the pami tool (her interface to all five operations) ──────────────────
 
 export interface PamiToolInput {
-  op?: 'encode' | 'store' | 'retrieve' | 'resonate' | 'kappa';
+  op?: 'encode' | 'store' | 'retrieve' | 'resonate' | 'kappa' | 'coherence';
   signal?: number[];       // the residual window (caller subtracts its prediction; identity-𝒫 = raw signal, dream-pass semantics)
   signal_b?: number[];     // second window for kappa
   index?: PamiIndex;       // for store/resonate when already encoded
@@ -331,10 +389,20 @@ export async function pamiTool(env: Env, a: PamiToolInput): Promise<string> {
       return kap === null ? JSON.stringify({ op, error: 'pami kappa: need two signals of ≥32 samples' })
         : JSON.stringify({ op, kappa: kap });
     }
+    if (op === 'coherence') {
+      const idx = a.index ?? (a.signal ? pamiIndex(a.signal) : null);
+      if (!idx) return JSON.stringify({ op, error: 'pami coherence: provide index or signal[]' });
+      const r = pamiCoherence(idx);
+      return JSON.stringify({
+        op, coherence: r.coherence, free_energy: r.regulated.final.F,
+        balanced_superposition: r.regulated.balanced_superposition,
+        vessel_locked: r.vessel.locked,
+      });
+    }
   } catch (e) {
     return JSON.stringify({ op, error: `pami failed: ${(e as Error).message}` });
   }
-  return JSON.stringify({ error: 'pami: op must be encode|store|retrieve|resonate|kappa (or pass signal/signal_b for auto)' });
+  return JSON.stringify({ error: 'pami: op must be encode|store|retrieve|resonate|kappa|coherence (or pass signal/signal_b for auto)' });
 }
 
 function round(x: number, p: number): number {
