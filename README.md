@@ -618,6 +618,10 @@ Journal/law: `/api/optimus-journal`, `/api/notebook`, `/api/madmind`,
 engine (`action: run|list|get|outcome`; `run` takes a `direction` string).
 `/api/elle-lattice` — The Lattice: 32-axis, 3-layer security deduction engine
 (`action: run|list|get`; `run` takes an `incident` string; admin-gated).
+`/api/flock` — Flock: social-media intelligence — brand kits + on-brand
+content + brand-conditioned image gen + multi-channel fan-out (`action:
+brand.* | channel.* | content.* | image.* | video.* | post.* | asset.list |
+status`). Generated media is served from `/flock/asset/…`.
 Engine/ops: `/api/elle-code-engine`, `/api/diagnose`, `/api/research`,
 `/api/cron`, `/api/elle-auth`, `/api/elle-oauth`, `/health`.
 
@@ -643,19 +647,63 @@ stance appended (she never ghost-writes a learner's readings, never argues
 the gate down). Call `edu_brief` first in any learning session; generating
 it writes the witness log.
 
+## Flock — social-media intelligence (`src/flock.ts`)
+
+One brain for running many brands' social presence, member-gated behind
+`/api/flock` (`action`-dispatched, same shape as the other engines). The
+**brand kit** (`flock_brands` — mission, voice, palette, fonts, audience,
+taboos, visual style) is the single continuity source; every generation and
+every check conditions on it.
+
+- **Content pipeline** — `content.ideate` (brief → on-brand concepts),
+  `content.caption` (on-voice caption + hashtags + CTA), and
+  `content.continuity` — the **Brand Guardian**, which scores any draft
+  against the kit across voice / palette / values / audience (0–100) and
+  returns concrete fixes. Every chain writes to `flock_reasoning_log` with
+  the same premises/framework/alternatives/would-change discipline as the
+  Falcon and Grant engines.
+- **Image (built hard)** — `image.generate` (brand-conditioned txt2img) and
+  `image.edit` (img2img "AI edit") through the provider seam in
+  `flock-providers.ts`. `buildImagePrompt` folds palette/style/voice into the
+  prompt and routes the brand's taboos into the negative prompt. Runs on
+  **Cloudflare Workers AI (`env.AI`)** by default — free, always-on, no key.
+- **Sovereign transfer** — the image seam is the one swappable place model
+  choice lives. Set `FLOCK_IMAGE_PROVIDER=sovereign` (or `auto`) +
+  `FLOCK_IMAGE_URL` and every draw routes to your own self-hosted model, with
+  automatic fallback to Workers AI if it's down — a config change, not a
+  rewrite (mirrors the LLM local/Ollama lane). `selectImageChain` is pure and
+  unit-tested so the policy is auditable.
+- **Video + posting** — honest stub adapters. `video.generate` describes the
+  job it *would* run until `FLOCK_VIDEO_*` is wired; `post.publish` fans one
+  post out across a **flock** of channels (`flock_channels`), dry-running each
+  channel that has no per-platform OAuth. Nothing fakes a render or a post.
+- **The gate** — `post.publish` refuses an unreviewed or off-brand post
+  unless forced; `post.review` runs the Guardian first.
+
+Generated media is stored in **R2 `DOCUMENTS`** under `flock/assets/…` and
+served publicly by unguessable id at `/flock/asset/…` (same posture as
+`/vfar`). Schema: `flock_brands`, `flock_channels`, `flock_assets`,
+`flock_posts`, `flock_reasoning_log` (`src/db/schema.ts`). 18 unit tests in
+`src/flock.test.ts`. The workbench face is the **flock** panel in the Elle
+app (`FlockPanel.tsx`).
+
 ## Persistence & bindings
 
 - **D1 `elle-corpus`** — corpus, memory, trades, journal, intents, runs, skills,
   forge tasks, MCP registry, idempotency, law tables.
 - **D1 `rapid2ai-db`** (`RAPID_DB`, `VENUE_ID`) — hospitality data, venue-scoped.
 - **Vectorize** — corpus + conversation + journal embeddings.
-- **R2 `DOCUMENTS`** — full paper text.
+- **R2 `DOCUMENTS`** — full paper text, plus Flock's generated media under `flock/assets/…`.
 - **KV** — `SESSIONS` (rate limits), `AUTH_TOKENS` (JWT revocation), `SCRATCHPAD`.
 - **`GITHUB_TOKEN`** — powers the forge + `github_*` tools.
 - **`SANDBOX_AGENT_KEY`** — the connect-back sandbox's shared secret (no
   Durable Object anymore — see `session-bus.ts` + `connect-sandbox.ts`).
   Must match the workbench's `ELLE_SANDBOX_KEY`.
 - **`ALPACA_*`** — paper/live trading.
+- **`FLOCK_IMAGE_*` / `FLOCK_VIDEO_*`** — Flock's generative backends. Unset ⇒
+  image gen rides `env.AI` (Workers AI) and video is stubbed. Set
+  `FLOCK_IMAGE_PROVIDER=sovereign` + `FLOCK_IMAGE_URL` to draw on a
+  self-hosted model instead (see `.dev.vars.example`).
 
 ## GitHub access — the worker token reaches elle-law
 
@@ -727,6 +775,8 @@ to Elle by construction. `main` auto-deploys via
 | `law.ts` | law bench (duel/tutor/doctrine/cohort/replays) |
 | `war-room.ts` | the War Room: SPAR (doctrine Duelist + Autopsy + ladder) · DRILLS · CHAMBERS · X-RAY |
 | `falcon.ts` | the Millennium Falcon: 16-axis, 3-tier product intelligence engine — Material Ground + Observer Reading fire in parallel, Validation + the Rupture (axis 16) fire last, sequentially |
+| `flock.ts` | Flock — social-media intelligence: brand kits, on-brand ideate/caption, the Brand Guardian (continuity scoring), image generate/edit, video stub, multi-channel post fan-out |
+| `flock-providers.ts` | Flock's swappable model seam: image (Workers AI / sovereign self-hosted, with fallback), video, and posting adapters — where the sovereign-model transfer lives |
 | `madmind.ts` / `diagnose.ts` / `research.ts` / `widget.ts` | submissions, diagnostics, research cron, embeddable widget |
 | `security-network.ts` | dynamic-adaptive security network: 48L/AOW attacker-tactic taxonomy, decaying per-actor posture, malware/polyglot scan + runtime hash blocklist |
 | `helix.ts` | COROS signal crypto tunnel: AES-256-GCM + φ-corkscrew covertness (length-hiding, whitening) + forward ratchet + constant-rate framing |
