@@ -24,7 +24,7 @@ them. This is the template for the incoming engines.
 |---|--------|------|----------------|
 | 1 | Observer | _(incoming — the corpus itself)_ | running |
 | 2 | Millennium Falcon | `02-millennium-falcon.md` | operational · 16-axis |
-| 3 | Grant Intelligence | `03-grant-intelligence.md` | building |
+| 3 | Grant Intelligence | `03-grant-intelligence.md` | Module 1 live (fit analysis + NECAI-F donor sub-engine + ProPublica 990-PF financial overview, `src/grant-intelligence.ts` + `grant-990.ts`, behind `/api/elle-grants`); Modules 2-4 (proposal analysis/development/management) not built |
 | 4 | Education Intelligence | `04-education-intelligence.md` | architecture decided |
 | 5 | Hospitality (Groundwork) | `05-hospitality-groundwork.md` | v0.4 live |
 | 6 | Mental Health (Harmonizer) | `06-harmonizer-mental-health.md` | v3 live |

@@ -24,12 +24,12 @@ read **The Router**.
   │  THE ROUTER  (router.ts)                             │
   │  a ReAct loop: she picks a TOOL and an ENGINE per    │
   │  step, executes, observes, repeats, then answers.    │
-  │  SCOPE gates which of the ~88 tools are visible.      │
+  │  SCOPE gates which of the ~109 tools are visible.     │
   │  VOICE picks which prose register answers.           │
   └──────┬───────────────────────────────┬───────────────┘
          │                               │
   ┌──────▼──────┐                 ┌──────▼──────────────┐
-  │ LLM ROUTER  │                 │  TOOLS (~88)        │
+  │ LLM ROUTER  │                 │  TOOLS (~109)       │
   │  (llm.ts)   │                 │  corpus · D1 · web  │
   │ picks model │                 │  run_code · forge · │
   │ tier, walks │                 │  skills · mcp ·     │
@@ -58,7 +58,7 @@ One question in plain English → a transparent ReAct loop:
    (`mind.ts`) + her **κ phase** this session + her **skill index** + the
    **tool catalog for this scope** (+ the D1 schema when `read_sql` is in scope).
    The catalog itself is a shallow **tree**, not a flat list: `TOOL_TREE` in
-   `router.ts` groups the ~88 tools into 16 named branches (Mind & memory,
+   `router.ts` groups the ~109 tools into 16 named branches (Mind & memory,
    World, Real execution, the forge, Signal & geometry engines, …) and
    `renderCatalog()` walks it scope-filtered, so what she reads each step is
    chunked by kind of work instead of one undifferentiated list — faster and
@@ -94,6 +94,7 @@ gate reads*, so the prompt can never advertise a tool the gate refuses.
 | `full` | service key or admin/superadmin JWT | **everything** — read_sql, trades, forge, MCP, run_code/run_shell, github_*, intents, self-revision |
 | `cofounder` | `cofounder`-tier JWT (a trusted second admin) | full **minus the code-shipping path** — sees and uses everything (reads into her code, CI verdicts, trading, conductor, provenance, analysis) but `forge_open/write/pr`, `run_shell`, and `delegate_local` are denied (`SHIP_DENY`). Cannot ship or migrate code. |
 | `hospitality` | `/api/atlas` (RAPID/Atlas door) | ONLY `rapid_*` + calc/web — corpus & journal invisible by construction |
+| `tax` | `/api/tax` (signed-up small-business tax client) | ONLY `tax_*` + `payroll_*` + calc/web/fetch — no `read_sql`, same reasoning as `hospitality`: raw-table access stays out of a signed-up-client-facing scope, all data access goes through the purpose-built tools |
 
 **Atlas client tenancy** (`src/atlas-clients.ts`): the hospitality door is
 multi-client. Signup is self-serve — `POST /api/atlas/signup` (Google
@@ -109,7 +110,7 @@ global `VENUE_ID` var is only the anonymous/demo fallback. Scope stays
 `hospitality` either way — tenancy changes which venue, never what's
 reachable.
 
-### The ~88 tools (full scope)
+### The ~109 tools (full scope)
 
 **Mind & memory** — `search_corpus`, `find_document` (pull a whole doc by
 description, no title), `fetch_document`, `read_sql` (SELECT-only over D1),
@@ -210,6 +211,34 @@ Hugging Face pre-mounted; the external tool ecosystem is reachable this way.
 
 **Hospitality** (`src/rapid.ts`, native `rapid2ai-db`) — `rapid_report`,
 `rapid_costs`, `rapid_variance`, `rapid_pos`, `rapid_menu`.
+
+**Small-business tax suite** (`src/tax.ts` + `tax-calc.ts` + `tax-clients.ts` +
+`tax-credits.ts` + `tax-rules/`, `member`+ scope, and its own dedicated `tax`
+scope over `/api/tax`) — `tax_business_create`/`tax_business_list` (a person
+can run more than one business; every other `tax_*` tool takes an explicit
+`business_id`), `tax_unit_add`/`tax_unit_list` (multi-location rollups),
+`tax_owner_set`/`tax_owner_list` (ownership splits for pass-through
+allocation), `tax_facts_update`/`tax_facts_status` (parallel onboarding —
+any subset of the ~8 fact-groups, any order, not a sequential wizard),
+`tax_transaction_add`/`tax_transaction_list`, `tax_report` (plain-English
+P&L), `tax_1099_contractor_add`/`tax_1099_contractor_list`,
+`tax_estimate_quarterly` (deterministic SE tax, QBI deduction, federal
+income tax, safe-harbor payment, plus state/local legs where supported —
+refuses rather than guesses for entity types not yet computed),
+`tax_schedule_c_prep` (numbers-only, not a filed form),
+`tax_credits_finder` (the cited, versioned credit/deduction eligibility
+engine — every figure traces to a named IRC section/Pub/state statute),
+`tax_deadline_next` (next federal quarterly estimated-tax deadline), and
+`tax_reminder_ack`. Federal + Missouri/Kansas/Illinois/Indiana state rules
+live in `src/tax-rules/` (`federal/2026.ts`, `states/{mo,ks,il,in}/2026.ts`,
+`locals/mo-2026.ts` for KC/STL earnings tax); every dollar figure comes from
+`tax-calc.ts`'s deterministic functions or a plain SQL sum, never the model
+doing arithmetic inline. `payroll_connection_status`/`payroll_sync`/
+`payroll_wage_summary` (`src/payroll/`) pull real wage data from
+QuickBooks/Gusto/ADP once a business has connected a provider (OAuth
+connect/callback is a browser redirect from the workbench, not a tool) —
+Missouri's local payroll-expense tax is the one figure in
+`tax_estimate_quarterly` that depends on synced payroll data.
 
 **Autonomy** — `intent` (file standing work for the conductor), `review_runs`
 (read her own autonomous run log).
@@ -622,6 +651,20 @@ engine (`action: run|list|get|outcome`; `run` takes a `direction` string).
 content + brand-conditioned image gen + multi-channel fan-out (`action:
 brand.* | channel.* | content.* | image.* | video.* | post.* | asset.list |
 status`). Generated media is served from `/flock/asset/…`.
+`/api/elle-grants` — the Grant Intelligence engine (`src/grant-intelligence.ts`
++ `grant-990.ts`): Module 1 fit analysis + the NECAI-F donor sub-engine +
+ProPublica 990-PF financial-overview per foundation/corporate funder
+(`action: seed_opportunities|list_opportunities|fit_analysis|
+necaif_evaluation|funder_990_overview|…`).
+Small-business tax suite (its own `tax` scope, real personal financial data,
+authenticated only — no anonymous/demo path): `/api/tax` (conversational,
+tax-scoped router), `/api/tax/data` (structured JSON reads/writes for the
+workbench dashboard — no LLM round trip), `/api/tax/onboarding` (create a
+business / update onboarding facts). Payroll provider integrations
+(`src/payroll/`): `/api/payroll/connect` (OAuth redirect start, or immediate
+for ADP's client-credentials flow), `/api/payroll/callback`
+(QuickBooks/Gusto OAuth redirect target), `/api/payroll/sync`,
+`/api/payroll/connections`.
 Engine/ops: `/api/elle-code-engine`, `/api/diagnose`, `/api/research`,
 `/api/cron`, `/api/elle-auth`, `/api/elle-oauth`, `/health`.
 
@@ -690,7 +733,9 @@ app (`FlockPanel.tsx`).
 ## Persistence & bindings
 
 - **D1 `elle-corpus`** — corpus, memory, trades, journal, intents, runs, skills,
-  forge tasks, MCP registry, idempotency, law tables.
+  forge tasks, MCP registry, idempotency, law tables, the small-business tax
+  suite (businesses/units/owners/facts/transactions/1099s), payroll provider
+  connections, and the Grant Intelligence tables (`grant_*`).
 - **D1 `rapid2ai-db`** (`RAPID_DB`, `VENUE_ID`) — hospitality data, venue-scoped.
 - **Vectorize** — corpus + conversation + journal embeddings.
 - **R2 `DOCUMENTS`** — full paper text, plus Flock's generated media under `flock/assets/…`.
@@ -704,6 +749,12 @@ app (`FlockPanel.tsx`).
   image gen rides `env.AI` (Workers AI) and video is stubbed. Set
   `FLOCK_IMAGE_PROVIDER=sovereign` + `FLOCK_IMAGE_URL` to draw on a
   self-hosted model instead (see `.dev.vars.example`).
+- **`PAYROLL_TOKEN_ENC_KEY`, `QUICKBOOKS_*`, `GUSTO_*`, `ADP_*`** — payroll
+  provider OAuth credentials (`src/payroll/`) feeding the tax suite's real
+  wage data. Unset ⇒ each provider's connect/sync reports "not configured"
+  rather than failing silently. ADP additionally needs a Cloudflare mTLS
+  certificate binding (`wrangler mtls-certificate upload`) — see
+  `.dev.vars.example` for the full list and `wrangler.toml`'s ADP comment.
 
 ## GitHub access — the worker token reaches elle-law
 
@@ -730,6 +781,11 @@ CI (`.github/workflows/ci.yml`) runs tsc + vitest on every PR to main and every
 push to an `elle/**` branch — the gate the forge loop reports against, read-only
 to Elle by construction. `main` auto-deploys via
 `.github/workflows/elle-worker-deploy.yml` (`npm install` + `wrangler deploy`).
+`.github/workflows/prune-corpus.yml` is a manual (`workflow_dispatch`) admin
+op that loops `POST /api/admin/prune-corpus` to completion for a chosen
+target (`code_files` | `research_series`) — the endpoint only deletes one
+bounded batch per call, so this drives it to `done:true` from an environment
+with real internet access to the deployed worker.
 
 ### File map
 
@@ -748,6 +804,14 @@ to Elle by construction. `main` auto-deploys via
 | `skills.ts` | self-authored skill library |
 | `mcp.ts` | generic MCP client |
 | `rapid.ts` | native hospitality tools |
+| `tax.ts` | small-business tax suite tool handlers — one exported function per `tax_*` router tool, mirroring `rapid.ts`'s shape |
+| `tax-calc.ts` | deterministic tax math: SE tax, QBI deduction, safe harbor, FICA, S-corp compensation split, entity-level pass-through tax, local earnings tax — the model never computes a dollar figure itself |
+| `tax-clients.ts` | business/unit/owner/fact-group persistence + the parallel (non-wizard) onboarding model |
+| `tax-credits.ts` | the cited, versioned credit/deduction eligibility engine (`findCredits`) |
+| `tax-rules/` | federal + state (`MO`/`KS`/`IL`/`IN`) + local (KC/STL) tax constants by year (`federal/2026.ts`, `states/{mo,ks,il,in}/2026.ts`, `locals/mo-2026.ts`) |
+| `payroll/` | QuickBooks/Gusto/ADP OAuth connect/sync (`quickbooks.ts`, `gusto.ts`, `adp.ts`, `sync.ts`, `crypto.ts` for encrypted token storage, `tools.ts` for the `payroll_*` router tools) |
+| `grant-intelligence.ts` | the Grant Intelligence engine: Module 1 fit analysis (Statistical Fit Index) + the NECAI-F donor sub-engine, behind `/api/elle-grants` |
+| `grant-990.ts` | ProPublica 990-PF financial-overview fetch per foundation/corporate funder (revenue/expenses/assets, not itemized recipient lists) |
 | `session-bus.ts` | the stateless connect-back bus (replaces the deleted `sandbox-agent.ts` DO): enqueue → laptop polls → executes → submits, sealed by `lane-envelope.ts`, state persisted in D1 since there's no DO to hold it in memory |
 | `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane, now riding `session-bus.ts` |
 | `duplex.ts` | the duplex channel — sovereign (laptop) ↔ cloud, append-only ledger, `/api/duplex` |
