@@ -1,8 +1,9 @@
 # Grant Intelligence Suite — architecture map (build note)
 
-**Status:** MAPPED. D1 schema scaffolded (`grant_*` tables in `src/db/schema.ts`,
-`ensureAllSchemas`). No routes, no modules, no LLM tiers built yet — see
-"What's actually built" below before assuming anything past the schema exists.
+**Status:** Module 1's fit-index reasoning + the NECAI-F donor sub-engine are
+live (`src/grant-intelligence.ts`, `POST /api/elle-grants`). Opportunity data
+is seeded from `grant-strategy-map.md` (manual, not live-ingested yet). See
+"What's actually built" below for the exact boundary of what runs today.
 
 This is the same kind of note as `docs/WAR_ROOM_TODO.md`: reconcile the spec
 against what this repo actually runs, and leave a sequenced build plan for
@@ -103,49 +104,74 @@ rows exist.
 **Built this session:**
 - This map.
 - `grant_*` tables in `src/db/schema.ts` (idempotent CREATE TABLE + indexes,
-  same pattern as every other engine).
-- `TABLE_CATALOG` entry in `router.ts`.
+  same pattern as every other engine); registered in `router.ts`'s
+  `TABLE_CATALOG`.
+- `src/grant-intelligence.ts` + `POST /api/elle-grants` (member-gated, wired
+  in `index.ts` next to `/api/falcon` and `/api/observer`):
+  - `seed_opportunities` — idempotent upsert of the nine opportunities
+    already named in `grant-strategy-map.md` (both tracks — `SEED_OPPORTUNITIES`
+    in the file, with a `track_hint` documenting which track named it, though
+    the columns that actually gate behavior are `funder_type`/
+    `necaif_applicable` on the row itself).
+  - `create_organization` — applicant profile, `track` discriminator.
+  - `list_opportunities` — filterable by `funder_type`.
+  - `fit_analysis` — the Statistical Fit Index (spec §V): reasons over the
+    org profile + opportunity + any `grant_recipients` rows on file (there
+    are none yet — a fresh run explicitly flags that in `factual_gaps`
+    rather than inferring a confident score from nothing). Writes
+    `grant_fit_analyses` + a full `grant_reasoning_log` row (factual premises
+    separated from the philosophical chain, alternatives considered,
+    "what would change this" — spec §IV shape). No `recommendation` field.
+  - `necaif_evaluation` — the six-criteria donor sub-engine (spec §III).
+    Hard-gated to `funder_type IN ('foundation','corporate')` — throws for
+    federal/state/accelerator opportunities, enforced before any LLM call.
+    Runs one real search-grounded sweep (`callLLM('research', …)`) for
+    documented facts about the funder, then synthesizes the six criteria;
+    an evaluation is sealed (immutable) on first run — a second call returns
+    the existing row rather than re-evaluating, matching spec §IX
+    ("append-only once sealed").
+  - `get_fit_analysis` — read back a fit analysis with its reasoning log.
+- `src/grant-intelligence.test.ts` — seed-data invariants (unique ids, the
+  necaif_applicable↔funder_type consistency the runtime gate also enforces,
+  both tracks represented) plus the guard clauses that fire before any LLM
+  call (missing org/opportunity, the NECAI-F funder-type refusal).
 
 **Already existed, unchanged:**
 - The spec itself, ingested into the corpus (`corpus-seed.ts`, series
   `business`, tag `engine-spec`, `source_url: corpus/engines/03-grant-intelligence.md`).
 - `corpus/business/grant-strategy-map.md` — Stewart's own funding pipeline,
-  already ingested (tag `grant-strategy`) — the primary source for the
-  business-track opportunity list until a live SBIR.gov/Grants.gov ingest
-  exists.
+  already ingested (tag `grant-strategy`) — the primary source for the seed
+  data above until a live SBIR.gov/Grants.gov ingest exists.
 
 **Not built — in spec rollout order (§X), adapted for both tracks:**
 
-1. **Module 1 database, live ingest.** Currently the schema exists but
-   nothing writes to it. First real work: a scheduled ingest (Queues +
-   `/api/cron`, same pattern as the existing daemon loop) pulling
-   Grants.gov/SAM.gov (both tracks) and SBIR.gov (business track), writing
-   `grant_opportunities` rows. Seed the table manually from
-   `grant-strategy-map.md`'s existing rows first — that data is already
-   structured and dated, and gets the fit-analysis module something to run
-   against before any live API integration exists.
+1. **Live Module 1 ingest.** `seed_opportunities` is a one-time manual load
+   from `grant-strategy-map.md`; nothing pulls Grants.gov/SAM.gov (both
+   tracks) or SBIR.gov (business track) yet. Next real work: a scheduled
+   ingest (Queues + `/api/cron`, same pattern as the existing daemon loop)
+   writing fresh `grant_opportunities` rows, plus a `grant_recipients`
+   backfill (990-PF for nonprofit, SBIR award history for business) so
+   `fit_analysis` has real statistical ground instead of an honest "no data
+   on file" gap.
 2. **Module 2 (Proposal Analysis).** Pilot target per spec: run the
    Observer Foundation's own applications through it. A parallel business-
    track pilot could run Groundwork's own MTC IDEA Fund / Arch Grants
-   applications (already named in `grant-strategy-map.md`) through the same
-   module — proves both tracks on the company's own paper before any
-   external user touches it.
-3. **NECAI-F funder evaluation.** Nonprofit-track only. Every foundation
-   named in `grant-strategy-map.md` (Bob Woodruff, McGovern, Open
-   Philanthropy, Mozilla) is a candidate for the six-criteria evaluation —
-   note Mozilla/McGovern/Open Philanthropy are *technically* funding the
+   applications through the same module — proves both tracks on the
+   company's own paper before any external user touches it.
+3. **NECAI-F evaluation, run against real funders.** The engine exists and
+   is gated correctly; it hasn't been run yet against the actual foundations
+   in `grant-strategy-map.md` (Bob Woodruff, McGovern, Open Philanthropy,
+   Mozilla). Note Mozilla/McGovern/Open Philanthropy are funding the
    business track's mission-aligned edge cases (AI ethics, emergent AI for
-   public benefit) even though they're structured as foundation grants, so
-   `necaif_applicable` should be `true` on those specific opportunity rows
-   even where the applicant profile is the business track. The flag lives on
-   the funder, not the applicant — this is exactly why it's on
-   `grant_opportunities`, not `grant_organizations`.
+   public benefit) even though they're structured as foundation grants —
+   their seed rows already carry `necaif_applicable=1` for exactly that
+   reason (the flag lives on the funder, not the applicant).
 4. **Module 3 (Proposal Development).**
 5. **Module 4 (Grant Management).**
 6. **Statistical fit models** — trained on outcome data, both tracks
-   separately (990-PF recipient data doesn't transfer to SBIR award
-   patterns; keep `grant_statistical_models` rows scoped by `funder_id`, not
-   pooled across tracks).
+   separately (990-PF recipient patterns don't transfer to SBIR award
+   patterns; `grant_statistical_models` rows are scoped by `funder_id`, not
+   pooled across tracks — schema already reflects this).
 
 ## Open questions for Stewart
 
