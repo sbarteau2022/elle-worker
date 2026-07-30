@@ -521,6 +521,80 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, turn_id TEXT NOT NULL,
     verdict REAL, per_criterion_json TEXT, justification TEXT,
     latency_ms INTEGER, created_at INTEGER)`,
+    // Grant Intelligence Engine (corpus/engines/03-grant-intelligence.md §VI,
+    // schema verbatim from spec) — see docs/GRANT_INTELLIGENCE_SUITE_MAP.md
+    // for the two-track (nonprofit/business) unification this session added
+    // on top of it. `recommendation` is deliberately absent everywhere: the
+    // engine presents, the applicant decides (spec's explicit design rule).
+    `CREATE TABLE IF NOT EXISTS grant_organizations (
+    id TEXT PRIMARY KEY, user_id TEXT, name TEXT NOT NULL,
+    track TEXT NOT NULL DEFAULT 'nonprofit' CHECK (track IN ('nonprofit','business')),
+    org_type TEXT, mission TEXT, budget_range TEXT, geographic_scope TEXT,
+    entity_stage TEXT, necaif_profile_json TEXT,
+    created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+  )`,
+    // funder_type/necaif_applicable is the gate: NECAI-F donor-ethics evaluation
+    // only ever runs against foundation/corporate funders, never federal
+    // agencies, state programs, or accelerators (see the map doc's rollout §3).
+    `CREATE TABLE IF NOT EXISTS grant_opportunities (
+    id TEXT PRIMARY KEY, source TEXT NOT NULL, funder_name TEXT NOT NULL,
+    funder_type TEXT NOT NULL CHECK (funder_type IN ('federal','state','foundation','corporate','international','accelerator')),
+    program_name TEXT, program_track TEXT,
+    amount_min REAL, amount_max REAL, deadline TEXT, requirements_json TEXT,
+    stated_priorities TEXT, actual_priorities_json TEXT, observer_position TEXT,
+    necaif_applicable INTEGER NOT NULL DEFAULT 0,
+    status TEXT DEFAULT 'open', updated_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+    `CREATE TABLE IF NOT EXISTS grant_recipients (
+    id TEXT PRIMARY KEY, opportunity_id TEXT, recipient_type_profile TEXT,
+    award_amount REAL, award_year INTEGER, source_filing TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+    `CREATE TABLE IF NOT EXISTS grant_fit_analyses (
+    id TEXT PRIMARY KEY, org_id TEXT NOT NULL, opportunity_id TEXT NOT NULL,
+    fit_index REAL, confidence_interval TEXT, sample_size INTEGER,
+    reasoning_log_id TEXT, created_at TEXT DEFAULT (datetime('now'))
+  )`,
+    `CREATE TABLE IF NOT EXISTS grant_proposal_analyses (
+    id TEXT PRIMARY KEY, org_id TEXT NOT NULL, opportunity_id TEXT,
+    draft_text TEXT, mission_alignment TEXT, theory_of_change_gaps TEXT,
+    evidence_quality TEXT, evaluation_methodology TEXT, budget_narrative TEXT,
+    observer_reading TEXT, funder_language_alignment TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+    `CREATE TABLE IF NOT EXISTS grant_development_sessions (
+    id TEXT PRIMARY KEY, org_id TEXT NOT NULL, opportunity_id TEXT,
+    transcript_json TEXT NOT NULL, draft_output TEXT,
+    human_verified INTEGER DEFAULT 0, verified_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+    // The primary training corpus (spec §IV/§VIII) — every conclusion logged
+    // with its full factual + philosophical chain. subject_type/subject_id
+    // points at whichever row produced the conclusion (fit analysis, proposal
+    // analysis, NECAI-F evaluation) so the chain is traceable without a
+    // foreign key (this file's convention — see header note, no FKs anywhere).
+    `CREATE TABLE IF NOT EXISTS grant_reasoning_log (
+    id TEXT PRIMARY KEY, subject_id TEXT, subject_type TEXT,
+    conclusion TEXT NOT NULL, factual_premises_json TEXT, factual_gaps TEXT,
+    philosophical_framework TEXT, philosophical_chain TEXT, synthesis TEXT,
+    alternatives_considered TEXT, what_would_change_this TEXT,
+    necaif_self_check TEXT, created_at TEXT DEFAULT (datetime('now'))
+  )`,
+    `CREATE TABLE IF NOT EXISTS grant_necaif_evaluations (
+    id TEXT PRIMARY KEY, opportunity_id TEXT NOT NULL UNIQUE,
+    revenue_mechanism TEXT, narrative_capture_history TEXT, editorial_conditions TEXT,
+    mission_alignment TEXT, trust_of_affected_populations TEXT, documented_networks TEXT,
+    observer_position TEXT, evidence_json TEXT, unknowns TEXT,
+    sealed INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now'))
+  )`,
+    // Scoped by funder_id, never pooled across tracks — 990-PF recipient
+    // patterns don't transfer to SBIR award patterns (map doc rollout §6).
+    `CREATE TABLE IF NOT EXISTS grant_statistical_models (
+    id TEXT PRIMARY KEY, funder_id TEXT, feature_weights_json TEXT NOT NULL,
+    methodology TEXT, sample_size INTEGER, date_range TEXT,
+    data_completeness_pct REAL, updated_at TEXT DEFAULT (datetime('now'))
+  )`,
   ];
   await db.batch(creates.map((s) => db.prepare(s)));
 
@@ -629,6 +703,15 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     `ALTER TABLE falcon_analyses ADD COLUMN grounded INTEGER DEFAULT 0`,
     `ALTER TABLE falcon_analyses ADD COLUMN n_sources INTEGER`,
     `ALTER TABLE falcon_analyses ADD COLUMN blanket_json TEXT`,
+    // grant-intelligence.md §VI tables — deadline/status lookups (Module 1
+    // and Module 4 both scan by this), fit-ranking per org, and reasoning-log
+    // lookups by the row that produced the conclusion.
+    `CREATE INDEX IF NOT EXISTS idx_grant_opportunities_deadline ON grant_opportunities(status, deadline)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_opportunities_funder_type ON grant_opportunities(funder_type, necaif_applicable)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_organizations_track ON grant_organizations(track)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_fit_org ON grant_fit_analyses(org_id, fit_index DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_fit_opportunity ON grant_fit_analyses(opportunity_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_reasoning_subject ON grant_reasoning_log(subject_type, subject_id)`,
   ];
   for (const sql of extras) await db.prepare(sql).run().catch(() => {});
 

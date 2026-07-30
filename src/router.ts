@@ -288,6 +288,9 @@ elle_outreach_log(id,outreach_type,thought,initiated_by,needs_response,notified,
 elle_code_tasks(id,repo,branch,base_branch,title,goal,status,pr_number,commits,created_at,updated_at) — forge work: status ∈ open|pr_open|merged|closed
 elle_events(id,run_id,session_id,source,scope,step_index,kind,tool,args,result_preview,duration_ms,created_at) — the event bus: one row per reasoning step (kind ∈ run_start|tool_call|answer|error). Correlate a run by run_id; the provenance tool reads this. For "what did that run do / where did this answer come from" prefer the provenance tool over raw SQL.
 duels(...), duel_turns(...), law_threads(...), doctrine_mastery(...), tutor_questions(...), user_stats(...), conceptual_shifts(...)
+grant_organizations(id,user_id,name,track,org_type,mission,budget_range,geographic_scope,entity_stage,created_at) — track ∈ nonprofit|business (see docs/GRANT_INTELLIGENCE_SUITE_MAP.md)
+grant_opportunities(id,source,funder_name,funder_type,program_name,amount_min,amount_max,deadline,stated_priorities,observer_position,necaif_applicable,status,created_at) — funder_type ∈ federal|state|foundation|corporate|international|accelerator
+grant_recipients(id,opportunity_id,recipient_type_profile,award_amount,award_year,source_filing), grant_fit_analyses(id,org_id,opportunity_id,fit_index,confidence_interval,sample_size,created_at), grant_proposal_analyses(...), grant_development_sessions(...), grant_reasoning_log(id,subject_id,subject_type,conclusion,...), grant_necaif_evaluations(id,opportunity_id,revenue_mechanism,narrative_capture_history,editorial_conditions,mission_alignment,trust_of_affected_populations,documented_networks,...), grant_statistical_models(id,funder_id,feature_weights_json,methodology,...) — all currently empty, schema only, no ingest yet
 `.trim();
 
 // One line per tool. Catalogs are RENDERED per scope from this record, so the
