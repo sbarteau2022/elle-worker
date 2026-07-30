@@ -39,6 +39,12 @@ import { reasonText, type ReasoningSummary } from './reasoning';
 import { getProfileByUser, profileBlock } from './profiles';
 import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
+import {
+  taxBusinessCreate, taxBusinessList, taxUnitAdd, taxUnitList, taxOwnerSet, taxOwnerList,
+  taxFactsUpdate, taxFactsStatus, taxTransactionAdd, taxTransactionList, taxReport,
+  tax1099ContractorAdd, tax1099ContractorList, taxEstimateQuarterly, taxScheduleCPrep,
+  taxCreditsFinder, taxDeadlineNext, taxReminderAck,
+} from './tax';
 import { resolveAlpacaBase, type LiveGuardEnv } from './live-guard';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
@@ -190,7 +196,7 @@ const MAX_PARALLEL_TOOLS = 4;
 //   (RAPID_DB → rapid2ai-db) and are venue-scoped by VENUE_ID.
 // run_code/run_shell/github_*/scratchpad stay out of every public-facing
 // scope: real execution and arbitrary-repo reads belong behind auth.
-export type Scope = 'full' | 'cofounder' | 'member' | 'public' | 'hospitality';
+export type Scope = 'full' | 'cofounder' | 'member' | 'public' | 'hospitality' | 'tax';
 // 'cofounder' = a trusted second admin who may SEE and use everything EXCEPT
 // shipping or migrating code. Full scope minus the code-delivery path: no
 // forge writes/PRs (opening a branch is the entry to shipping, so it's denied
@@ -221,6 +227,16 @@ export const LOCAL_LOOP_DENY = new Set(['run_shell', 'run_code', 'delegate_local
 // observations, so the page-fault handler must be reachable wherever a page
 // can be minted (pages are opaque KV slices keyed by id — read-only).
 const HOSPITALITY_TOOLS = new Set(['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu', 'calc', 'web_search', 'fetch_url', 'code_engine', 'page_read']);
+// Signed-up small-business tax clients — no read_sql (same reasoning as
+// hospitality: raw-table access stays out of a signed-up-client-facing
+// scope, all data access goes through these purpose-built tools).
+const TAX_TOOLS = new Set([
+  'tax_business_create', 'tax_business_list', 'tax_unit_add', 'tax_unit_list', 'tax_owner_set', 'tax_owner_list',
+  'tax_facts_update', 'tax_facts_status', 'tax_transaction_add', 'tax_transaction_list', 'tax_report',
+  'tax_1099_contractor_add', 'tax_1099_contractor_list', 'tax_estimate_quarterly', 'tax_schedule_c_prep',
+  'tax_credits_finder', 'tax_deadline_next', 'tax_reminder_ack',
+  'calc', 'web_search', 'fetch_url', 'page_read',
+]);
 const PUBLIC_TOOLS = new Set([
   'search_corpus', 'fetch_document', 'find_document', 'recall_memory', 'web_search', 'fetch_url', 'code_engine', 'diagnose', 'calc', 'page_read',
 ]);
@@ -240,6 +256,7 @@ export function toolAllowed(scope: Scope, name: string): boolean {
   if (scope === 'cofounder') return !SHIP_DENY.has(name);
   if (scope === 'member') return MEMBER_TOOLS.has(name);
   if (scope === 'public') return PUBLIC_TOOLS.has(name);
+  if (scope === 'tax') return TAX_TOOLS.has(name);
   return HOSPITALITY_TOOLS.has(name);
 }
 
@@ -312,6 +329,24 @@ const TOOL_LINES: Record<string, string> = {
   rapid_variance: `rapid_variance() — 90-day price variance by SKU: avg/min/max unit price and % swing, for SKUs with 2+ deliveries.`,
   rapid_pos: `rapid_pos() — last 14 days POS daily close: gross/net sales, tax, tips, transaction count.`,
   rapid_menu: `rapid_menu() — last 30 days menu performance: units sold, gross $, days sold, top 25 by revenue.`,
+  tax_business_create: `WRITE: tax_business_create(business_name,entity_type?:sole_prop|single_member_llc|multi_member_llc|s_corp|c_corp,state?,locality?:KC|STL,ein_last4?,industry_naics?) — register a new business for the signed-in tax client. Idempotent per (user, business_name) — calling again with the same name resumes it rather than duplicating. Auto-files an onboarding review and (for supported entity types) arms a recurring quarterly-deadline reminder.`,
+  tax_business_list: `tax_business_list() — list the signed-in user's businesses (business_id, name, entity_type). A person can run more than one — every other tax_* tool takes an explicit business_id, so use this first when it isn't already known from context.`,
+  tax_unit_add: `WRITE: tax_unit_add(business_id,unit_name,address?) — add a location/unit to a multi-location business; units roll up to the parent business's one return, tracked separately only for reporting.`,
+  tax_unit_list: `tax_unit_list(business_id) — list a business's units.`,
+  tax_owner_set: `WRITE: tax_owner_set(business_id,owners:[{owner_name,ownership_pct}]) — set (replaces) the ownership split for a multi-owner pass-through entity; drives how tax_estimate_quarterly allocates net profit per owner. Percentages need not sum to exactly 100 (normalized), but each must be 0-100.`,
+  tax_owner_list: `tax_owner_list(business_id) — list a business's ownership split.`,
+  tax_facts_update: `WRITE: tax_facts_update(business_id,tax_year?,facts:{household?,income?,retirement?,health?,home_office?,vehicle?,equipment?,contractors?}) — save ANY SUBSET of onboarding fact-groups, in any order, any call — this is what makes onboarding parallel rather than a sequential wizard. Call tax_facts_status first to see what's still missing before asking the user for it.`,
+  tax_facts_status: `tax_facts_status(business_id,tax_year?) — which of the ~8 onboarding fact-groups are filled in vs. still missing for a business/tax year.`,
+  tax_transaction_add: `WRITE: tax_transaction_add(business_id,tax_year?,occurred_at?:YYYY-MM-DD,direction:income|expense,category,amount,description?,unit_id?,contractor_id?) — log one income or expense line. amount is DOLLARS (converted to cents internally for exact ledger math) — never let the model do this arithmetic itself.`,
+  tax_transaction_list: `tax_transaction_list(business_id,tax_year?,category?) — list a business's transactions, optionally filtered to one category.`,
+  tax_report: `tax_report(business_id,tax_year?) — plain-English income/expense P&L summary for a tax year, real numbers only.`,
+  tax_1099_contractor_add: `WRITE: tax_1099_contractor_add(business_id,tax_year?,contractor_name,w9_on_file?,notes?) — add or update a 1099 contractor record; idempotent by name.`,
+  tax_1099_contractor_list: `tax_1099_contractor_list(business_id,tax_year?) — list contractors with YTD paid and whether the 1099-NEC filing threshold is met.`,
+  tax_estimate_quarterly: `tax_estimate_quarterly(business_id,tax_year?,quarter?) — the deterministic quarterly estimated-tax calculation (SE tax, QBI deduction, federal income tax, safe-harbor payment, plus state/local legs where supported). Never estimate this yourself — always call this tool for a real number. Returns an explicit "not yet supported" message (never a guessed figure) for entity types this suite doesn't yet compute (S-corp/C-corp).`,
+  tax_schedule_c_prep: `tax_schedule_c_prep(business_id,tax_year?) — numbers-only Schedule C line summary (NOT a filed form) for sole proprietorships/single-member LLCs; explains why it refuses for other entity types instead of guessing at their (different) form.`,
+  tax_credits_finder: `tax_credits_finder(business_id,tax_year?) — runs the cited, versioned credit/deduction eligibility engine against the business's on-file facts and returns plain-language "how to maximize it" guidance per hit. Every figure traces to a named IRC section/Pub/state statute; never state a credit or dollar figure this tool didn't return.`,
+  tax_deadline_next: `tax_deadline_next(business_id) — the next federal quarterly estimated-tax deadline and days remaining, computed from the calendar (deterministic, not a guess).`,
+  tax_reminder_ack: `WRITE: tax_reminder_ack(business_id,quarter,tax_year?) — record that a deadline reminder was delivered for a quarter, so the standing watch does not re-notify for the same quarter. Call this after reach_out-ing a fired quarterly-deadline watch.`,
   calc: `calc(expression) — deterministic arithmetic (+,-,*,/,%,^, parens, sqrt/abs/round/min/max/etc). Use for any exact computation instead of doing the math yourself.`,
   scratchpad_write: `scratchpad_write(key,value) — short-TTL working memory for this reasoning chain. Jot a finding down mid-chain instead of losing it to observation truncation.`,
   scratchpad_read: `scratchpad_read(key?) — read back a scratchpad entry; no key lists everything saved so far.`,
@@ -409,6 +444,12 @@ const TOOL_TREE: { category: string; tools: string[] }[] = [
   { category: 'Skills', tools: ['skill_list', 'skill_read', 'skill_route', 'skill_write'] },
   { category: 'MCP', tools: ['mcp_library', 'mcp_add', 'mcp_tools', 'mcp_call'] },
   { category: 'Hospitality (RAPID²AI)', tools: ['rapid_report', 'rapid_costs', 'rapid_variance', 'rapid_pos', 'rapid_menu'] },
+  { category: 'Small business tax suite', tools: [
+    'tax_business_create', 'tax_business_list', 'tax_unit_add', 'tax_unit_list', 'tax_owner_set', 'tax_owner_list',
+    'tax_facts_update', 'tax_facts_status', 'tax_transaction_add', 'tax_transaction_list', 'tax_report',
+    'tax_1099_contractor_add', 'tax_1099_contractor_list', 'tax_estimate_quarterly', 'tax_schedule_c_prep',
+    'tax_credits_finder', 'tax_deadline_next', 'tax_reminder_ack',
+  ] },
   { category: 'Autonomy & standing work', tools: ['idea', 'intent', 'review_runs', 'duplex', 'self_schedule', 'watch', 'dead_drop'] },
   { category: 'Provenance & self-audit', tools: ['provenance', 'constraint_analyzer', 'fork_replay', 'metabolism'] },
   { category: 'Signal & geometry engines', tools: ['pfar', 'pami', 'vfar', 'hyper', 'torus', 'recall_ab', 'structure', 'product', 'atlas'] },
@@ -829,6 +870,24 @@ export async function runTool(
       case 'rapid_variance': return clip(await rapidVariance(env));
       case 'rapid_pos':      return clip(await rapidPOS(env));
       case 'rapid_menu':     return clip(await rapidMenu(env));
+      case 'tax_business_create': return clip(await taxBusinessCreate(env, ctxUserId, a));
+      case 'tax_business_list':   return clip(await taxBusinessList(env, ctxUserId));
+      case 'tax_unit_add':        return clip(await taxUnitAdd(env, a));
+      case 'tax_unit_list':       return clip(await taxUnitList(env, a));
+      case 'tax_owner_set':       return clip(await taxOwnerSet(env, a));
+      case 'tax_owner_list':      return clip(await taxOwnerList(env, a));
+      case 'tax_facts_update':    return clip(await taxFactsUpdate(env, a));
+      case 'tax_facts_status':    return clip(await taxFactsStatus(env, a));
+      case 'tax_transaction_add': return clip(await taxTransactionAdd(env, a));
+      case 'tax_transaction_list': return clip(await taxTransactionList(env, a));
+      case 'tax_report':          return clip(await taxReport(env, a));
+      case 'tax_1099_contractor_add':  return clip(await tax1099ContractorAdd(env, a));
+      case 'tax_1099_contractor_list': return clip(await tax1099ContractorList(env, a));
+      case 'tax_estimate_quarterly':   return clip(await taxEstimateQuarterly(env, a));
+      case 'tax_schedule_c_prep':      return clip(await taxScheduleCPrep(env, a));
+      case 'tax_credits_finder':       return clip(await taxCreditsFinder(env, a));
+      case 'tax_deadline_next':        return clip(await taxDeadlineNext(env, a));
+      case 'tax_reminder_ack':         return clip(await taxReminderAck(env, a));
       case 'calc': {
         return calc(String(a.expression || a.expr || a.q || ''));
       }

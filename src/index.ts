@@ -90,6 +90,11 @@ import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, delet
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
 import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
+import { createBusiness, resolveBusinessesForUser, updateTaxFacts, getTaxFactsStatus, addUnit, listUnits, setOwners, listOwners, type FactGroup } from './tax-clients';
+import {
+  taxTransactionAdd, taxTransactionList, taxReport, tax1099ContractorAdd, tax1099ContractorList,
+  taxEstimateQuarterly, taxScheduleCPrep, taxCreditsFinder, taxDeadlineNext,
+} from './tax';
 import { ingestAtlasCsv } from './atlas-ingest';
 import { readAtlasEvents } from './atlas-events';
 import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from './retrieval/reembed';
@@ -1841,6 +1846,101 @@ export default {
         { maxSteps: Number(ab.max_steps) || 6, scope: 'hospitality', userId: clientVenue ? `atlas:${authed!.id}` : 'atlas', sessionId, source: 'rapid2ai' });
       // usage lets the demo surface count questions client-side ("3 of 5")
       // without a second endpoint; the hard valve stays the 30/hr limiter.
+      return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps, usage: { used: count + 1, limit: 30 } });
+    }
+
+    // Tax suite onboarding — authenticated (real financial data, no
+    // anonymous/demo path unlike Atlas). Mirrors /api/atlas/profile's shape
+    // but accepts a business_id + partial `facts` groups on every call after
+    // the first, since onboarding here is parallel fact-groups, not a
+    // sequential form (see tax-clients.ts's header comment).
+    if (path === '/api/tax/onboarding') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      if (request.method === 'GET') {
+        const businessId = new URL(request.url).searchParams.get('business_id');
+        const businesses = await resolveBusinessesForUser(env, u.id);
+        const factsStatus = businessId ? await getTaxFactsStatus(env, businessId, new Date().getUTCFullYear()) : null;
+        return json({ businesses, facts_status: factsStatus });
+      }
+      try {
+        const b = body as { business_id?: string; business_name?: string; tax_year?: number; facts?: Partial<Record<FactGroup, Record<string, unknown>>> };
+        if (!b.business_id) {
+          if (!b.business_name) return err('business_name required to create a business (or pass business_id to update facts on an existing one)');
+          const out = await createBusiness(env, u, body);
+          return json(out, out.created ? 201 : 200);
+        }
+        const taxYear = Number(b.tax_year) || new Date().getUTCFullYear();
+        if (b.facts && Object.keys(b.facts).length) {
+          const row = await updateTaxFacts(env, b.business_id, taxYear, b.facts);
+          return json({ business_id: b.business_id, tax_year: row.tax_year, completed_groups: JSON.parse(row.completed_groups) });
+        }
+        return json({ business_id: b.business_id, facts_status: await getTaxFactsStatus(env, b.business_id, taxYear) });
+      } catch (e) { return err((e as Error).message, 400); }
+    }
+
+    // Tax suite structured-data door — direct JSON, no LLM round trip. The
+    // workbench dashboard needs fast, cheap, structured reads/writes for
+    // lists/tables (transactions, contractors, units, owners) and the
+    // deterministic estimate/credits/deadline calculators — exactly the
+    // shape /api/elle-intents and /api/elle-trading already serve their
+    // panels with. /api/tax (below) stays the conversational door for
+    // actually talking to Elle about it.
+    if (path === '/api/tax/data' && request.method === 'POST') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      const b = body as Record<string, unknown>;
+      const op = String(b.op || '');
+      const asJson = (s: string) => { try { return JSON.parse(s); } catch { return { text: s }; } };
+      try {
+        switch (op) {
+          case 'business_list': return json({ businesses: await resolveBusinessesForUser(env, u.id) });
+          case 'unit_add': return json(await addUnit(env, String(b.business_id || ''), String(b.unit_name || ''), b.address ? String(b.address) : null));
+          case 'unit_list': return json({ units: await listUnits(env, String(b.business_id || '')) });
+          case 'owner_set': return json({ owners: await setOwners(env, String(b.business_id || ''), Array.isArray(b.owners) ? b.owners as Array<{ owner_name: string; ownership_pct: number }> : []) });
+          case 'owner_list': return json({ owners: await listOwners(env, String(b.business_id || '')) });
+          case 'transaction_add': return json(asJson(await taxTransactionAdd(env, b)));
+          case 'transaction_list': return json(asJson(await taxTransactionList(env, b)));
+          case 'report': return json(asJson(await taxReport(env, b)));
+          case 'contractor_add': return json(asJson(await tax1099ContractorAdd(env, b)));
+          case 'contractor_list': return json(asJson(await tax1099ContractorList(env, b)));
+          case 'estimate_quarterly': return json(asJson(await taxEstimateQuarterly(env, b)));
+          case 'schedule_c_prep': return json(asJson(await taxScheduleCPrep(env, b)));
+          case 'credits_finder': return json(asJson(await taxCreditsFinder(env, b)));
+          case 'deadline_next': return json(asJson(await taxDeadlineNext(env, b)));
+          default: return err(`unknown op "${op}"`, 400);
+        }
+      } catch (e) { return err((e as Error).message, 400); }
+    }
+
+    // Tax suite conversational door — authenticated, tax-SCOPED (no read_sql,
+    // only the purpose-built tax_* tools — see Scope in router.ts). No
+    // anonymous fallback: this is real personal financial data, not a
+    // restaurant demo. Rate limited per user like /api/atlas.
+    if (path === '/api/tax') {
+      const authed = await getUser(request, env);
+      if (!authed) return err('Unauthorized', 401);
+      const actorKey = `user:${authed.id}`;
+      if ((await getPosture(env, actorKey).catch(() => ({ posture: 'normal' as const }))).posture === 'blocked') {
+        return err('Temporarily blocked — the security network flagged this account', 403);
+      }
+      const rlKey = `tax-rl:user:${authed.id}`;
+      const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+      if (count >= 30) {
+        await recordThreat(env, { actorKey, source: 'ratelimit', kind: 'ratelimit.exceeded', detail: '/api/tax' }).catch(() => {});
+        return err('Rate limit reached — try again in an hour', 429);
+      }
+      await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
+      const ab = body as { query?: string; q?: string; max_steps?: number; session_id?: string };
+      const q = String(ab.query || ab.q || '').trim();
+      if (!q) return err('query required');
+      const businesses = await resolveBusinessesForUser(env, authed.id);
+      const contextPrefix = businesses.length
+        ? `[context: signed-in user's businesses — ${businesses.map((b) => `business_id ${b.id} "${b.name}" (${b.entity_type})`).join('; ')}]\n\n`
+        : `[context: signed-in user has no businesses on file yet — offer tax_business_create]\n\n`;
+      const sessionId = String(ab.session_id || `tax:${crypto.randomUUID()}`);
+      const out = await runRouter(contextPrefix + q, env, routerDeps(),
+        { maxSteps: Number(ab.max_steps) || 8, scope: 'tax', userId: authed.id, sessionId, source: 'tax-suite' });
       return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps, usage: { used: count + 1, limit: 30 } });
     }
 
