@@ -1,0 +1,56 @@
+# Manual admin op: drives POST /api/admin/prune-corpus (src/index.ts) to
+# completion for a given target. Exists because that endpoint deletes one
+# bounded batch (500 chunks) per call — GitHub Actions has real internet
+# access to the deployed worker, unlike some sandboxed dev/agent
+# environments, so this is the reliable way to loop it to done:true.
+name: Prune Corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Prune target (see PRUNE_CORPUS_TARGETS in src/index.ts)'
+        required: true
+        type: choice
+        options:
+          - code_files
+          - research_series
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    name: Loop prune-corpus until done
+    steps:
+      - name: Drive ${{ inputs.target }} to completion
+        env:
+          ELLE_SERVICE_KEY: ${{ secrets.ELLE_SERVICE_KEY }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [ -z "$ELLE_SERVICE_KEY" ]; then
+            echo "::error::ELLE_SERVICE_KEY is not set as a repo secret (Settings > Secrets and variables > Actions) — cannot authenticate to the admin endpoint."
+            exit 1
+          fi
+          total_papers=0
+          batches=0
+          while true; do
+            resp=$(curl -sS -w '\n%{http_code}' -X POST \
+              https://elle-worker.sbarteau2022.workers.dev/api/admin/prune-corpus \
+              -H "Authorization: Bearer $ELLE_SERVICE_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{\"target\":\"$TARGET\"}")
+            code=$(echo "$resp" | tail -n1)
+            body=$(echo "$resp" | sed '$d')
+            batches=$((batches + 1))
+            echo "batch $batches (HTTP $code): $body"
+            if [ "$code" != "200" ]; then
+              echo "::error::prune-corpus returned HTTP $code"
+              exit 1
+            fi
+            done_flag=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('done', False))")
+            papers=$(echo "$body" | python3 -c "import sys,json; print(json.load(sys.stdin).get('papers_deleted', 0))")
+            total_papers=$((total_papers + papers))
+            if [ "$done_flag" = "True" ]; then
+              echo "Done. Total batches: $batches. Papers swept in final batch: $papers."
+              break
+            fi
+          done
