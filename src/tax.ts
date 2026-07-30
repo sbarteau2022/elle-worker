@@ -23,12 +23,12 @@ import {
   computeSETax, additionalMedicareTaxCents, computeQBIDeduction, homeOfficeDeductionCents,
   vehicleDeductionCents, computeSafeHarbor, allocateNetProfit, netProfitCents, federalIncomeTaxCents,
   stateIncomeTaxCents, standardDeductionCents, localEarningsTaxCents, payrollExpenseTaxCents, meets1099Threshold,
+  computeFICA, splitSCorpCompensation, entityLevelPassThroughTaxCents, indianaCountyTaxCents,
   type TxSummary, type TaxFacts, type FilingStatus,
 } from './tax-calc';
 import { findCredits, DISCLAIMER } from './tax-credits';
 import { getFederalConstants, getStateConstants, getLocalConstants, isStateSupported, isLocalitySupported } from './tax-rules';
 import { getWageSummaryCents } from './payroll/sync';
-import { PASS_THROUGH_ENTITY_TYPES } from './tax-clients';
 
 let schemaReady = false;
 async function ensureSchema(env: Env): Promise<void> {
@@ -261,8 +261,8 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
   const taxYear = Number(a.tax_year) || currentYear();
   const quarter = Math.min(Math.max(Number(a.quarter) || currentQuarter(), 1), 4);
 
-  if (!(PASS_THROUGH_ENTITY_TYPES as readonly string[]).includes(business.entity_type)) {
-    return `tax_estimate_quarterly: entity type "${business.entity_type}" is not yet supported for tax computation in this suite (v1 covers sole proprietorships and pass-through LLCs only) — no estimate is available. This is a scope gap, not a $0 result; do not treat it as one.`;
+  if (business.entity_type === 'c_corp') {
+    return `tax_estimate_quarterly: entity type "c_corp" is not yet supported for tax computation in this suite (1120 corporate tax / double taxation is a separate, larger domain not yet built) — no estimate is available. This is a scope gap, not a $0 result; do not treat it as one.`;
   }
 
   const factsRow = await getTaxFacts(env, businessId, taxYear);
@@ -270,30 +270,69 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
   const tx = await getTxSummary(env, businessId, taxYear);
   const netCents = netProfitCents(tx);
   const filingStatus = (facts.filing_status as FilingStatus) || 'single';
-
   const fed = getFederalConstants(taxYear);
-  const se = computeSETax(netCents, fed);
+  const now = Date.now();
+
+  const isSCorp = business.entity_type === 's_corp';
+  let scorp: { split: ReturnType<typeof splitSCorpCompensation>; fica: ReturnType<typeof computeFICA> } | null = null;
+  if (isSCorp) {
+    // An S-corp estimate genuinely CANNOT proceed without a real
+    // salary/distribution split — unlike the pass-through path, there is no
+    // safe default here (guessing a salary is exactly the kind of figure
+    // this suite refuses to invent). Requires synced payroll wage data.
+    const wages = await getWageSummaryCents(env, businessId, taxYear);
+    if (!wages.hasData) {
+      return `tax_estimate_quarterly: S-corp requires a real reasonable-salary figure from synced payroll data (payroll_connection_status/payroll_sync) before an estimate can be computed — never guessed. Connect and sync a payroll provider first.`;
+    }
+    // Simplification, flagged: treats ALL synced wages as the owner's
+    // salary — correct for a single-shareholder S-corp with no other
+    // employees on payroll; a business with real staff would need
+    // per-employee attribution to isolate just the owner's salary.
+    scorp = { split: splitSCorpCompensation(netCents, wages.totalWagesCents), fica: computeFICA(wages.totalWagesCents, fed) };
+  }
+
   const retirementCents = dollarsToCents(facts.retirement_contributions_ytd);
   const seHealthCents = dollarsToCents(facts.self_employed_health_premiums_ytd);
   const w2Cents = dollarsToCents(facts.w2_income_estimate);
   const stdDeduction = standardDeductionCents(filingStatus, fed);
-  const taxableBeforeQbi = Math.max(0, netCents - se.deductibleHalfCents - retirementCents - seHealthCents + w2Cents - stdDeduction);
-  const qbi = computeQBIDeduction(netCents, se.deductibleHalfCents, retirementCents, seHealthCents, taxableBeforeQbi, filingStatus, fed);
+
+  // ── federal ──
+  let se: ReturnType<typeof computeSETax>;
+  let qbiBaseCents: number; // the income QBI's 20% applies to — net profit for pass-through, distribution-only for S-corp (salary is ordinary W-2 income, never QBI)
+  let ficaOrSeTaxCents: number;
+  let ficaLine: string;
+  if (isSCorp) {
+    se = { netEarningsCents: 0, socialSecurityTaxCents: 0, medicareTaxCents: 0, totalSeTaxCents: 0, deductibleHalfCents: 0 }; // no SE tax at all on an S-corp's income
+    qbiBaseCents = scorp!.split.distributionCents;
+    ficaOrSeTaxCents = scorp!.fica.totalFICACents;
+    ficaLine = `FICA on $${(scorp!.split.salaryCents / 100).toFixed(2)} salary: ${centsToDollarStr(scorp!.fica.totalFICACents)} (employer ${centsToDollarStr(scorp!.fica.employerShareCents)} + employee ${centsToDollarStr(scorp!.fica.employeeShareCents)}) — distributions ($${(scorp!.split.distributionCents / 100).toFixed(2)}) owe NO payroll or SE tax`;
+  } else {
+    se = computeSETax(netCents, fed);
+    qbiBaseCents = netCents;
+    ficaOrSeTaxCents = se.totalSeTaxCents;
+    ficaLine = `SE tax: ${centsToDollarStr(se.totalSeTaxCents)} (Social Security ${centsToDollarStr(se.socialSecurityTaxCents)} + Medicare ${centsToDollarStr(se.medicareTaxCents)})`;
+  }
+
+  const incomeForOrdinaryTax = isSCorp ? scorp!.split.salaryCents + scorp!.split.distributionCents : netCents;
+  const taxableBeforeQbi = Math.max(0, incomeForOrdinaryTax - se.deductibleHalfCents - retirementCents - seHealthCents + w2Cents - stdDeduction);
+  // S-corp's own paid wages (the salary) feed the QBI wage-limitation test
+  // as a REAL number, not the conservative no-wages-known fallback.
+  const qbi = computeQBIDeduction(qbiBaseCents, se.deductibleHalfCents, retirementCents, seHealthCents, taxableBeforeQbi, filingStatus, fed, isSCorp ? scorp!.split.salaryCents : undefined);
   const taxableIncome = Math.max(0, taxableBeforeQbi - qbi.finalDeductionCents);
   const fedIncomeTax = federalIncomeTaxCents(taxableIncome, filingStatus, fed);
-  const addlMedicare = additionalMedicareTaxCents(se.netEarningsCents, w2Cents, filingStatus, fed);
-  const totalFederalTaxCents = se.totalSeTaxCents + fedIncomeTax + addlMedicare;
+  const addlMedicare = isSCorp ? 0 : additionalMedicareTaxCents(se.netEarningsCents, w2Cents, filingStatus, fed); // Additional Medicare Tax on wages is already withheld through payroll for an S-corp salary, not computed here
+  const totalFederalTaxCents = ficaOrSeTaxCents + fedIncomeTax + addlMedicare;
 
   const priorYearTaxCents = facts.prior_year_tax_liability != null ? dollarsToCents(facts.prior_year_tax_liability) : null;
   const priorYearAgiCents = facts.prior_year_agi != null ? dollarsToCents(facts.prior_year_agi) : null;
   const safeHarbor = computeSafeHarbor(totalFederalTaxCents, priorYearTaxCents, priorYearAgiCents, filingStatus, fed);
 
-  const now = Date.now();
   const lines: string[] = [
     `Q${quarter} ${taxYear} estimated tax for business ${businessId} (${business.entity_type}):`,
     `Net profit YTD: ${centsToDollarStr(netCents)}`,
-    `SE tax: ${centsToDollarStr(se.totalSeTaxCents)} (Social Security ${centsToDollarStr(se.socialSecurityTaxCents)} + Medicare ${centsToDollarStr(se.medicareTaxCents)})`,
-    `QBI deduction: ${centsToDollarStr(qbi.finalDeductionCents)}${qbi.aboveCeilingApproximation ? ' (simplified above-threshold phase-out — no W-2/UBIA limitation modeled, verify with a CPA)' : ''}`,
+    ...(isSCorp ? [] : [ficaLine]),
+    ...(isSCorp ? [ficaLine] : []),
+    `QBI deduction (on ${isSCorp ? 'distributions only' : 'net profit'}): ${centsToDollarStr(qbi.finalDeductionCents)}${qbi.aboveCeilingApproximation ? ' (simplified above-threshold phase-out — no real W-2/UBIA figure available, verify with a CPA)' : ''}`,
     `Federal income tax: ${centsToDollarStr(fedIncomeTax)}`,
     ...(addlMedicare > 0 ? [`Additional Medicare Tax: ${centsToDollarStr(addlMedicare)}`] : []),
     `Total federal tax (this basis): ${centsToDollarStr(totalFederalTaxCents)}`,
@@ -303,20 +342,38 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
   await env.DB.prepare(
     `INSERT INTO tax_estimates (id, business_id, tax_year, quarter, jurisdiction, net_profit_cents, se_tax_cents, income_tax_cents, qbi_deduction_cents, total_estimated_tax_cents, safe_harbor_basis, rules_version, computed_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).bind(id(), businessId, taxYear, quarter, 'federal', netCents, se.totalSeTaxCents, fedIncomeTax, qbi.finalDeductionCents, totalFederalTaxCents, safeHarbor.basisUsed, String(fed.year), now).run();
+  ).bind(id(), businessId, taxYear, quarter, 'federal', netCents, ficaOrSeTaxCents, fedIncomeTax, qbi.finalDeductionCents, totalFederalTaxCents, safeHarbor.basisUsed, String(fed.year), now).run();
 
+  // ── state (works for both pass-through and S-corp — same ordinary-income base) ──
   if (isStateSupported(business.state, taxYear)) {
     const st = getStateConstants(business.state!, taxYear);
     const stdDedState = st.standardDeductionCents[filingStatus] ?? st.standardDeductionCents.single;
-    const stateTaxableIncome = Math.max(0, netCents - se.deductibleHalfCents - qbi.finalDeductionCents + w2Cents - stdDedState);
-    const stateTaxCents = stateIncomeTaxCents(stateTaxableIncome, st);
-    lines.push(`${st.state} state income tax: ${centsToDollarStr(stateTaxCents)}`);
+    const stateTaxableIncome = Math.max(0, incomeForOrdinaryTax - se.deductibleHalfCents - qbi.finalDeductionCents + w2Cents - stdDedState);
+    const stateTaxCents = stateIncomeTaxCents(stateTaxableIncome, filingStatus, st);
+    // Illinois-style entity-level tax (e.g. the 1.5% Personal Property
+    // Replacement Tax) — the ENTITY's own liability, on top of the owner's
+    // personal state tax above, applicable only to the entity types the
+    // state actually requires it from (never sole props/single-member LLCs).
+    const entityLevelCents = entityLevelPassThroughTaxCents(netCents, business.entity_type, st);
+    const stateTotalCents = stateTaxCents + entityLevelCents;
+    lines.push(`${st.state} state income tax: ${centsToDollarStr(stateTaxCents)}${entityLevelCents > 0 ? ` + entity-level tax ${centsToDollarStr(entityLevelCents)} (${st.state} pass-through entity tax on the business's own net income)` : ''}`);
+    if (st.state === 'IN' && business.county_tax_rate) {
+      const countyTaxCents = indianaCountyTaxCents(stateTaxableIncome, business.county_tax_rate);
+      lines.push(`${business.county || 'county'} local income tax (Indiana): ${centsToDollarStr(countyTaxCents)}`);
+    } else if (st.state === 'IN' && !business.county_tax_rate) {
+      lines.push(`Indiana county income tax NOT included — no county_tax_rate on file for this business (set it from Indiana DOR's published county-rate table)`);
+    }
     await env.DB.prepare(
       `INSERT INTO tax_estimates (id, business_id, tax_year, quarter, jurisdiction, net_profit_cents, income_tax_cents, total_estimated_tax_cents, rules_version, computed_at) VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).bind(id(), businessId, taxYear, quarter, st.state, netCents, stateTaxCents, stateTaxCents, String(st.year), now).run();
+    ).bind(id(), businessId, taxYear, quarter, st.state, netCents, stateTaxCents, stateTotalCents, String(st.year), now).run();
   }
 
-  if (isLocalitySupported(business.locality, taxYear)) {
+  // ── local (KC/STL earnings tax) — sole-prop/pass-through mechanics only;
+  // an S-corp's local tax treatment is genuinely different (the corp itself
+  // may file its own local return) and is not modeled here. ──
+  if (isSCorp && isLocalitySupported(business.locality, taxYear)) {
+    lines.push(`${business.locality} local earnings tax NOT included for an S-corp — its local tax treatment differs from the sole-prop/partnership mechanics modeled here; consult a CPA.`);
+  } else if (!isSCorp && isLocalitySupported(business.locality, taxYear)) {
     const loc = getLocalConstants(business.locality!, taxYear);
     const localEarningsCents = localEarningsTaxCents(netCents, loc);
     let localTotalCents = localEarningsCents;

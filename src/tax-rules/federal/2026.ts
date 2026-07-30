@@ -105,10 +105,12 @@ export const FEDERAL_RULES_2026: TaxRule[] = [
     lastVerified: '2026-07-30',
     eligible: (facts) => {
       const et = String(facts.entity_type || 'sole_prop');
-      return ['sole_prop', 'single_member_llc', 'multi_member_llc'].includes(et);
+      // S-corp qualifies too, but only on DISTRIBUTIONS — the salary
+      // portion is ordinary W-2 income and never counts as QBI.
+      return ['sole_prop', 'single_member_llc', 'multi_member_llc', 's_corp'].includes(et);
     },
     plainLanguage:
-      'Pass-through business profit qualifies for a 20% deduction before ordinary income tax is calculated — applied automatically on every quarterly estimate. ' +
+      'Pass-through business profit qualifies for a 20% deduction before ordinary income tax is calculated (for an S-corp, this applies only to distributions, never the salary portion) — applied automatically on every quarterly estimate. ' +
       'To maximize it: keep taxable income under $201,775 (single) / $403,550 (MFJ) where possible, since the deduction phases out above that. ' +
       'Maxing out a SEP-IRA or Solo 401(k) contribution lowers taxable income and helps preserve the full deduction.',
     confidence: 'high',

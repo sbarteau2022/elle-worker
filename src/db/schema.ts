@@ -881,6 +881,13 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_tax_contractors_business_year ON tax_1099_contractors(business_id, tax_year)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_estimates_key ON tax_estimates(business_id, tax_year, quarter, jurisdiction)`,
     `CREATE INDEX IF NOT EXISTS idx_tax_reminders_key ON tax_reminders_sent(business_id, tax_year, quarter)`,
+    // Indiana's 92 counties each set their own flat income tax rate
+    // (0.50%-3.38%) — not maintained as a lookup table in this repo (too
+    // much low-confidence data to keep current); the operator enters their
+    // business's own county rate directly, sourced from Indiana DOR's own
+    // published table (see tax-rules/states/in/2026.ts's header comment).
+    `ALTER TABLE tax_businesses ADD COLUMN county TEXT`,
+    `ALTER TABLE tax_businesses ADD COLUMN county_tax_rate REAL`,
     // payroll/*.ts
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_conn_business_provider ON payroll_connections(business_id, provider)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_employees_business ON payroll_employees(business_id)`,

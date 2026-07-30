@@ -42,6 +42,10 @@ const GROUP_COLUMNS: Record<FactGroup, string[]> = {
 export interface TaxBusiness {
   id: string; user_id: string; business_name: string; entity_type: string;
   ein_last4: string | null; state: string | null; locality: string | null; industry_naics: string | null;
+  // Indiana-specific — see schema.ts's header comment on these columns:
+  // 92 counties each set their own rate, entered manually rather than
+  // maintained as an in-repo lookup table.
+  county: string | null; county_tax_rate: number | null;
   status: string; onboarding_intent_id: string | null;
   created_at: number; updated_at: number;
 }
@@ -120,6 +124,8 @@ export async function createBusiness(
     state: str(body.state, 2)?.toUpperCase() ?? null,
     locality: str(body.locality, 10)?.toUpperCase() ?? null,
     industry_naics: str(body.industry_naics, 20),
+    county: str(body.county, 60),
+    county_tax_rate: (body.county_tax_rate != null && Number.isFinite(Number(body.county_tax_rate))) ? Number(body.county_tax_rate) : null,
     status: 'onboarding',
     onboarding_intent_id: null,
     created_at: now,
@@ -127,15 +133,24 @@ export async function createBusiness(
   };
 
   let intentId: string | null = null;
-  const supported = (PASS_THROUGH_ENTITY_TYPES as readonly string[]).includes(entityType);
+  // S-corp is computable now too, but ONLY once real payroll wage data is
+  // synced (tax_estimate_quarterly refuses to guess a salary/distribution
+  // split) — the onboarding goal reflects that extra dependency rather
+  // than treating it identically to a pass-through entity.
+  const supported = (PASS_THROUGH_ENTITY_TYPES as readonly string[]).includes(entityType) || entityType === 's_corp';
   const goal =
     `New small-business tax client onboarded: "${name}" (${entityType}${business.state ? `, ${business.state}` : ''}), business_id ${business.id}, contact ${user.email}. ` +
-    (supported
+    (entityType === 'c_corp'
+      ? `This entity type (c_corp) is not yet supported for tax computation in this suite (1120 corporate tax is a separate, larger domain not yet built) — ` +
+        `no estimate should be attempted. Note the gap for a future build pass and do nothing further.`
+      : entityType === 's_corp'
       ? `Review tax_facts_status for this business/current tax year; if fact-groups are missing, note which ones in a check-in. ` +
+        `An S-corp estimate ALSO needs a real reasonable-salary figure — check payroll_connection_status, and if no provider is connected, tell the owner tax_estimate_quarterly can't run until one is connected and synced. ` +
+        `Once facts are filled in and payroll is synced, run tax_estimate_quarterly and tax_credits_finder and summarize the results. ` +
+        `Done looks like: a status check has run and either an estimate/credits summary is filed or the missing facts/payroll connection are named for follow-up.`
+      : `Review tax_facts_status for this business/current tax year; if fact-groups are missing, note which ones in a check-in. ` +
         `Once at least household + income facts are filled in, run tax_estimate_quarterly and tax_credits_finder and summarize the results. ` +
-        `Done looks like: a status check has run and either an estimate/credits summary is filed or the missing facts are named for follow-up.`
-      : `This entity type (${entityType}) is not yet supported for tax computation in this suite (v1 covers sole proprietorships and pass-through LLCs only) — ` +
-        `no estimate should be attempted. Note the gap for a future build pass and do nothing further.`);
+        `Done looks like: a status check has run and either an estimate/credits summary is filed or the missing facts are named for follow-up.`);
 
   try {
     const res = await intentTool(env, { op: 'create', title: `Tax onboarding — ${name}`, goal, status: 'active', source: 'stewart', priority: 6 });
@@ -147,11 +162,12 @@ export async function createBusiness(
   business.onboarding_intent_id = intentId;
 
   await env.DB.prepare(
-    `INSERT INTO tax_businesses (id, user_id, business_name, entity_type, ein_last4, state, locality, industry_naics, status, onboarding_intent_id, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO tax_businesses (id, user_id, business_name, entity_type, ein_last4, state, locality, industry_naics, county, county_tax_rate, status, onboarding_intent_id, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     business.id, business.user_id, business.business_name, business.entity_type, business.ein_last4,
-    business.state, business.locality, business.industry_naics, business.status, business.onboarding_intent_id, business.created_at, business.updated_at,
+    business.state, business.locality, business.industry_naics, business.county, business.county_tax_rate,
+    business.status, business.onboarding_intent_id, business.created_at, business.updated_at,
   ).run();
 
   // Arm the recurring quarterly-deadline watch only for entity types this

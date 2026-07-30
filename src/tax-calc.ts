@@ -100,11 +100,34 @@ export function payrollExpenseTaxCents(totalWagesCents: number, rate: number): n
 export interface StateConstants {
   state: string;
   year: number;
-  /** Missouri (and several other states) use the same bracket table for every filing status — only the standard deduction differs, which is why this isn't Record<FilingStatus, ...>. */
-  brackets: TaxBracket[];
+  /**
+   * Per-filing-status bracket tables, same shape as FederalConstants — some
+   * states (Missouri) use an identical table for every status; others
+   * (Kansas) double the MFJ threshold like federal does. Building it as
+   * Record<FilingStatus, ...> from the start means a state that DOES vary
+   * by status never needs a special-cased helper function bolted on later.
+   */
+  brackets: Record<FilingStatus, TaxBracket[]>;
   standardDeductionCents: Record<FilingStatus, number>;
+  /**
+   * A tax the PASS-THROUGH ENTITY ITSELF owes on its own net income, on top
+   * of (not instead of) the owner's personal income tax above — e.g.
+   * Illinois's 1.5% Personal Property Replacement Tax on partnerships/
+   * S-corps (NOT sole proprietorships/single-member LLCs, which don't file
+   * a separate entity return). Applies only to the entity types listed in
+   * passThroughEntityLevelTaxAppliesTo.
+   */
+  passThroughEntityLevelTaxRate?: number;
+  passThroughEntityLevelTaxAppliesTo?: string[];
   lastVerified: string;
   sources: string[];
+}
+
+export function entityLevelPassThroughTaxCents(netProfitCents: number, entityType: string, c: StateConstants): number {
+  if (!c.passThroughEntityLevelTaxRate) return 0;
+  if (!c.passThroughEntityLevelTaxAppliesTo?.includes(entityType)) return 0;
+  if (netProfitCents <= 0) return 0;
+  return Math.round(netProfitCents * c.passThroughEntityLevelTaxRate);
 }
 
 export interface TaxFacts {
@@ -165,8 +188,8 @@ export function federalIncomeTaxCents(taxableCents: number, filingStatus: Filing
   return applyBrackets(taxableCents, c.brackets[filingStatus]);
 }
 
-export function stateIncomeTaxCents(taxableCents: number, c: StateConstants): number {
-  return applyBrackets(taxableCents, c.brackets);
+export function stateIncomeTaxCents(taxableCents: number, filingStatus: FilingStatus, c: StateConstants): number {
+  return applyBrackets(taxableCents, c.brackets[filingStatus] ?? c.brackets.single);
 }
 
 export function standardDeductionCents(filingStatus: FilingStatus, c: FederalConstants): number {
@@ -207,6 +230,49 @@ export function computeSETax(netProfitCents: number, c: FederalConstants, priorS
   };
 }
 
+// ── W-2 payroll FICA (S-corp reasonable salary) ───────────────────────────
+// Distinct from computeSETax: W-2 wages get the FULL 15.3% (both employer
+// and employee halves) with NO 92.35% haircut — that haircut exists only in
+// self-employment tax to approximate the employer-side deduction a W-2
+// employee's employer already absorbs separately. An S-corp shareholder's
+// salary is real payroll, taxed like anyone else's paycheck.
+export interface FICAResult {
+  socialSecurityTaxCents: number;
+  medicareTaxCents: number;
+  totalFICACents: number;
+  employeeShareCents: number;
+  employerShareCents: number;
+}
+
+export function computeFICA(wagesCents: number, c: FederalConstants, priorSSWagesCents = 0): FICAResult {
+  if (wagesCents <= 0) return { socialSecurityTaxCents: 0, medicareTaxCents: 0, totalFICACents: 0, employeeShareCents: 0, employerShareCents: 0 };
+  const ssRoom = Math.max(0, c.ssWageBaseCents - priorSSWagesCents);
+  const ssTaxableCents = Math.min(wagesCents, ssRoom);
+  const socialSecurityTaxCents = Math.round(ssTaxableCents * (c.seTaxRate - 0.029));
+  const medicareTaxCents = Math.round(wagesCents * 0.029);
+  const totalFICACents = socialSecurityTaxCents + medicareTaxCents;
+  const employeeShareCents = Math.round(totalFICACents / 2);
+  return { socialSecurityTaxCents, medicareTaxCents, totalFICACents, employeeShareCents, employerShareCents: totalFICACents - employeeShareCents };
+}
+
+// ── S-corp reasonable-salary / distribution split ─────────────────────────
+// Salary is real payroll (subject to computeFICA above, never SE tax);
+// distributions are the remainder, subject to ordinary income tax but
+// neither SE tax nor FICA. salaryExceedsProfit flags the (real, if rare)
+// case where reported salary exceeds net profit — distributions floor at
+// zero rather than going negative.
+export interface SCorpSplit { salaryCents: number; distributionCents: number; salaryExceedsProfit: boolean }
+export function splitSCorpCompensation(netProfitCents: number, salaryCents: number): SCorpSplit {
+  const raw = netProfitCents - salaryCents;
+  return { salaryCents, distributionCents: Math.max(0, raw), salaryExceedsProfit: raw < 0 };
+}
+
+// ── Indiana's flat county income tax (layered on top of the flat state rate) ──
+export function indianaCountyTaxCents(taxableIncomeCents: number, countyTaxRate: number | null | undefined): number {
+  if (taxableIncomeCents <= 0 || !countyTaxRate) return 0;
+  return Math.round(taxableIncomeCents * countyTaxRate);
+}
+
 // ── Additional Medicare Tax (IRC §3101(b)(2)) — thresholds are fixed by
 // statute, NOT inflation-adjusted, so these don't move year to year. ──
 export function additionalMedicareTaxCents(
@@ -238,6 +304,14 @@ export function computeQBIDeduction(
   taxableIncomeBeforeQbiCents: number,
   filingStatus: FilingStatus,
   c: FederalConstants,
+  // Real W-2 wages paid BY THE BUSINESS (both owner's and any employees') —
+  // when known (e.g. an S-corp's synced payroll), the above-ceiling phase-out
+  // uses the actual 50%-of-W-2-wages limitation instead of conservatively
+  // zeroing out. UBIA-of-qualified-property is still not modeled (no asset
+  // basis tracked in this suite), so this is the 50%-of-wages test only, not
+  // the fuller "greater of 50% wages OR 25% wages + 2.5% UBIA" rule — still
+  // strictly more accurate than the no-wages-known fallback.
+  w2WagesPaidCents?: number,
 ): QBIResult {
   const qbiCents = Math.max(0, netProfitCents - deductibleSeTaxHalfCents - retirementContributionsCents - seHealthPremiumsCents);
   if (qbiCents <= 0) return { qbiCents: 0, rawDeductionCents: 0, finalDeductionCents: 0, aboveCeilingApproximation: false };
@@ -255,22 +329,25 @@ export function computeQBIDeduction(
   const fullThreshold = isMfj ? c.qbiFullDeductionThresholdCents.mfj : c.qbiFullDeductionThresholdCents.single;
   const ceiling = isMfj ? c.qbiPhaseOutCeilingCents.mfj : c.qbiPhaseOutCeilingCents.single;
 
-  let phaseFactor = 1;
+  // Without a real wage figure this is 0 — i.e. the same conservative
+  // "fully phased out" floor as before wages were ever available. Capped at
+  // preMinCents: the wage/UBIA test is a LIMIT, never a reason the deduction
+  // could exceed the plain 20%-of-QBI figure (disproportionately high wages
+  // relative to a small QBI must not inflate the deduction past that).
+  const wageLimitedCents = w2WagesPaidCents != null ? Math.min(preMinCents, Math.round(w2WagesPaidCents * 0.5)) : 0;
+  let deductionBeforeIncomeCap = preMinCents;
   let aboveCeilingApproximation = false;
-  if (taxableIncomeBeforeQbiCents > ceiling) {
-    // No W-2 wage / UBIA-of-property limitation is modeled (not collected in
-    // v1 onboarding) — conservatively treat the deduction as fully phased
-    // out above the ceiling rather than guess a wage-limited figure.
-    phaseFactor = 0;
-    aboveCeilingApproximation = true;
-  } else if (taxableIncomeBeforeQbiCents > fullThreshold) {
+  if (taxableIncomeBeforeQbiCents > fullThreshold) {
     const range = ceiling - fullThreshold;
-    phaseFactor = range > 0 ? 1 - (taxableIncomeBeforeQbiCents - fullThreshold) / range : 0;
-    aboveCeilingApproximation = true;
+    const frac = taxableIncomeBeforeQbiCents >= ceiling ? 1 : (range > 0 ? (taxableIncomeBeforeQbiCents - fullThreshold) / range : 1);
+    deductionBeforeIncomeCap = Math.round(preMinCents - frac * (preMinCents - wageLimitedCents));
+    // Only flag "approximation" when we DON'T have a real wage figure — with
+    // one, this phase-out is the actual IRS formula, not a stand-in for it.
+    aboveCeilingApproximation = w2WagesPaidCents == null;
   }
 
   const capByTaxableIncome = Math.round(taxableIncomeBeforeQbiCents * c.qbiRate);
-  const finalDeductionCents = Math.max(0, Math.min(Math.round(preMinCents * phaseFactor), capByTaxableIncome));
+  const finalDeductionCents = Math.max(0, Math.min(deductionBeforeIncomeCap, capByTaxableIncome));
   return { qbiCents, rawDeductionCents, finalDeductionCents, aboveCeilingApproximation };
 }
 

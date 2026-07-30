@@ -18,7 +18,7 @@ describe('findCredits', () => {
     expect(hits.map((h) => h.id)).toEqual(['qbi-20pct']);
   });
 
-  it('never fires the pass-through QBI deduction for an S-corp, but still fires entity-agnostic deductions', () => {
+  it('DOES fire the QBI deduction for an S-corp too — it applies to distributions, just not the salary portion (see tax_estimate_quarterly) — plus entity-agnostic deductions', () => {
     const facts = {
       entity_type: 's_corp',
       retirement_plan_type: 'solo_401k',
@@ -32,8 +32,7 @@ describe('findCredits', () => {
     };
     const hits = findCredits(facts, emptyTx, 2026);
     const ids = hits.map((h) => h.id).sort();
-    expect(ids).toEqual(['retirement-sep-solo401k', 'vehicle-standard-mileage']);
-    expect(ids).not.toContain('qbi-20pct');
+    expect(ids).toEqual(['qbi-20pct', 'retirement-sep-solo401k', 'vehicle-standard-mileage']);
   });
 
   it('fires every eligible rule when every fact-group is filled in, with correctly cited estimates', () => {

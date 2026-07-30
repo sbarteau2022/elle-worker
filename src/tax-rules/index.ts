@@ -12,6 +12,9 @@ import type { FederalConstants, StateConstants, LocalConstants } from '../tax-ca
 import type { TaxRule } from './types';
 import { FEDERAL_2026, FEDERAL_RULES_2026 } from './federal/2026';
 import { MO_2026, MO_RULES_2026 } from './states/mo/2026';
+import { KS_2026, KS_RULES_2026 } from './states/ks/2026';
+import { IL_2026, IL_RULES_2026 } from './states/il/2026';
+import { IN_2026, IN_RULES_2026 } from './states/in/2026';
 import { KC_2026, STL_2026 } from './locals/mo-2026';
 
 const FEDERAL_BY_YEAR: Record<number, { constants: FederalConstants; rules: TaxRule[] }> = {
@@ -20,6 +23,9 @@ const FEDERAL_BY_YEAR: Record<number, { constants: FederalConstants; rules: TaxR
 
 const STATE_BY_KEY: Record<string, { constants: StateConstants; rules: TaxRule[] }> = {
   'MO:2026': { constants: MO_2026, rules: MO_RULES_2026 },
+  'KS:2026': { constants: KS_2026, rules: KS_RULES_2026 },
+  'IL:2026': { constants: IL_2026, rules: IL_RULES_2026 },
+  'IN:2026': { constants: IN_2026, rules: IN_RULES_2026 },
 };
 
 const LOCAL_BY_YEAR: Record<string, LocalConstants> = {
@@ -28,7 +34,7 @@ const LOCAL_BY_YEAR: Record<string, LocalConstants> = {
 };
 
 export const SUPPORTED_YEARS = Object.keys(FEDERAL_BY_YEAR).map(Number);
-export const SUPPORTED_STATES = ['MO'];
+export const SUPPORTED_STATES = ['MO', 'KS', 'IL', 'IN'];
 export const SUPPORTED_LOCALITIES = ['KC', 'STL'];
 
 export function getFederalConstants(year: number): FederalConstants {

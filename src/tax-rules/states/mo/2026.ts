@@ -38,7 +38,8 @@ const MO_BRACKETS = [
 export const MO_2026: StateConstants = {
   state: 'MO',
   year: 2026,
-  brackets: MO_BRACKETS,
+  // Same table for every filing status — Missouri (unlike Kansas) doesn't double any threshold for MFJ.
+  brackets: { single: MO_BRACKETS, mfj: MO_BRACKETS, mfs: MO_BRACKETS, hoh: MO_BRACKETS },
   standardDeductionCents: FEDERAL_2026.standardDeductionCents,
   lastVerified: '2026-07-30',
   sources: [
