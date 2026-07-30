@@ -167,3 +167,16 @@ ELLE_CONVICTION_ENFORCE = "on"
 # is exactly 'on'. Arm deliberately with:
 #   wrangler secret put ELLE_LIVE_TRADING   (value: on)
 # Never set it here in [vars] — a committed 'on' would defeat the second key.
+
+# PAYROLL PROVIDER INTEGRATIONS (src/payroll/*.ts): QuickBooks/Gusto/ADP
+# client id/secret + PAYROLL_TOKEN_ENC_KEY are Worker secrets (wrangler
+# secret put X) — see .dev.vars.example for the full list. ADP additionally
+# needs a Cloudflare mTLS certificate binding, which can't be pre-declared
+# here without a real certificate:
+#   wrangler mtls-certificate upload --cert adp-cert.pem --key adp-key.pem
+#   [[mtls_certificates]]
+#   binding = "ADP_MTLS_CERT"
+#   certificate_id = "<id from the upload command>"
+# Until that block is added (with a real certificate_id), ADP's connect/sync
+# report "not configured" — the same fail-closed default as every other
+# unset integration in this file.

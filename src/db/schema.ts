@@ -369,6 +369,59 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     created_at INTEGER,
     updated_at INTEGER
   )`,
+    // payroll/*.ts — per-tenant payroll provider connections (QuickBooks,
+    // Gusto, ADP). access_token_enc/refresh_token_enc are AES-GCM ciphertext
+    // (see payroll/crypto.ts) — the first D1-stored third-party credentials
+    // in this repo, so unlike every other table here they are NOT plain
+    // text. business_id joins to tax_businesses.id by convention, no FK.
+    `CREATE TABLE IF NOT EXISTS payroll_connections (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    status TEXT DEFAULT 'disconnected',
+    access_token_enc TEXT,
+    refresh_token_enc TEXT,
+    token_expires_at INTEGER,
+    external_account_id TEXT,
+    scope TEXT,
+    last_synced_at INTEGER,
+    last_sync_error TEXT,
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    `CREATE TABLE IF NOT EXISTS payroll_employees (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    connection_id TEXT NOT NULL,
+    provider_employee_id TEXT NOT NULL,
+    full_name TEXT,
+    job_title TEXT,
+    employment_status TEXT,
+    hire_date TEXT,
+    termination_date TEXT,
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    `CREATE TABLE IF NOT EXISTS payroll_runs (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    connection_id TEXT NOT NULL,
+    provider_payroll_id TEXT NOT NULL,
+    pay_period_start TEXT,
+    pay_period_end TEXT,
+    check_date TEXT,
+    status TEXT,
+    total_wages_cents INTEGER,
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    `CREATE TABLE IF NOT EXISTS payroll_line_items (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    employee_id TEXT NOT NULL,
+    gross_pay_cents INTEGER,
+    net_pay_cents INTEGER,
+    employer_taxes_cents INTEGER,
+    hours REAL,
+    created_at INTEGER
+  )`,
     // tax-clients.ts / tax.ts — the small-business tax suite. One user can
     // own several businesses of different entity types (sole prop, S-corp,
     // multi-member LLC, ...); tax_business_units lets a single business
@@ -813,6 +866,13 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_tax_contractors_business_year ON tax_1099_contractors(business_id, tax_year)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_estimates_key ON tax_estimates(business_id, tax_year, quarter, jurisdiction)`,
     `CREATE INDEX IF NOT EXISTS idx_tax_reminders_key ON tax_reminders_sent(business_id, tax_year, quarter)`,
+    // payroll/*.ts
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_conn_business_provider ON payroll_connections(business_id, provider)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_employees_business ON payroll_employees(business_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_employees_connection ON payroll_employees(connection_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_runs_business_period ON payroll_runs(business_id, pay_period_start, pay_period_end)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_line_items_run ON payroll_line_items(run_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_line_items_employee ON payroll_line_items(employee_id)`,
     // push.ts
     `CREATE INDEX IF NOT EXISTS idx_reach_outs_user ON reach_outs (user_id, sent_at DESC)`,
     // connect-sandbox.ts

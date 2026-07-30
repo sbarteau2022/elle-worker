@@ -90,7 +90,8 @@ import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, delet
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
 import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
-import { createBusiness, resolveBusinessesForUser, updateTaxFacts, getTaxFactsStatus, addUnit, listUnits, setOwners, listOwners, type FactGroup } from './tax-clients';
+import { createBusiness, resolveBusinessesForUser, updateTaxFacts, getTaxFactsStatus, addUnit, listUnits, setOwners, listOwners, getBusiness, type FactGroup } from './tax-clients';
+import { startConnect, completeConnect, syncConnection, decodeState, listConnections } from './payroll/sync';
 import {
   taxTransactionAdd, taxTransactionList, taxReport, tax1099ContractorAdd, tax1099ContractorList,
   taxEstimateQuarterly, taxScheduleCPrep, taxCreditsFinder, taxDeadlineNext,
@@ -222,6 +223,30 @@ export interface Env extends LLMEnv {
   // no-op. This is the deliberate "spend budget to run the history corpus"
   // switch — nothing runs itself until this names a user.
   OBSERVER_AUTODRAIN_USER?: string;
+  // Payroll provider integrations (src/payroll/*.ts) — per-tenant OAuth
+  // connections feeding the tax suite's real wage data (notably St. Louis's
+  // payroll expense tax). This is the FIRST place this repo stores a
+  // third-party credential per-tenant in D1 rather than as one global Worker
+  // secret — see payroll/crypto.ts. Set with `wrangler secret put X`; any
+  // provider's tools/doors return "not configured" rather than throwing
+  // when its secrets are unset, same discipline as every other optional
+  // integration in this file.
+  PAYROLL_TOKEN_ENC_KEY?: string; // base64 AES-256-GCM key — `openssl rand -base64 32`
+  QUICKBOOKS_CLIENT_ID?: string;
+  QUICKBOOKS_CLIENT_SECRET?: string;
+  QUICKBOOKS_REDIRECT_URI?: string;
+  QUICKBOOKS_ENVIRONMENT?: string; // 'sandbox' (default) | 'production'
+  GUSTO_CLIENT_ID?: string;
+  GUSTO_CLIENT_SECRET?: string;
+  GUSTO_REDIRECT_URI?: string;
+  GUSTO_ENVIRONMENT?: string; // 'demo' (default) | 'production'
+  ADP_CLIENT_ID?: string;
+  ADP_CLIENT_SECRET?: string;
+  // Cloudflare mTLS certificate binding (`wrangler mtls-certificate upload`
+  // + a [[mtls_certificates]] entry in wrangler.toml) — ADP's OAuth requires
+  // mutual TLS, which cannot be provisioned from code; this stays undefined
+  // until that manual, operator-side step is done.
+  ADP_MTLS_CERT?: Fetcher;
 }
 
 // ── Utilities ─────────────────────────────────────────────────
@@ -1942,6 +1967,71 @@ export default {
       const out = await runRouter(contextPrefix + q, env, routerDeps(),
         { maxSteps: Number(ab.max_steps) || 8, scope: 'tax', userId: authed.id, sessionId, source: 'tax-suite' });
       return json({ content: out.answer, session_id: sessionId, trace: out.trace, steps: out.steps, usage: { used: count + 1, limit: 30 } });
+    }
+
+    // Payroll provider connect — authenticated; verifies the business
+    // belongs to the caller before doing anything (a business_id alone
+    // must never be enough to touch someone else's payroll connection).
+    // GET so it's directly usable as a browser redirect target from the
+    // workbench. QuickBooks/Gusto return an authorization URL to redirect
+    // to; ADP (client-credentials, no user redirect) connects immediately.
+    if (path === '/api/payroll/connect' && request.method === 'GET') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      const url = new URL(request.url);
+      const businessId = url.searchParams.get('business_id') || '';
+      const provider = url.searchParams.get('provider') || '';
+      const business = await getBusiness(env, businessId).catch(() => null);
+      if (!business || business.user_id !== u.id) return err('business not found', 404);
+      try {
+        const out = await startConnect(env, businessId, provider);
+        return json(out);
+      } catch (e) { return err((e as Error).message, 400); }
+    }
+
+    // Payroll OAuth callback — the redirect target for QuickBooks/Gusto.
+    // state (minted by startConnect) carries business_id + provider; this
+    // is a simplification for a single-operator context (see sync.ts's
+    // encodeState comment) rather than a server-verified nonce.
+    if (path === '/api/payroll/callback' && request.method === 'GET') {
+      const url = new URL(request.url);
+      const code = url.searchParams.get('code') || '';
+      const state = url.searchParams.get('state') || '';
+      const realmId = url.searchParams.get('realmId'); // QuickBooks-specific
+      const decoded = decodeState(state);
+      if (!decoded) return err('invalid or expired state', 400);
+      if (!code) return err('code required', 400);
+      try {
+        const out = await completeConnect(env, decoded.business_id, decoded.provider, code, realmId);
+        return json(out);
+      } catch (e) { return err((e as Error).message, 400); }
+    }
+
+    // Payroll sync — authenticated, on-demand pull. Same ownership check as
+    // /api/payroll/connect.
+    if (path === '/api/payroll/sync' && request.method === 'POST') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      const b = body as { business_id?: string; provider?: string };
+      const business = await getBusiness(env, String(b.business_id || '')).catch(() => null);
+      if (!business || business.user_id !== u.id) return err('business not found', 404);
+      try {
+        const out = await syncConnection(env, String(b.business_id), String(b.provider || ''));
+        return json(out);
+      } catch (e) { return err((e as Error).message, 400); }
+    }
+
+    // Payroll connection status — authenticated, lists every provider a
+    // business has (attempted to) connect.
+    if (path === '/api/payroll/connections' && request.method === 'GET') {
+      const u = await getUser(request, env);
+      if (!u) return err('Unauthorized', 401);
+      const url = new URL(request.url);
+      const businessId = url.searchParams.get('business_id') || '';
+      const business = await getBusiness(env, businessId).catch(() => null);
+      if (!business || business.user_id !== u.id) return err('business not found', 404);
+      const connections = await listConnections(env, businessId);
+      return json({ connections: connections.map((c) => ({ provider: c.provider, status: c.status, last_synced_at: c.last_synced_at, last_sync_error: c.last_sync_error })) });
     }
 
     if (path === '/api/elle-auth') return handleAuth(body as Record<string, string>, env, request);
