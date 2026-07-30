@@ -22,11 +22,12 @@ import {
 import {
   computeSETax, additionalMedicareTaxCents, computeQBIDeduction, homeOfficeDeductionCents,
   vehicleDeductionCents, computeSafeHarbor, allocateNetProfit, netProfitCents, federalIncomeTaxCents,
-  stateIncomeTaxCents, standardDeductionCents, localEarningsTaxCents, meets1099Threshold,
+  stateIncomeTaxCents, standardDeductionCents, localEarningsTaxCents, payrollExpenseTaxCents, meets1099Threshold,
   type TxSummary, type TaxFacts, type FilingStatus,
 } from './tax-calc';
 import { findCredits, DISCLAIMER } from './tax-credits';
 import { getFederalConstants, getStateConstants, getLocalConstants, isStateSupported, isLocalitySupported } from './tax-rules';
+import { getWageSummaryCents } from './payroll/sync';
 import { PASS_THROUGH_ENTITY_TYPES } from './tax-clients';
 
 let schemaReady = false;
@@ -317,11 +318,26 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
 
   if (isLocalitySupported(business.locality, taxYear)) {
     const loc = getLocalConstants(business.locality!, taxYear);
-    const localTaxCents = localEarningsTaxCents(netCents, loc);
-    lines.push(`${loc.locality} local earnings tax: ${centsToDollarStr(localTaxCents)}${loc.payrollExpenseTaxRate ? ' (payroll expense tax on employee wages NOT included — not modeled in v1)' : ''}`);
+    const localEarningsCents = localEarningsTaxCents(netCents, loc);
+    let localTotalCents = localEarningsCents;
+    let payrollNote = '';
+    if (loc.payrollExpenseTaxRate) {
+      // St. Louis's separate payroll expense tax on wages paid — real
+      // figure when a payroll provider is connected and synced (see
+      // payroll/sync.ts), an explicit gap (never a guess) otherwise.
+      const wages = await getWageSummaryCents(env, businessId, taxYear);
+      if (wages.hasData) {
+        const payrollTaxCents = payrollExpenseTaxCents(wages.totalWagesCents, loc.payrollExpenseTaxRate);
+        localTotalCents += payrollTaxCents;
+        payrollNote = ` + payroll expense tax ${centsToDollarStr(payrollTaxCents)} (on ${centsToDollarStr(wages.totalWagesCents)} synced wages via ${wages.connectedProviders.join(', ')})`;
+      } else {
+        payrollNote = ' (payroll expense tax on employee wages NOT included — connect and sync a payroll provider first via payroll_connection_status/payroll_sync)';
+      }
+    }
+    lines.push(`${loc.locality} local earnings tax: ${centsToDollarStr(localEarningsCents)}${payrollNote}`);
     await env.DB.prepare(
       `INSERT INTO tax_estimates (id, business_id, tax_year, quarter, jurisdiction, net_profit_cents, income_tax_cents, total_estimated_tax_cents, rules_version, computed_at) VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).bind(id(), businessId, taxYear, quarter, loc.locality, netCents, localTaxCents, localTaxCents, String(loc.year), now).run();
+    ).bind(id(), businessId, taxYear, quarter, loc.locality, netCents, localEarningsCents, localTotalCents, String(loc.year), now).run();
   }
 
   lines.push(DISCLAIMER);

@@ -89,6 +89,14 @@ export function localEarningsTaxCents(netProfitCents: number, c: LocalConstants)
   return Math.round(netProfitCents * c.earningsTaxRate);
 }
 
+// St. Louis's separate 0.5% payroll expense tax — on WAGES PAID TO
+// EMPLOYEES, not the business's own net profit, so it's computed against a
+// real synced wage total (payroll/sync.ts) rather than netProfitCents.
+export function payrollExpenseTaxCents(totalWagesCents: number, rate: number): number {
+  if (totalWagesCents <= 0) return 0;
+  return Math.round(totalWagesCents * rate);
+}
+
 export interface StateConstants {
   state: string;
   year: number;

@@ -16,7 +16,10 @@ import type { Env } from './index';
 
 interface Exec { sql: string; binds: unknown[] }
 
-function fakeEnv(opts?: { business?: Record<string, unknown> | null; facts?: Record<string, unknown> | null; txRows?: Array<Record<string, unknown>>; contractor?: Record<string, unknown> | null }): { env: Env; execs: Exec[] } {
+function fakeEnv(opts?: {
+  business?: Record<string, unknown> | null; facts?: Record<string, unknown> | null; txRows?: Array<Record<string, unknown>>;
+  contractor?: Record<string, unknown> | null; payrollConnections?: Array<Record<string, unknown>>; payrollRuns?: Array<Record<string, unknown>>;
+}): { env: Env; execs: Exec[] } {
   const execs: Exec[] = [];
   const db = {
     prepare(sql: string) {
@@ -27,6 +30,8 @@ function fakeEnv(opts?: { business?: Record<string, unknown> | null; facts?: Rec
         async all() {
           execs.push({ sql, binds });
           if (/FROM tax_transactions/.test(sql)) return { results: opts?.txRows || [] };
+          if (/FROM payroll_connections/.test(sql)) return { results: opts?.payrollConnections || [] };
+          if (/FROM payroll_runs/.test(sql)) return { results: opts?.payrollRuns || [] };
           return { results: [] };
         },
         async first() {
@@ -143,6 +148,28 @@ describe('taxEstimateQuarterly — entity-type gate is the safety-critical path'
     expect(out).toMatch(/does not replace a CPA/);
     const jurisdictions = execs.filter((e) => /INSERT INTO tax_estimates/.test(e.sql)).map((e) => e.binds[4]);
     expect(jurisdictions.sort()).toEqual(['KC', 'MO', 'federal']);
+  });
+
+  it('flags the St. Louis payroll expense tax as not-included (never a guess) when no payroll provider is synced', async () => {
+    const { env } = fakeEnv({ business: { ...soleProp, locality: 'STL' }, facts: null, txRows: [], payrollConnections: [] });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(out).toContain('STL local earnings tax');
+    expect(out).toMatch(/payroll expense tax on employee wages NOT included/);
+  });
+
+  it('includes a REAL St. Louis payroll expense tax figure once a payroll provider is connected and synced', async () => {
+    const { env, execs } = fakeEnv({
+      business: { ...soleProp, locality: 'STL' }, facts: null, txRows: [],
+      payrollConnections: [{ id: 'conn_1', business_id: 'biz_1', provider: 'gusto', status: 'connected', last_synced_at: Date.now() }],
+      payrollRuns: [{ total_wages_cents: 1_000_000 }], // $10,000 in synced wages for the year
+    });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    // 0.5% of $10,000 = $50.00
+    expect(out).toContain('payroll expense tax $50.00');
+    expect(out).toContain('$10000.00 synced wages via gusto');
+    const jurisdictionInsert = execs.find((e) => /INSERT INTO tax_estimates/.test(e.sql) && e.binds[4] === 'STL');
+    // total_estimated_tax_cents (index 7) includes the payroll tax on top of the earnings tax; income_tax_cents (index 6) does not.
+    expect(jurisdictionInsert!.binds[7]).toBeGreaterThan(jurisdictionInsert!.binds[6] as number);
   });
 });
 

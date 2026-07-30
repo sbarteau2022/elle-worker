@@ -45,6 +45,7 @@ import {
   tax1099ContractorAdd, tax1099ContractorList, taxEstimateQuarterly, taxScheduleCPrep,
   taxCreditsFinder, taxDeadlineNext, taxReminderAck,
 } from './tax';
+import { payrollConnectionStatus, payrollSync, payrollWageSummary } from './payroll/tools';
 import { resolveAlpacaBase, type LiveGuardEnv } from './live-guard';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
 import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
@@ -235,6 +236,7 @@ const TAX_TOOLS = new Set([
   'tax_facts_update', 'tax_facts_status', 'tax_transaction_add', 'tax_transaction_list', 'tax_report',
   'tax_1099_contractor_add', 'tax_1099_contractor_list', 'tax_estimate_quarterly', 'tax_schedule_c_prep',
   'tax_credits_finder', 'tax_deadline_next', 'tax_reminder_ack',
+  'payroll_connection_status', 'payroll_sync', 'payroll_wage_summary',
   'calc', 'web_search', 'fetch_url', 'page_read',
 ]);
 const PUBLIC_TOOLS = new Set([
@@ -347,6 +349,9 @@ const TOOL_LINES: Record<string, string> = {
   tax_credits_finder: `tax_credits_finder(business_id,tax_year?) — runs the cited, versioned credit/deduction eligibility engine against the business's on-file facts and returns plain-language "how to maximize it" guidance per hit. Every figure traces to a named IRC section/Pub/state statute; never state a credit or dollar figure this tool didn't return.`,
   tax_deadline_next: `tax_deadline_next(business_id) — the next federal quarterly estimated-tax deadline and days remaining, computed from the calendar (deterministic, not a guess).`,
   tax_reminder_ack: `WRITE: tax_reminder_ack(business_id,quarter,tax_year?) — record that a deadline reminder was delivered for a quarter, so the standing watch does not re-notify for the same quarter. Call this after reach_out-ing a fired quarterly-deadline watch.`,
+  payroll_connection_status: `payroll_connection_status(business_id) — which payroll providers (QuickBooks/Gusto/ADP) are connected for a business, their sync state, and any error. There is no payroll_connect tool — connecting is an OAuth browser redirect the user does from the workbench, not something you can do inline.`,
+  payroll_sync: `payroll_sync(business_id,provider:quickbooks|gusto|adp) — pull the latest employees/payroll-run data from an already-connected provider into this business's records. Refuses if that provider isn't connected yet.`,
+  payroll_wage_summary: `payroll_wage_summary(business_id,tax_year?) — real total wages paid for a tax year, from synced payroll data — this is what feeds a Missouri local (KC/STL) payroll-expense-tax figure in tax_estimate_quarterly. Says explicitly when no payroll data is connected/synced yet, never guesses a wage total.`,
   calc: `calc(expression) — deterministic arithmetic (+,-,*,/,%,^, parens, sqrt/abs/round/min/max/etc). Use for any exact computation instead of doing the math yourself.`,
   scratchpad_write: `scratchpad_write(key,value) — short-TTL working memory for this reasoning chain. Jot a finding down mid-chain instead of losing it to observation truncation.`,
   scratchpad_read: `scratchpad_read(key?) — read back a scratchpad entry; no key lists everything saved so far.`,
@@ -449,6 +454,7 @@ const TOOL_TREE: { category: string; tools: string[] }[] = [
     'tax_facts_update', 'tax_facts_status', 'tax_transaction_add', 'tax_transaction_list', 'tax_report',
     'tax_1099_contractor_add', 'tax_1099_contractor_list', 'tax_estimate_quarterly', 'tax_schedule_c_prep',
     'tax_credits_finder', 'tax_deadline_next', 'tax_reminder_ack',
+    'payroll_connection_status', 'payroll_sync', 'payroll_wage_summary',
   ] },
   { category: 'Autonomy & standing work', tools: ['idea', 'intent', 'review_runs', 'duplex', 'self_schedule', 'watch', 'dead_drop'] },
   { category: 'Provenance & self-audit', tools: ['provenance', 'constraint_analyzer', 'fork_replay', 'metabolism'] },
@@ -888,6 +894,9 @@ export async function runTool(
       case 'tax_credits_finder':       return clip(await taxCreditsFinder(env, a));
       case 'tax_deadline_next':        return clip(await taxDeadlineNext(env, a));
       case 'tax_reminder_ack':         return clip(await taxReminderAck(env, a));
+      case 'payroll_connection_status': return clip(await payrollConnectionStatus(env, a));
+      case 'payroll_sync':              return clip(await payrollSync(env, a));
+      case 'payroll_wage_summary':      return clip(await payrollWageSummary(env, a));
       case 'calc': {
         return calc(String(a.expression || a.expr || a.q || ''));
       }

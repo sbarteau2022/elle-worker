@@ -56,3 +56,25 @@ CLOUDFLARE_ACCOUNT_ID=f60c2e6068e002f5dbad7cd562a5c165
 #   FLOCK_VIDEO_URL=https://<your-text-to-video-endpoint>
 #   FLOCK_VIDEO_KEY=<bearer, optional>
 #   FLOCK_VIDEO_MODEL=<model id>
+
+# ── Payroll provider integrations (src/payroll/*.ts) — per-tenant OAuth ──────
+# feeding the tax suite's real wage data. Unset ⇒ each provider's tools/doors
+# report "not configured", not an error. In production set ALL of these as
+# Worker secrets (wrangler secret put X), never here.
+#   PAYROLL_TOKEN_ENC_KEY=<base64, `openssl rand -base64 32`> — encrypts every
+#     stored access/refresh token at rest; required before ANY provider works.
+#   QUICKBOOKS_CLIENT_ID=... / QUICKBOOKS_CLIENT_SECRET=...
+#   QUICKBOOKS_REDIRECT_URI=https://<this-worker>/api/payroll/callback
+#   QUICKBOOKS_ENVIRONMENT=sandbox   # 'sandbox' (default) | 'production'
+#   GUSTO_CLIENT_ID=... / GUSTO_CLIENT_SECRET=...
+#   GUSTO_REDIRECT_URI=https://<this-worker>/api/payroll/callback
+#   GUSTO_ENVIRONMENT=demo          # 'demo' (default) | 'production'
+#   ADP_CLIENT_ID=... / ADP_CLIENT_SECRET=...
+# ADP additionally requires mutual TLS, which secrets alone cannot provide:
+#   wrangler mtls-certificate upload --cert adp-cert.pem --key adp-key.pem
+#   then add to wrangler.toml:
+#     [[mtls_certificates]]
+#     binding = "ADP_MTLS_CERT"
+#     certificate_id = "<id from the upload command>"
+# Until that's done, ADP's connect/sync report "not configured" like any
+# other unset integration — it is not a bug, it's the fail-closed default.
