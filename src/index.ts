@@ -649,6 +649,56 @@ async function handleIngest(body: Record<string, string>, env: Env): Promise<Res
   return json({ success: true, ingested: true, paper_id: paperId, chunks_total: chunks.length, chunks_embedded: embedded, gate: gate ? { passed: true, checks: gate.checks } : { skipped: true }, errors: errors.length ? errors : undefined });
 }
 
+// Admin-only corpus prune: deletes matching corpus_papers/corpus_chunks rows
+// AND their Vectorize vectors together, so no orphaned vector is left behind
+// crowding out real topK slots for a row that no longer joins to anything.
+// Bounded to one BATCH per call (same drain convention as falcon_queue/
+// observer_queue) so a 1000+ chunk target never risks a single request's CPU
+// limit — the caller (see /api/admin/prune-corpus below) loops until done.
+const PRUNE_CORPUS_TARGETS: Record<string, { chunkWhere: string; paperWhere: string }> = {
+  // The bulk local-filesystem RAG ingest ('/RAG Ingest Corpus/coding/' +
+  // '/schemas/') pulled in raw source — minified npm package internals,
+  // .sql migration dumps, .py/.js scripts — none of which is prose the
+  // corpus should ground answers in. Reingest deliberately, not this way.
+  code_files: {
+    chunkWhere: `p.source_url LIKE '%RAG Ingest Corpus/coding/%' OR p.source_url LIKE '%RAG Ingest Corpus/schemas/%'`,
+    paperWhere: `source_url LIKE '%RAG Ingest Corpus/coding/%' OR source_url LIKE '%RAG Ingest Corpus/schemas/%'`,
+  },
+  // The hourly research cron (src/research.ts) rotated a fixed 10-topic list
+  // for months; the whole series is a handful of ideas restated hundreds of
+  // times, not research. Cleared in full — research.ts was fixed alongside
+  // this to actually vary topics and dedup against real history.
+  research_series: {
+    chunkWhere: `p.series = 'research'`,
+    paperWhere: `series = 'research'`,
+  },
+};
+
+async function handlePruneCorpus(body: { target?: string }, env: Env): Promise<Response> {
+  const cfg = body.target ? PRUNE_CORPUS_TARGETS[body.target] : undefined;
+  if (!cfg) return err(`target must be one of: ${Object.keys(PRUNE_CORPUS_TARGETS).join(', ')}`, 400);
+
+  const BATCH = 500;
+  const chunkRows = await env.DB.prepare(
+    `SELECT c.id, c.vectorize_id FROM corpus_chunks c JOIN corpus_papers p ON p.id = c.paper_id WHERE ${cfg.chunkWhere} LIMIT ?`
+  ).bind(BATCH).all();
+  const chunks = (chunkRows.results || []) as { id: string; vectorize_id: string | null }[];
+
+  if (chunks.length === 0) {
+    // No chunks left for this target — sweep any now-childless papers it still owns.
+    const del = await env.DB.prepare(
+      `DELETE FROM corpus_papers WHERE (${cfg.paperWhere}) AND id NOT IN (SELECT paper_id FROM corpus_chunks)`
+    ).run();
+    return json({ done: true, papers_deleted: del.meta.changes ?? 0 });
+  }
+
+  const vecIds = chunks.map(c => c.vectorize_id).filter((v): v is string => !!v);
+  if (vecIds.length) await env.VECTORIZE.deleteByIds(vecIds);
+  await env.DB.batch(chunks.map(c => env.DB.prepare(`DELETE FROM corpus_chunks WHERE id = ?`).bind(c.id)));
+
+  return json({ done: false, chunks_deleted: chunks.length, vectors_deleted: vecIds.length });
+}
+
 // Multimodal corpus intake (src/multimodal-intake.ts). Turn image/audio parts
 // into one assembled text via Workers AI, then reuse handleIngest so the text
 // runs the identical gate → chunk → embed → Vectorize path as any paper. The
@@ -2226,6 +2276,9 @@ export default {
     }
     if (path === '/api/elle-trading')      { if (!svc) return err('Unauthorized', 401); return handleTradingView(env); }
     if (path === '/api/ingest')            { if (!svc) return err('Unauthorized', 401); return handleIngest(body as Record<string, string>, env); }
+    // Admin corpus prune — deletes a bounded batch per call (see
+    // handlePruneCorpus above); caller loops on done:false until done:true.
+    if (path === '/api/admin/prune-corpus') { if (!svc) return err('Unauthorized', 401); return handlePruneCorpus(body as { target?: string }, env); }
     // Multimodal corpus intake — the worker-side eye. Images/audio → Workers AI
     // (vision + whisper) → one assembled text → the SAME ingest pipeline above.
     // Video = caller-supplied keyframes (image parts) + audio track (audio part).
