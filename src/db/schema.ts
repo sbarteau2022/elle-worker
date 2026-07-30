@@ -714,6 +714,21 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     methodology TEXT, sample_size INTEGER, date_range TEXT,
     data_completeness_pct REAL, updated_at TEXT DEFAULT (datetime('now'))
   )`,
+    // grant-990.ts — the 990-PF financial overview layer (spec §II Module 1:
+    // "Foundation: 990-PF analysis of every major private foundation").
+    // Summary financials only (ProPublica Nonprofit Explorer API) — NOT an
+    // itemized grants-paid recipient list, which needs the real 990-PF
+    // Schedule I/XV (a documented next step, not this table). One row per
+    // funder_name, replaced on re-fetch (a filing-year snapshot, not a series).
+    `CREATE TABLE IF NOT EXISTS grant_funder_990_overview (
+    funder_name TEXT PRIMARY KEY, ein TEXT, ntee_code TEXT, city TEXT, state TEXT,
+    most_recent_filing_year INTEGER,
+    total_revenue_cents INTEGER, total_expenses_cents INTEGER,
+    total_assets_end_cents INTEGER, total_liabilities_end_cents INTEGER,
+    contributions_gifts_grants_cents INTEGER, program_revenue_cents INTEGER,
+    pdf_only_filing_years TEXT, source_url TEXT,
+    fetched_at TEXT, error TEXT
+  )`,
     // flock.ts — social-media intelligence subsystem. Brand kits are the
     // continuity source; assets/posts/channels condition on them.
     `CREATE TABLE IF NOT EXISTS flock_brands (
@@ -873,6 +888,7 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_grant_fit_org ON grant_fit_analyses(org_id, fit_index DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_grant_fit_opportunity ON grant_fit_analyses(opportunity_id)`,
     `CREATE INDEX IF NOT EXISTS idx_grant_reasoning_subject ON grant_reasoning_log(subject_type, subject_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_grant_990_ein ON grant_funder_990_overview(ein)`,
   ];
   for (const sql of extras) await db.prepare(sql).run().catch(() => {});
 
