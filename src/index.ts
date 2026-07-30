@@ -22,6 +22,7 @@ import {
 import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema, realizedPerformance } from './trading';
 import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
+import { handleGrantIntelligence, type GrantEnv } from './grant-intelligence';
 import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
@@ -2631,6 +2632,10 @@ export default {
     // The Observer — Five-Axis structural analysis engine (history/science,
     // the Falcon's sibling). Member-gated like the Falcon; ~5 model calls.
     if (path === '/api/observer')               return handleObserver(body, env as unknown as ObserverEnv, user.id);
+    // Grant Intelligence Engine — Module 1 (fit index) + NECAI-F donor
+    // sub-engine, both tracks (nonprofit + small-business — see
+    // docs/GRANT_INTELLIGENCE_SUITE_MAP.md). Member-gated like its siblings.
+    if (path === '/api/elle-grants')             return handleGrantIntelligence(body, env as unknown as GrantEnv, user.id);
     // THE SPINE — unified Falcon: three tier-collapses in order, dissent holds
     // (does not collapse), Axis 17 predicts. SHADOW — gates no real decision;
     // κ accrues across runs, the same regulator that sizes a position.
