@@ -11,6 +11,7 @@ write → recall → assemble without the conversational router or a user login.
 | `/mem/write` | `{ content, metadata?, compress_invariants?, type?, importance?, tags?, session_id? }` | `{ ok: true, id }` |
 | `/mem/recall` | `{ query, top_k? }` | `{ results: [{ id, content, text, summary, score, via, memory_type, created_at }], count }` |
 | `/mem/assemble` | `{ query, budget? }` | `{ context, budget }` |
+| `/mem/backfill` | `{ batch? }` (default 120) | embeds a bounded batch of vector-less memories into the cold tier — idempotent, call repeatedly until `remaining` reaches 0 (also runs nightly from consolidation) |
 
 `content` may also be sent as `text`; `query` as `q`; `top_k` as `k`. Each
 recall result carries both `content` and `text` (aliases) so either client

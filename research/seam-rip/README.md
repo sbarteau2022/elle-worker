@@ -24,8 +24,14 @@ uncoupled tones       kappa=0.0385  p=0.2697  -> NULL
 
 ## Files
 - `rip.py` — the validated seam detector + circular-shift permutation null.
+- `phase_eight.py` — does a figure-eight phase portrait (2:1 slow/fast
+  phase-locking, PLV per Tass et al. 1998) emerge in the data, or would one
+  be drawn regardless? Same discipline as `rip.py`: a circular-shift null
+  the lock must survive, self-test pre-registered at p<0.01.
 - `vision_emit.swift` — Apple Vision -> CSV (head pose + optical flow). Scaffold;
   compile/adjust on macOS. The CSV contract is the fixed part.
+- `SESSION_AUDIT_2026-07-13.md` — dated record of what was built and what the
+  data showed in the session that produced `rip.py`, kept as-is (historical).
 
 ## Run
 ```
@@ -33,6 +39,8 @@ python3 rip.py                              # self-test (PASS #1, NULL #2/#3)
 swiftc -O vision_emit.swift -o vision_emit  # on macOS
 ./vision_emit clip.mov > vision.csv
 python3 rip.py --csv vision.csv --col flow_mag --fps 30
+python3 phase_eight.py                              # self-test (locked/drift/noise)
+python3 phase_eight.py --csv vision.csv --slow yaw --fast flow_mag --fps 30
 ```
 
 ## The ladder (each rung gated by the one below returning signal)
