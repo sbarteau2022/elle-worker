@@ -82,6 +82,18 @@ function generateId(): string {
   return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
 }
 
+// A rejected/blocked order used to exist only as a console.log — invisible to
+// the desk and, worse, invisible to HER: the next cycle's prompt carried no
+// trace, so she would re-emit the same doomed buy indefinitely. Rejections now
+// land in elle_market_observations (shown on the desk and readable via her own
+// tools) so the feedback loop closes. Best-effort, never blocks the cycle.
+async function noteOrderRejection(env: Env, symbol: string, detail: string): Promise<void> {
+  console.log(`[TRADE] ${detail}`);
+  await env.DB.prepare(
+    `INSERT INTO elle_market_observations (id, signal_type, symbol, observation) VALUES (?, 'order_rejected', ?, ?)`,
+  ).bind(generateId(), symbol, detail.slice(0, 500)).run().catch(() => {});
+}
+
 // ── chat-trade ledger ────────────────────────────────────────
 // trade_execute (the router tool) used to place real Alpaca orders and record
 // NOTHING — the order went out, the position synced back on the next cycle,
@@ -200,7 +212,18 @@ async function getAccount(env: Env) {
     cash: string;
     equity?: string;
     last_equity?: string;
+    buying_power?: string;
   }>;
+}
+
+// What the broker will actually accept for a NEW opening order. Alpaca's
+// buying_power is authoritative for a margin account (cash can be deeply
+// negative while buying_power is simply 0); fall back to non-negative cash
+// when the field is absent.
+function accountBuyingPower(account: { cash: string; buying_power?: string }): number {
+  const bp = account.buying_power != null ? parseFloat(account.buying_power) : NaN;
+  if (Number.isFinite(bp)) return Math.max(0, bp);
+  return Math.max(0, parseFloat(account.cash) || 0);
 }
 
 async function getPositions(env: Env) {
@@ -631,8 +654,24 @@ export async function runTradingCycle(env: Env): Promise<void> {
 
   const orderFrac = maxOrderFrac(env);
   const symbolFrac = maxSymbolFrac(env);
+
+  // What the broker will actually accept. Rejected orders never reached the
+  // ledger or the prompt before this — she would emit buys cycle after cycle
+  // with negative cash, each one dying silently at Alpaca. Now the constraint
+  // is stated up front, buys are pre-gated against it, and rejections land in
+  // elle_market_observations where she (and the desk) can see them.
+  const buyingPower = accountBuyingPower(account);
+  const capitalLockout = buyingPower < Math.max(500, equity * 0.01);
+
   const systemPrompt = `You are Elle — the autonomous trading intelligence of The Observer platform.
-Portfolio: $${parseFloat(account.portfolio_value).toFixed(2)} total, $${parseFloat(account.cash).toFixed(2)} cash, ${positions.length} open positions.
+Portfolio: $${parseFloat(account.portfolio_value).toFixed(2)} total, $${parseFloat(account.cash).toFixed(2)} cash, buying power $${buyingPower.toFixed(2)}, ${positions.length} open positions.
+${capitalLockout ? `
+CAPITAL LOCKOUT — READ FIRST: your buying power is effectively ZERO. The broker WILL REJECT any
+new buy, short, or bought option — do not emit them; they die at the broker and waste the cycle.
+Until you free capital the only productive actions are sell / cover / trim / hold / watch. The
+fastest way out is to trim your most oversized position (see each position's % of equity below)
+and redeploy small. This lockout is a fact of the account, not a market view.
+` : ''}
 
 You trade with philosophical reasoning grounded in the Observer methodology.
 What markets suppress is often where the move lives. Bilateral suppression is the load-bearing axis.
@@ -761,6 +800,12 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
   // Live holdings in risk-guard's shape, for naked-option coverage checks.
   const heldForCoverage: HeldPosition[] = positions.map(p => ({ symbol: p.symbol, qty: p.qty, side: p.side }));
 
+  // Running buying-power budget for this cycle's OPENING orders. Pre-gating
+  // here (instead of letting Alpaca reject) makes the failure visible in the
+  // observations ledger and lets a partially-affordable order downsize instead
+  // of dying whole. Decremented per placed order; closes/sells are unaffected.
+  let bpRemaining = buyingPower;
+
   for (const d of (decision.decisions as Array<Record<string, unknown>>) || []) {
     const action = d.action as string;
     const symbol = d.symbol as string;
@@ -790,6 +835,7 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
       // Buy-in cap: price the contract (100-share multiplier) and cut the
       // order down under the per-order fraction of equity. An unknown mark
       // fails small (1 contract), never open.
+      let buyPremiumNotional = 0; // known-mark estimate, for the buying-power budget
       if (action === 'buy') {
         const mark = await latestOptionMark(h, contract.symbol);
         if (mark == null) {
@@ -800,6 +846,17 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
           if (sized.qty < 1) { console.log(`[RISK] option buy ${symbol} skipped: ${sized.reason}`); continue; }
           if (sized.downsized) console.log(`[RISK] ${contract.symbol}: ${sized.reason}`);
           qty = sized.qty;
+          // Bought premium consumes buying power — same pre-gate as equities.
+          if (qty * mark * 100 > bpRemaining) {
+            const fit = Math.floor(bpRemaining / (mark * 100));
+            if (fit < 1) {
+              await noteOrderRejection(env, symbol, `option buy ${qty}x ${contract.symbol} blocked pre-broker: premium ~$${(qty * mark * 100).toFixed(0)} but buying power is $${bpRemaining.toFixed(0)}`);
+              continue;
+            }
+            console.log(`[RISK] ${contract.symbol}: downsized ${qty} → ${fit} contracts to fit buying power $${bpRemaining.toFixed(0)}`);
+            qty = fit;
+          }
+          buyPremiumNotional = qty * mark * 100;
         }
       }
 
@@ -809,7 +866,8 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
           body: JSON.stringify({ symbol: contract.symbol, qty: qty.toString(), side: action, type: 'market', time_in_force: 'day' }),
         });
         const order = await orderRes.json() as { id: string; status: string; reject_reason?: string };
-        if (order.status === 'rejected') { console.log(`[TRADE] option order rejected: ${order.reject_reason}`); continue; }
+        if (order.status === 'rejected') { await noteOrderRejection(env, symbol, `option ${action} ${qty}x ${contract.symbol} rejected by broker: ${order.reject_reason || '(no reason given)'}`); continue; }
+        if (action === 'buy') bpRemaining = Math.max(0, bpRemaining - buyPremiumNotional);
 
         if (action === 'buy') {
           // opens a long leg (or closes a short one — Alpaca resolves that from account state; we
@@ -856,7 +914,17 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
       const sized = sizeWithinPortfolioCaps(requested, price, equity, orderFrac, heldValue, symbolFrac);
       if (sized.qty < 1) { console.log(`[RISK] buy ${symbol} skipped: ${sized.reason}`); continue; }
       if (sized.downsized) console.log(`[RISK] buy ${symbol}: ${sized.reason}`);
-      const qty = sized.qty;
+      let qty = sized.qty;
+      // Buying-power pre-gate: don't send the broker an order it must reject.
+      if (qty * price > bpRemaining) {
+        const fit = Math.floor(bpRemaining / price);
+        if (fit < 1) {
+          await noteOrderRejection(env, symbol, `buy ${qty} ${symbol} blocked pre-broker: needs $${(qty * price).toFixed(0)} but buying power is $${bpRemaining.toFixed(0)} — free capital by trimming before opening new longs`);
+          continue;
+        }
+        console.log(`[RISK] buy ${symbol}: downsized ${qty} → ${fit} to fit buying power $${bpRemaining.toFixed(0)}`);
+        qty = fit;
+      }
       try {
         const orderRes = await fetch(`${base}/v2/orders`, {
           method: 'POST',
@@ -864,7 +932,8 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
           body: JSON.stringify({ symbol, qty: qty.toString(), side: 'buy', type: 'market', time_in_force: 'day' }),
         });
         const order = await orderRes.json() as { id: string; status: string; reject_reason?: string };
-        if (order.status === 'rejected') { console.log(`[TRADE] Rejected: ${order.reject_reason}`); continue; }
+        if (order.status === 'rejected') { await noteOrderRejection(env, symbol, `buy ${qty} ${symbol} rejected by broker: ${order.reject_reason || '(no reason given)'}`); continue; }
+        bpRemaining = Math.max(0, bpRemaining - qty * price);
 
         await env.DB.prepare(
           `INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, confidence, expected_catalyst, expected_timeframe, broker_order_id, status, asset_class)
@@ -916,14 +985,25 @@ asset_class:"us_equity") for plain stock buy/sell/short/cover.`;
       const sized = sizeWithinCap(requested, price, equity, orderFrac);
       if (sized.qty < 1) { console.log(`[RISK] short ${symbol} skipped: ${sized.reason}`); continue; }
       if (sized.downsized) console.log(`[RISK] short ${symbol}: ${sized.reason}`);
-      const qty = sized.qty;
+      let qty = sized.qty;
+      // Shorts consume margin buying power like longs — same pre-gate.
+      if (qty * price > bpRemaining) {
+        const fit = Math.floor(bpRemaining / price);
+        if (fit < 1) {
+          await noteOrderRejection(env, symbol, `short ${qty} ${symbol} blocked pre-broker: needs $${(qty * price).toFixed(0)} of buying power but only $${bpRemaining.toFixed(0)} remains`);
+          continue;
+        }
+        console.log(`[RISK] short ${symbol}: downsized ${qty} → ${fit} to fit buying power $${bpRemaining.toFixed(0)}`);
+        qty = fit;
+      }
       try {
         const orderRes = await fetch(`${base}/v2/orders`, {
           method: 'POST', headers: h,
           body: JSON.stringify({ symbol, qty: qty.toString(), side: 'sell', type: 'market', time_in_force: 'day' }),
         });
         const order = await orderRes.json() as { id: string; status: string; reject_reason?: string };
-        if (order.status === 'rejected') { console.log(`[TRADE] short rejected: ${order.reject_reason}`); continue; }
+        if (order.status === 'rejected') { await noteOrderRejection(env, symbol, `short ${qty} ${symbol} rejected by broker: ${order.reject_reason || '(no reason given)'}`); continue; }
+        bpRemaining = Math.max(0, bpRemaining - qty * price);
 
         await env.DB.prepare(
           `INSERT INTO elle_trades (id, symbol, action, quantity, entry_price, reasoning, what_she_is_testing, confidence, expected_catalyst, expected_timeframe, broker_order_id, status, asset_class)

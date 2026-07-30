@@ -153,6 +153,15 @@ VENUE_ID = ""
 # Blank ⇒ the cron is a no-op. Owner set on request ("just let it self drain").
 OBSERVER_AUTODRAIN_USER = "28430abe976eab8599b5103d58bf4192"
 
+# CONVICTION TRIM EXECUTOR (src/trading.ts): the de-risk half of the
+# validated recovery overlay. When a position's regulator κ strains below
+# neutral, the cron trims it toward entryQty·min(1, κ/0.5). De-risk ONLY —
+# this path never adds size and can never fully flatten a position (κ has an
+# open floor). Armed 2026-07-30 on operator request: NVDA sat at ~198% of
+# equity with κ≈0.28 and buying power exhausted, and the decision loop was
+# not trimming on its own. Set to anything other than "on" to disarm.
+ELLE_CONVICTION_ENFORCE = "on"
+
 # LIVE TRADING is a TWO-KEY operation (src/live-guard.ts): a non-paper
 # ALPACA_BASE_URL is refused everywhere unless the ELLE_LIVE_TRADING secret
 # is exactly 'on'. Arm deliberately with:
