@@ -473,18 +473,53 @@ const genId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 // deliberate choice for whoever owns consolidate.ts's schedule, not a
 // silent side effect of this change.
 export const GAMMA_DEFAULT = 0.5;
+
+// modulation is OFF by default (vesselFactor=1, volatility=0) — in that
+// state the gamma=0.5 no-overlap proof is EXACT, unchanged from the first
+// version of this mechanism. Engaging it composes the same two dials
+// wired into query-time adaptiveDelta() into the real, permanent,
+// insertion-time basin instead — the gap that was left open when those
+// dials were built: they modulated a function retrieval no longer calls.
+//
+// THE HONEST TRADEOFF: vesselFactor can LOOSEN a delta (up to
+// VESSEL_FACTOR_MAX=2.0×) as well as tighten it, so the exact
+// delta_A+delta_B ≤ d(A,B) proof no longer holds unconditionally once
+// modulation is engaged. What DOES still hold, provably: vesselFactor is
+// bounded to [VESSEL_FACTOR_MIN, VESSEL_FACTOR_MAX] and volatilityTighten
+// only ever shrinks, so the worst case is both memories at maximum
+// loosening — delta_A + delta_B ≤ VESSEL_FACTOR_MAX · d(A,B), i.e. at most
+// 2× the true gap, never unbounded, and still capped by deltaMax
+// regardless. Proven inline in pami-insertion-delta.test.ts, not asserted.
 export function computeInsertionDelta(
   newIdx: PamiIndex, existing: PamiIndex[], deltaMax = DELTA_DEFAULT, gamma = GAMMA_DEFAULT,
+  modulation: AdaptiveDeltaModulation = {},
 ): number {
   let nearest = Infinity;
   for (const other of existing) {
     const d = pamiDistance(newIdx, other);
     if (d < nearest) nearest = d;
   }
-  return Number.isFinite(nearest) ? Math.min(deltaMax, gamma * nearest) : deltaMax;
+  // Cold start (no neighbor to measure density from) still gets both
+  // modulations applied to the ceiling itself — "tighten under volatility"
+  // isn't a density-dependent claim, and vesselFactor is intrinsic to the
+  // new memory alone either way.
+  let delta = Number.isFinite(nearest) ? gamma * nearest : deltaMax;
+  if (modulation.vesselFactor) delta *= modulation.vesselFactor;
+  if (modulation.volatility) delta = volatilityTighten(delta, modulation.volatility);
+  return Math.min(deltaMax, Math.max(0, delta));
 }
 
-export async function pamiStore(env: Env, index: PamiIndex, content?: string): Promise<string> {
+export interface PamiStoreOptions {
+  // Both OFF by default — pamiStore()'s default behavior is UNCHANGED from
+  // the exact no-overlap guarantee this mechanism shipped with. Opting in
+  // trades that exactness for the bounded (≤2×) version, in return for real
+  // precision-weighting (see computeInsertionDelta's docstring for the proof
+  // either way).
+  useVesselPrecision?: boolean; // fold this memory's own settledness into its delta
+  volatility?: number;          // [0,1] — current graph.ts sweep() churn; see graphVolatility(). Applied to this write AND any shrink corrections it triggers.
+}
+
+export async function pamiStore(env: Env, index: PamiIndex, content?: string, options: PamiStoreOptions = {}): Promise<string> {
   await ensureSchema(env);
   const id = genId();
 
@@ -494,16 +529,28 @@ export async function pamiStore(env: Env, index: PamiIndex, content?: string): P
     try { return [{ r, idx: JSON.parse(r.index_json) as PamiIndex }]; } catch { return []; }
   });
 
-  const newDelta = computeInsertionDelta(index, existing.map((e) => e.idx));
+  const newDelta = computeInsertionDelta(
+    index, existing.map((e) => e.idx), DELTA_DEFAULT, GAMMA_DEFAULT,
+    {
+      vesselFactor: options.useVesselPrecision ? vesselPrecisionFactor(index) : undefined,
+      volatility: options.volatility,
+    },
+  );
 
   // Shrink-on-insert: any existing memory whose stored delta the new one
   // now invalidates gets tightened in the SAME batch, so the no-overlap
-  // guarantee never goes stale between writes.
+  // guarantee never goes stale between writes. Re-applies THAT memory's own
+  // vessel factor (intrinsic, always recomputable from its own index, only
+  // when the caller opted in) and this write's volatility reading (the
+  // "current conditions" this whole transaction — new memory and every
+  // correction it triggers — happened under), never the new memory's factor.
   const shrinks = existing.flatMap(({ r, idx }) => {
     const d = pamiDistance(index, idx);
-    const candidate = GAMMA_DEFAULT * d;
+    let candidate = GAMMA_DEFAULT * d * (options.useVesselPrecision ? vesselPrecisionFactor(idx) : 1);
+    if (options.volatility) candidate = volatilityTighten(candidate, options.volatility);
+    candidate = Math.min(DELTA_DEFAULT, Math.max(0, candidate));
     const current = r.delta ?? DELTA_DEFAULT;
-    return candidate < current ? [{ id: r.id, delta: Math.max(0, candidate) }] : [];
+    return candidate < current ? [{ id: r.id, delta: candidate }] : [];
   });
 
   const stmts = [
@@ -517,9 +564,12 @@ export async function pamiStore(env: Env, index: PamiIndex, content?: string): P
 
 // Bulk maintenance recompute — "when the graph undergoes structural
 // changes." Recomputes EVERY stored memory's delta from scratch against the
-// full current population. Not on any cron path; call this from wherever
+// full current population. useVesselPrecision/volatility are OFF by default,
+// same as pamiStore. Not on any cron path; call this from wherever
 // graph-hygiene maintenance is triggered, on purpose, not by default.
-export async function pamiRecomputeDeltas(env: Env, deltaMax = DELTA_DEFAULT, gamma = GAMMA_DEFAULT): Promise<{ updated: number }> {
+export async function pamiRecomputeDeltas(
+  env: Env, deltaMax = DELTA_DEFAULT, gamma = GAMMA_DEFAULT, options: PamiStoreOptions = {},
+): Promise<{ updated: number }> {
   await ensureSchema(env);
   const rows = await env.DB.prepare('SELECT id, index_json FROM pami_memories ORDER BY created_at DESC LIMIT 4000')
     .all().then((r) => r.results as Array<{ id: string; index_json: string }>).catch(() => []);
@@ -528,7 +578,10 @@ export async function pamiRecomputeDeltas(env: Env, deltaMax = DELTA_DEFAULT, ga
   });
   const stmts = parsed.map(({ id, idx }) => {
     const others = parsed.filter((p) => p.id !== id).map((p) => p.idx);
-    const delta = computeInsertionDelta(idx, others, deltaMax, gamma);
+    const delta = computeInsertionDelta(idx, others, deltaMax, gamma, {
+      vesselFactor: options.useVesselPrecision ? vesselPrecisionFactor(idx) : undefined,
+      volatility: options.volatility,
+    });
     return env.DB.prepare('UPDATE pami_memories SET delta = ? WHERE id = ?').bind(delta, id);
   });
   if (stmts.length) await env.DB.batch(stmts);

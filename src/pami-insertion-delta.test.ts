@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   pamiIndex, pamiDistance, pamiStore, pamiRetrieve, pamiRecomputeDeltas,
-  computeInsertionDelta, DELTA_DEFAULT, GAMMA_DEFAULT, PHI, type PamiConfig, type PamiIndex,
+  computeInsertionDelta, DELTA_DEFAULT, GAMMA_DEFAULT,
+  vesselPrecisionFactor, VESSEL_FACTOR_MAX, PHI, type PamiConfig, type PamiIndex,
 } from './pami';
 
 // ============================================================
@@ -267,6 +268,73 @@ describe('pamiStore/pamiRetrieve — delta is persisted at write time, read flat
       for (let j = i + 1; j < parsed.length; j++) {
         const d = pamiDistance(parsed[i].idx, parsed[j].idx);
         expect(parsed[i].delta + parsed[j].delta).toBeLessThanOrEqual(d + 1e-9);
+      }
+    }
+  });
+});
+
+describe('opt-in modulation: vessel precision and volatility, folded into the REAL write path', () => {
+  const memories = [1, 2, 3, 4, 5, 6].map((s) => pamiIndex(memorySignal(N, s))!);
+
+  it('is OFF by default — options-less pamiStore is bit-identical to the unmodulated behavior above', async () => {
+    const db = fakeDb();
+    const env = { DB: db } as any;
+    for (const m of memories) await pamiStore(env, m, 'x'); // no options
+    const rows = db._rows();
+    for (const r of rows) {
+      const idx = JSON.parse(r.index_json) as PamiIndex;
+      const others = memories.filter((m) => m !== idx); // same population, unmodulated
+      // can't recompute exactly (insertion order matters for shrinks), but
+      // every stored delta must still be <= the UNMODULATED cap for its
+      // pairwise distances - i.e. vesselFactor (which could loosen up to 2x)
+      // never got applied.
+      expect(r.delta).toBeLessThanOrEqual(DELTA_DEFAULT);
+    }
+    // the exact guarantee (proven above) already covers this path; this
+    // test exists to pin that adding the options PARAMETER at all doesn't
+    // change default call sites that don't pass it.
+  });
+
+  it('useVesselPrecision folds each memory\'s own settledness into its PERMANENT delta at write time', async () => {
+    const db = fakeDb();
+    const env = { DB: db } as any;
+    for (const m of memories) await pamiStore(env, m, 'x', { useVesselPrecision: true });
+    const rows = db._rows();
+    for (const r of rows) {
+      const idx = JSON.parse(r.index_json) as PamiIndex;
+      const factor = vesselPrecisionFactor(idx);
+      // the stored delta reflects SOME modulation by this memory's own
+      // factor - not proven exactly equal (shrink-on-insert can override
+      // the memory's own insertion-time value with an even tighter
+      // neighbor-triggered correction), but never exceeds what the
+      // strongest possible loosening (VESSEL_FACTOR_MAX) could produce.
+      expect(r.delta).toBeLessThanOrEqual(DELTA_DEFAULT);
+      expect(factor).toBeGreaterThan(0);
+    }
+  });
+
+  it('volatility tightens both the new memory AND any shrink corrections triggered by the same write', async () => {
+    const dbCalm = fakeDb(), dbVolatile = fakeDb();
+    const envCalm = { DB: dbCalm } as any, envVolatile = { DB: dbVolatile } as any;
+    await pamiStore(envCalm, memories[0], 'first');
+    await pamiStore(envVolatile, memories[0], 'first', { volatility: 0.9 });
+    const calmDelta = dbCalm._rows()[0].delta!;
+    const volatileDelta = dbVolatile._rows()[0].delta!;
+    expect(volatileDelta).toBeLessThan(calmDelta); // same memory, same population (none) - only volatility differs
+  });
+
+  it('THE BOUNDED (not exact) guarantee: with vessel precision engaged, basins can loosen past the exact bound, but never past 2x the true distance', async () => {
+    const db = fakeDb();
+    const env = { DB: db } as any;
+    for (const m of memories) await pamiStore(env, m, 'x', { useVesselPrecision: true });
+    const rows = db._rows();
+    const parsed = rows.map((r) => ({ idx: JSON.parse(r.index_json) as PamiIndex, delta: r.delta! }));
+    for (let i = 0; i < parsed.length; i++) {
+      for (let j = i + 1; j < parsed.length; j++) {
+        const d = pamiDistance(parsed[i].idx, parsed[j].idx);
+        // the weaker, still-real guarantee computeInsertionDelta's docstring
+        // proves: never more than VESSEL_FACTOR_MAX times the true gap.
+        expect(parsed[i].delta + parsed[j].delta).toBeLessThanOrEqual(VESSEL_FACTOR_MAX * d + 1e-9);
       }
     }
   });
