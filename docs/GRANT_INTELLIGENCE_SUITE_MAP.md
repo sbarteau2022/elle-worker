@@ -1,8 +1,9 @@
 # Grant Intelligence Suite — architecture map (build note)
 
-**Status:** Module 1's fit-index reasoning + the NECAI-F donor sub-engine are
-live (`src/grant-intelligence.ts`, `POST /api/elle-grants`). Opportunity data
-is seeded from `grant-strategy-map.md` (manual, not live-ingested yet). See
+**Status:** Module 1's fit-index reasoning, the NECAI-F donor sub-engine, and
+the 990-PF financial-overview layer are live (`src/grant-intelligence.ts`,
+`src/grant-990.ts`, `POST /api/elle-grants`). Opportunity data is seeded from
+`grant-strategy-map.md` (manual, not live-ingested yet). See
 "What's actually built" below for the exact boundary of what runs today.
 
 This is the same kind of note as `docs/WAR_ROOM_TODO.md`: reconcile the spec
@@ -136,6 +137,34 @@ rows exist.
   both tracks represented) plus the guard clauses that fire before any LLM
   call (missing org/opportunity, the NECAI-F funder-type refusal).
 
+**Built in a follow-up session — the 990-PF financial overview layer:**
+- `src/grant-990.ts` — pulls ProPublica's Nonprofit Explorer API (public, no
+  key) for a named funder: resolves an EIN by name (`resolveFunderEin` —
+  exact case-insensitive match wins over ProPublica's own relevance ranking),
+  then pulls the most recent filing's summary financials (revenue, expenses,
+  assets, liabilities, contributions/grants received, program revenue).
+  Explicitly surfaces `pdfOnlyFilingYears` for a foundation that only files on
+  paper (no structured data) rather than silently treating that as zero.
+  Scope is honest: this is the **overview** layer (spec §II Module 1 — "what
+  they actually fund vs what they say" at the summary-financials level), NOT
+  an itemized grants-paid recipient list — that needs the real 990-PF
+  Schedule I/XV, a further step this doesn't attempt.
+- `grant_funder_990_overview` table (`src/db/schema.ts`) — one row per
+  `funder_name`, replaced on re-fetch (a filing-year snapshot, not a series).
+  Registered in `router.ts`'s `TABLE_CATALOG`.
+- Three new `POST /api/elle-grants` actions in `src/grant-intelligence.ts`:
+  `funder_990_overview` (one funder, by name or explicit EIN),
+  `funder_990_overview_all` (every distinct `funder_name` already seeded
+  under `funder_type IN ('foundation','corporate')` — sequential, not
+  parallel, since ProPublica has no documented bulk endpoint and this is a
+  handful of funders, not hundreds), `get_990_overview` (read back a
+  persisted overview).
+- `src/grant-990.test.ts` — EIN-resolution tie-breaking (exact match beats
+  ProPublica's relevance score), filing-year sorting, the PDF-only-filings
+  case, the EIN-override fast path, and every error path (no match, non-OK
+  response, org endpoint returning nothing) — all against a stubbed `fetch`,
+  no live ProPublica calls.
+
 **Already existed, unchanged:**
 - The spec itself, ingested into the corpus (`corpus-seed.ts`, series
   `business`, tag `engine-spec`, `source_url: corpus/engines/03-grant-intelligence.md`).
@@ -149,10 +178,14 @@ rows exist.
    from `grant-strategy-map.md`; nothing pulls Grants.gov/SAM.gov (both
    tracks) or SBIR.gov (business track) yet. Next real work: a scheduled
    ingest (Queues + `/api/cron`, same pattern as the existing daemon loop)
-   writing fresh `grant_opportunities` rows, plus a `grant_recipients`
-   backfill (990-PF for nonprofit, SBIR award history for business) so
+   writing fresh `grant_opportunities` rows. `funder_990_overview`/
+   `funder_990_overview_all` (`src/grant-990.ts`) cover the 990-PF
+   **financial-overview** half of this for the nonprofit track — summary
+   revenue/expenses/assets per foundation, not itemized grants-paid. Still
+   missing: a `grant_recipients` backfill (real 990-PF Schedule I/XV
+   recipient lists for nonprofit, SBIR award history for business) so
    `fit_analysis` has real statistical ground instead of an honest "no data
-   on file" gap.
+   on file" gap — the overview layer doesn't provide that on its own.
 2. **Module 2 (Proposal Analysis).** Pilot target per spec: run the
    Observer Foundation's own applications through it. A parallel business-
    track pilot could run Groundwork's own MTC IDEA Fund / Arch Grants
