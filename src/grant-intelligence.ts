@@ -32,6 +32,7 @@
 import { z } from 'zod';
 import { ensureAllSchemas } from './db/schema';
 import { callLLM, jsonLLM, type LLMEnv } from './llm';
+import { fetch990Overview, type Funder990Overview } from './grant-990';
 
 export interface GrantEnv extends LLMEnv {
   DB: D1Database;
@@ -270,6 +271,70 @@ export async function runNecaifEvaluation(
   return { evaluationId, data, alreadySealed: false };
 }
 
+// ── 990-PF financial overview (spec §II Module 1) ──────────────────────────
+// One row per funder_name, replaced on re-fetch — a filing-year snapshot, not
+// an append-only series (grant_reasoning_log is where history-of-conclusions
+// belongs; this is just the current picture).
+async function persist990Overview(env: GrantEnv, overview: Funder990Overview): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO grant_funder_990_overview
+       (funder_name, ein, ntee_code, city, state, most_recent_filing_year,
+        total_revenue_cents, total_expenses_cents, total_assets_end_cents, total_liabilities_end_cents,
+        contributions_gifts_grants_cents, program_revenue_cents, pdf_only_filing_years, source_url, fetched_at, error)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
+     ON CONFLICT(funder_name) DO UPDATE SET
+       ein=excluded.ein, ntee_code=excluded.ntee_code, city=excluded.city, state=excluded.state,
+       most_recent_filing_year=excluded.most_recent_filing_year,
+       total_revenue_cents=excluded.total_revenue_cents, total_expenses_cents=excluded.total_expenses_cents,
+       total_assets_end_cents=excluded.total_assets_end_cents, total_liabilities_end_cents=excluded.total_liabilities_end_cents,
+       contributions_gifts_grants_cents=excluded.contributions_gifts_grants_cents,
+       program_revenue_cents=excluded.program_revenue_cents, pdf_only_filing_years=excluded.pdf_only_filing_years,
+       source_url=excluded.source_url, fetched_at=excluded.fetched_at, error=NULL`
+  ).bind(
+    overview.funderName, overview.ein, overview.nteeCode, overview.city, overview.state, overview.mostRecentFilingYear,
+    overview.totalRevenueCents, overview.totalExpensesCents, overview.totalAssetsEndCents, overview.totalLiabilitiesEndCents,
+    overview.contributionsGiftsGrantsCents, overview.programRevenueCents,
+    JSON.stringify(overview.pdfOnlyFilingYears), overview.sourceUrl, overview.fetchedAt,
+  ).run();
+}
+
+async function persist990Error(env: GrantEnv, funderName: string, errorMessage: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO grant_funder_990_overview (funder_name, fetched_at, error) VALUES (?,?,?)
+     ON CONFLICT(funder_name) DO UPDATE SET fetched_at=excluded.fetched_at, error=excluded.error`
+  ).bind(funderName, new Date().toISOString(), errorMessage).run();
+}
+
+// Run + persist for one funder. Returns the overview (or the error) so both
+// the single-funder and the "all named foundations" actions share one path.
+export async function run990Overview(
+  env: GrantEnv, funderName: string, einOverride?: string,
+): Promise<Funder990Overview | { error: string }> {
+  const result = await fetch990Overview(funderName, einOverride);
+  if ('error' in result) { await persist990Error(env, funderName, result.error); return result; }
+  await persist990Overview(env, result);
+  return result;
+}
+
+// The spec's "every major private foundation" — every DISTINCT funder_name
+// already seeded under funder_type IN ('foundation','corporate') (the only
+// types NECAI-F/990 analysis applies to; see the map doc's rule). Runs
+// sequentially (ProPublica has no documented bulk endpoint and this is a
+// handful of funders, not hundreds) so one slow/failing lookup doesn't race
+// another's write to the same PRIMARY KEY-per-name row.
+export async function run990OverviewForAllFunders(
+  env: GrantEnv,
+): Promise<{ funderName: string; result: Funder990Overview | { error: string } }[]> {
+  const rows = await env.DB.prepare(
+    `SELECT DISTINCT funder_name FROM grant_opportunities WHERE funder_type IN ('foundation','corporate') ORDER BY funder_name`
+  ).all<{ funder_name: string }>().catch(() => ({ results: [] }));
+  const out: { funderName: string; result: Funder990Overview | { error: string } }[] = [];
+  for (const row of rows.results ?? []) {
+    out.push({ funderName: row.funder_name, result: await run990Overview(env, row.funder_name) });
+  }
+  return out;
+}
+
 // ── DB bootstrap — guarded, self-healing (house style, war-room.ts) ────────
 let grantSchemaReady = false;
 async function ensureGrantSchema(env: GrantEnv): Promise<void> {
@@ -354,7 +419,33 @@ export async function handleGrantIntelligence(body: Record<string, unknown>, env
     }
   }
 
+  if (action === 'funder_990_overview') {
+    const funderName = String(body.funder_name || '').trim();
+    if (!funderName) return json({ error: 'funder_name required' }, 400);
+    const ein = body.ein ? String(body.ein) : undefined;
+    const result = await run990Overview(env, funderName, ein);
+    if ('error' in result) return json({ funder_name: funderName, ...result }, 502);
+    return json({ overview: result });
+  }
+
+  if (action === 'funder_990_overview_all') {
+    const results = await run990OverviewForAllFunders(env);
+    return json({
+      funders: results.length,
+      succeeded: results.filter((r) => !('error' in r.result)).length,
+      results,
+    });
+  }
+
+  if (action === 'get_990_overview') {
+    const funderName = String(body.funder_name || '').trim();
+    if (!funderName) return json({ error: 'funder_name required' }, 400);
+    const row = await env.DB.prepare(`SELECT * FROM grant_funder_990_overview WHERE funder_name = ?`).bind(funderName).first();
+    if (!row) return json({ error: 'not found' }, 404);
+    return json({ overview: row });
+  }
+
   return json({
-    error: `unknown action "${action}" (seed_opportunities|create_organization|list_opportunities|fit_analysis|get_fit_analysis|necaif_evaluation)`,
+    error: `unknown action "${action}" (seed_opportunities|create_organization|list_opportunities|fit_analysis|get_fit_analysis|necaif_evaluation|funder_990_overview|funder_990_overview_all|get_990_overview)`,
   }, 400);
 }
