@@ -369,6 +369,125 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     created_at INTEGER,
     updated_at INTEGER
   )`,
+    // tax-clients.ts / tax.ts — the small-business tax suite. One user can
+    // own several businesses of different entity types (sole prop, S-corp,
+    // multi-member LLC, ...); tax_business_units lets a single business
+    // track multiple locations rolling up to one return; tax_owners holds
+    // ownership splits for pass-through allocation. No FOREIGN KEY, matching
+    // every other table here — relationships are plain TEXT ids joined at
+    // the query layer.
+    `CREATE TABLE IF NOT EXISTS tax_businesses (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    business_name TEXT NOT NULL,
+    entity_type TEXT NOT NULL DEFAULT 'sole_prop',
+    ein_last4 TEXT,
+    state TEXT,
+    locality TEXT,
+    industry_naics TEXT,
+    status TEXT DEFAULT 'onboarding',
+    onboarding_intent_id TEXT,
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    `CREATE TABLE IF NOT EXISTS tax_business_units (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    unit_name TEXT NOT NULL,
+    address TEXT,
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    `CREATE TABLE IF NOT EXISTS tax_owners (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    owner_name TEXT NOT NULL,
+    ownership_pct REAL NOT NULL,
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    // One row per (business, tax_year); every column is independently
+    // nullable/upsertable so onboarding can save fact-groups in any order —
+    // see tax-clients.ts's updateTaxFacts.
+    `CREATE TABLE IF NOT EXISTS tax_facts (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    tax_year INTEGER NOT NULL,
+    filing_status TEXT,
+    dependents_count INTEGER,
+    spouse_has_income INTEGER,
+    w2_income_estimate REAL,
+    prior_year_tax_liability REAL,
+    prior_year_agi REAL,
+    retirement_plan_type TEXT,
+    retirement_contributions_ytd REAL,
+    health_insurance_type TEXT,
+    self_employed_health_premiums_ytd REAL,
+    has_home_office INTEGER,
+    home_office_sqft REAL,
+    home_total_sqft REAL,
+    home_office_method TEXT,
+    uses_vehicle_for_business INTEGER,
+    vehicle_business_miles_ytd REAL,
+    vehicle_method TEXT,
+    equipment_purchases_ytd REAL,
+    section179_candidate INTEGER,
+    pays_contractors INTEGER,
+    completed_groups TEXT DEFAULT '[]',
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    // amount_cents (not a float) so a running ledger of real business
+    // transactions never drifts from rounding.
+    `CREATE TABLE IF NOT EXISTS tax_transactions (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    unit_id TEXT,
+    tax_year INTEGER NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    direction TEXT NOT NULL,
+    category TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    description TEXT,
+    contractor_id TEXT,
+    source TEXT DEFAULT 'manual',
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    `CREATE TABLE IF NOT EXISTS tax_1099_contractors (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    tax_year INTEGER NOT NULL,
+    contractor_name TEXT NOT NULL,
+    w9_on_file INTEGER DEFAULT 0,
+    ytd_payments_cents INTEGER DEFAULT 0,
+    threshold_met INTEGER DEFAULT 0,
+    notes TEXT,
+    created_at INTEGER, updated_at INTEGER
+  )`,
+    // A history log of computed estimates, not an invalidation-tracked
+    // cache — v1 always recomputes on read (see tax.ts's
+    // tax_estimate_quarterly); rows here are for audit trail / dashboard
+    // history only.
+    `CREATE TABLE IF NOT EXISTS tax_estimates (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    tax_year INTEGER NOT NULL,
+    quarter INTEGER NOT NULL,
+    jurisdiction TEXT NOT NULL,
+    net_profit_cents INTEGER,
+    se_tax_cents INTEGER,
+    income_tax_cents INTEGER,
+    qbi_deduction_cents INTEGER,
+    total_estimated_tax_cents INTEGER,
+    safe_harbor_basis TEXT,
+    rules_version TEXT,
+    computed_at INTEGER
+  )`,
+    // Dedupe ledger for the quarterly-deadline watch (watches.ts) — keeps a
+    // recurring watch from reach_out-ing the same quarter's reminder twice.
+    `CREATE TABLE IF NOT EXISTS tax_reminders_sent (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL,
+    tax_year INTEGER NOT NULL,
+    quarter INTEGER NOT NULL,
+    sent_at INTEGER
+  )`,
     // push.ts
     `CREATE TABLE IF NOT EXISTS push_devices (
       user_id TEXT NOT NULL,
@@ -578,6 +697,16 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     BEGIN SELECT RAISE(ABORT, 'the duplex master copy is append-only'); END`,
     // profiles.ts
     `CREATE INDEX IF NOT EXISTS idx_profiles_email ON user_profiles(email)`,
+    // tax-clients.ts / tax.ts
+    `CREATE INDEX IF NOT EXISTS idx_tax_businesses_user ON tax_businesses(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_tax_units_business ON tax_business_units(business_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_tax_owners_business ON tax_owners(business_id)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_facts_business_year ON tax_facts(business_id, tax_year)`,
+    `CREATE INDEX IF NOT EXISTS idx_tax_tx_business_year_date ON tax_transactions(business_id, tax_year, occurred_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_tax_tx_business_category ON tax_transactions(business_id, category)`,
+    `CREATE INDEX IF NOT EXISTS idx_tax_contractors_business_year ON tax_1099_contractors(business_id, tax_year)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tax_estimates_key ON tax_estimates(business_id, tax_year, quarter, jurisdiction)`,
+    `CREATE INDEX IF NOT EXISTS idx_tax_reminders_key ON tax_reminders_sent(business_id, tax_year, quarter)`,
     // push.ts
     `CREATE INDEX IF NOT EXISTS idx_reach_outs_user ON reach_outs (user_id, sent_at DESC)`,
     // connect-sandbox.ts
