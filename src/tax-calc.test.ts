@@ -12,7 +12,8 @@ import {
   applyBrackets, federalIncomeTaxCents, stateIncomeTaxCents, standardDeductionCents,
   netProfitCents, computeSETax, additionalMedicareTaxCents, computeQBIDeduction,
   homeOfficeDeductionCents, vehicleDeductionCents, computeSafeHarbor, allocateNetProfit,
-  meets1099Threshold,
+  meets1099Threshold, computeFICA, splitSCorpCompensation, indianaCountyTaxCents,
+  entityLevelPassThroughTaxCents,
 } from './tax-calc';
 import { FEDERAL_2026 } from './tax-rules/federal/2026';
 import { MO_2026 } from './tax-rules/states/mo/2026';
@@ -35,7 +36,7 @@ describe('federalIncomeTaxCents (2026 single)', () => {
 
 describe('stateIncomeTaxCents (MO 2026)', () => {
   it('applies all 8 brackets at $20,000 taxable', () => {
-    expect(stateIncomeTaxCents(2_000_000, MO_2026)).toBe(76_406);
+    expect(stateIncomeTaxCents(2_000_000, 'single', MO_2026)).toBe(76_406);
   });
 });
 
@@ -184,5 +185,78 @@ describe('applyBrackets (generic)', () => {
     // 3rd bracket boundary is the highest defined; anything above it uses the top (unbounded) rate on the remainder.
     const brackets = [{ uptoCents: 100, rate: 0.10 }, { uptoCents: null, rate: 0.20 }];
     expect(applyBrackets(300, brackets)).toBe(Math.round(100 * 0.10 + 200 * 0.20));
+  });
+});
+
+describe('computeFICA (W-2 payroll — full wages, NOT the 92.35% SE-tax haircut)', () => {
+  it('applies 12.4% SS + 2.9% Medicare on the full wage, split evenly employer/employee', () => {
+    const r = computeFICA(8_000_000, FEDERAL_2026); // $80,000 salary
+    expect(r.socialSecurityTaxCents).toBe(992_000); // 8,000,000 * 0.124 (full wage, no 92.35% factor)
+    expect(r.medicareTaxCents).toBe(232_000); // 8,000,000 * 0.029
+    expect(r.totalFICACents).toBe(1_224_000);
+    expect(r.employeeShareCents).toBe(612_000);
+    expect(r.employerShareCents).toBe(612_000);
+  });
+
+  it('caps the Social Security leg at the wage base but leaves Medicare uncapped', () => {
+    const r = computeFICA(20_000_000, FEDERAL_2026); // above the $184,500 SS wage base
+    expect(r.socialSecurityTaxCents).toBe(Math.round(FEDERAL_2026.ssWageBaseCents * 0.124));
+    expect(r.medicareTaxCents).toBe(Math.round(20_000_000 * 0.029));
+  });
+
+  it('is all zero for zero or negative wages', () => {
+    expect(computeFICA(0, FEDERAL_2026)).toEqual({ socialSecurityTaxCents: 0, medicareTaxCents: 0, totalFICACents: 0, employeeShareCents: 0, employerShareCents: 0 });
+  });
+});
+
+describe('splitSCorpCompensation', () => {
+  it('splits net profit into salary + the remainder as distribution', () => {
+    expect(splitSCorpCompensation(10_000_000, 6_000_000)).toEqual({ salaryCents: 6_000_000, distributionCents: 4_000_000, salaryExceedsProfit: false });
+  });
+  it('floors distributions at zero and flags when reported salary exceeds net profit', () => {
+    expect(splitSCorpCompensation(3_000_000, 5_000_000)).toEqual({ salaryCents: 5_000_000, distributionCents: 0, salaryExceedsProfit: true });
+  });
+});
+
+describe('indianaCountyTaxCents', () => {
+  it('applies a flat county rate on top of the state rate\'s own taxable-income base', () => {
+    expect(indianaCountyTaxCents(5_000_000, 0.0202)).toBe(101_000); // Marion County example rate
+  });
+  it('is zero with no rate on file or non-positive income', () => {
+    expect(indianaCountyTaxCents(5_000_000, null)).toBe(0);
+    expect(indianaCountyTaxCents(5_000_000, undefined)).toBe(0);
+    expect(indianaCountyTaxCents(0, 0.02)).toBe(0);
+  });
+});
+
+describe('computeQBIDeduction — real W-2 wage limitation (S-corp path)', () => {
+  it('uses the real 50%-of-wages limit above the ceiling instead of fully zeroing out', () => {
+    const r = computeQBIDeduction(30_000_000, 0, 0, 0, 30_000_000, 'single', FEDERAL_2026, 10_000_000);
+    expect(r.finalDeductionCents).toBe(5_000_000); // min(50% of $100k wages = $50k, 20% of $300k taxable income cap = $60k) = $50k
+    expect(r.aboveCeilingApproximation).toBe(false); // a real wage figure was supplied — this is the actual rule, not a stand-in
+  });
+
+  it('never lets a disproportionately high wage figure inflate the deduction past the plain 20%-of-QBI amount', () => {
+    // QBI only $20,000 (net profit with no other adjustments) → 20% = $4,000, but wages paid are $50,000 (50% = $25,000, far above $4,000).
+    const r = computeQBIDeduction(2_000_000, 0, 0, 0, 30_000_000, 'single', FEDERAL_2026, 5_000_000);
+    expect(r.finalDeductionCents).toBe(400_000); // capped at the unlimited 20%-of-QBI figure, not the (irrelevant, higher) wage limit
+  });
+
+  it('still fully phases out above the ceiling when no wage figure is known at all (unchanged default behavior)', () => {
+    const r = computeQBIDeduction(30_000_000, 0, 0, 0, 30_000_000, 'single', FEDERAL_2026);
+    expect(r.finalDeductionCents).toBe(0);
+    expect(r.aboveCeilingApproximation).toBe(true);
+  });
+});
+
+describe('entityLevelPassThroughTaxCents', () => {
+  const stateWithPPRT = { state: 'IL', year: 2026, brackets: { single: [], mfj: [], mfs: [], hoh: [] }, standardDeductionCents: { single: 0, mfj: 0, mfs: 0, hoh: 0 }, passThroughEntityLevelTaxRate: 0.015, passThroughEntityLevelTaxAppliesTo: ['multi_member_llc', 's_corp'], lastVerified: '2026-07-30', sources: [] };
+
+  it('applies only to the listed entity types', () => {
+    expect(entityLevelPassThroughTaxCents(10_000_000, 's_corp', stateWithPPRT)).toBe(150_000);
+    expect(entityLevelPassThroughTaxCents(10_000_000, 'sole_prop', stateWithPPRT)).toBe(0); // sole props don't file a separate entity return
+  });
+  it('is zero for a state with no entity-level tax configured', () => {
+    expect(entityLevelPassThroughTaxCents(10_000_000, 's_corp', MO_2026)).toBe(0);
   });
 });

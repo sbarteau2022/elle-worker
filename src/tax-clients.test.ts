@@ -90,17 +90,25 @@ describe('createBusiness', () => {
     expect(String(binds[4])).toMatch(/quarterly estimated-tax deadlines/); // condition text
   });
 
-  it('does NOT arm a deadline watch for an unsupported entity type (s_corp) — no point reminding toward an uncomputable number', async () => {
+  it('does NOT arm a deadline watch for an unsupported entity type (c_corp) — no point reminding toward an uncomputable number', async () => {
+    const { env, execs } = fakeEnv();
+    const out = await createBusiness(env, USER, { business_name: 'Acme Corp', entity_type: 'c_corp' });
+    expect(out.business.entity_type).toBe('c_corp');
+    expect(execs.find((e) => /INSERT INTO elle_watches/.test(e.sql))).toBeUndefined();
+  });
+
+  it('DOES arm a deadline watch for s_corp — computable once payroll is synced, so reminders are still useful', async () => {
     const { env, execs } = fakeEnv();
     const out = await createBusiness(env, USER, { business_name: 'Acme Corp', entity_type: 's_corp' });
     expect(out.business.entity_type).toBe('s_corp');
-    expect(execs.find((e) => /INSERT INTO elle_watches/.test(e.sql))).toBeUndefined();
+    const watchInsert = execs.find((e) => /INSERT INTO elle_watches/.test(e.sql));
+    expect(watchInsert, 'no watch was armed').toBeTruthy();
   });
 
   it('is idempotent per (user, business_name) — never creates a second business for the same name', async () => {
     const existing: TaxBusiness = {
       id: 'biz_existing', user_id: USER.id, business_name: 'Acme', entity_type: 'sole_prop',
-      ein_last4: null, state: 'MO', locality: null, industry_naics: null, status: 'onboarding', onboarding_intent_id: 'intent_1',
+      ein_last4: null, state: 'MO', locality: null, industry_naics: null, county: null, county_tax_rate: null, status: 'onboarding', onboarding_intent_id: 'intent_1',
       created_at: 1, updated_at: 1,
     };
     const { env, execs } = fakeEnv({ existingBusiness: existing });

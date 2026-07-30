@@ -131,12 +131,46 @@ describe('tax1099ContractorAdd', () => {
 });
 
 describe('taxEstimateQuarterly — entity-type gate is the safety-critical path', () => {
-  it('NEVER computes a number for an unsupported entity type — returns an explicit gap message instead', async () => {
-    const { env, execs } = fakeEnv({ business: { ...soleProp, entity_type: 's_corp' } });
+  it('NEVER computes a number for C-corp — returns an explicit gap message instead', async () => {
+    const { env, execs } = fakeEnv({ business: { ...soleProp, entity_type: 'c_corp' } });
     const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
     expect(out).toMatch(/not yet supported/);
     expect(out).toMatch(/not a \$0 result/);
     expect(execs.find((e) => /INSERT INTO tax_estimates/.test(e.sql))).toBeUndefined();
+  });
+
+  it('NEVER guesses an S-corp salary/distribution split — refuses until real payroll data is synced', async () => {
+    const { env, execs } = fakeEnv({ business: { ...soleProp, entity_type: 's_corp' }, payrollConnections: [] });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(out).toMatch(/requires a real reasonable-salary figure/);
+    expect(execs.find((e) => /INSERT INTO tax_estimates/.test(e.sql))).toBeUndefined();
+  });
+
+  it('computes a real S-corp estimate once payroll wages are synced: FICA on salary, no SE tax, QBI on distributions only', async () => {
+    const { env, execs } = fakeEnv({
+      business: { ...soleProp, entity_type: 's_corp' }, facts: null,
+      txRows: [{ direction: 'income', category: 'income_gross_receipts', amount_cents: 10_000_000 }], // $100,000 net profit
+      payrollConnections: [{ id: 'conn_1', business_id: 'biz_1', provider: 'gusto', status: 'connected', last_synced_at: Date.now() }],
+      payrollRuns: [{ total_wages_cents: 6_000_000 }], // $60,000 salary
+    });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(out).toMatch(/FICA on \$60000\.00 salary/);
+    expect(out).toMatch(/distributions \(\$40000\.00\) owe NO payroll or SE tax/);
+    expect(out).toMatch(/QBI deduction \(on distributions only\)/);
+    expect(out).not.toContain('SE tax:');
+    const federalInsert = execs.find((e) => /INSERT INTO tax_estimates/.test(e.sql) && e.binds[4] === 'federal');
+    // se_tax_cents column (index 6) actually holds the FICA total for an S-corp — real (60,000 salary), not zero.
+    expect(federalInsert!.binds[6]).toBeGreaterThan(0);
+  });
+
+  it('never leaves an S-corp\'s local (KC/STL) tax silently unhandled — flags it as not-modeled rather than applying sole-prop mechanics', async () => {
+    const { env } = fakeEnv({
+      business: { ...soleProp, entity_type: 's_corp', locality: 'KC' }, facts: null, txRows: [],
+      payrollConnections: [{ id: 'conn_1', business_id: 'biz_1', provider: 'gusto', status: 'connected', last_synced_at: Date.now() }],
+      payrollRuns: [{ total_wages_cents: 1_000_000 }],
+    });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(out).toMatch(/KC local earnings tax NOT included for an S-corp/);
   });
 
   it('computes federal + supported state + supported local legs for a pass-through business, with the disclaimer attached', async () => {
@@ -170,6 +204,26 @@ describe('taxEstimateQuarterly — entity-type gate is the safety-critical path'
     const jurisdictionInsert = execs.find((e) => /INSERT INTO tax_estimates/.test(e.sql) && e.binds[4] === 'STL');
     // total_estimated_tax_cents (index 7) includes the payroll tax on top of the earnings tax; income_tax_cents (index 6) does not.
     expect(jurisdictionInsert!.binds[7]).toBeGreaterThan(jurisdictionInsert!.binds[6] as number);
+  });
+
+  it('adds Illinois\'s entity-level Personal Property Replacement Tax for a multi-member LLC, never for a sole prop', async () => {
+    const { env: envMMLLC } = fakeEnv({ business: { ...soleProp, entity_type: 'multi_member_llc', state: 'IL', locality: null }, facts: null, txRows: [{ direction: 'income', category: 'income_gross_receipts', amount_cents: 10_000_000 }] });
+    const outMMLLC = await taxEstimateQuarterly(envMMLLC, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(outMMLLC).toMatch(/entity-level tax/);
+
+    const { env: envSoleProp } = fakeEnv({ business: { ...soleProp, state: 'IL', locality: null }, facts: null, txRows: [{ direction: 'income', category: 'income_gross_receipts', amount_cents: 10_000_000 }] });
+    const outSoleProp = await taxEstimateQuarterly(envSoleProp, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(outSoleProp).not.toMatch(/entity-level tax/);
+  });
+
+  it('adds Indiana county tax when the business has a rate on file, and flags its absence otherwise', async () => {
+    const { env: withCounty } = fakeEnv({ business: { ...soleProp, state: 'IN', locality: null, county: 'Marion', county_tax_rate: 0.0202 }, facts: null, txRows: [] });
+    const out1 = await taxEstimateQuarterly(withCounty, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(out1).toMatch(/Marion local income tax \(Indiana\)/);
+
+    const { env: withoutCounty } = fakeEnv({ business: { ...soleProp, state: 'IN', locality: null, county: null, county_tax_rate: null }, facts: null, txRows: [] });
+    const out2 = await taxEstimateQuarterly(withoutCounty, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(out2).toMatch(/Indiana county income tax NOT included/);
   });
 });
 
