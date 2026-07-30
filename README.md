@@ -775,8 +775,9 @@ to Elle by construction. `main` auto-deploys via
 | `law.ts` | law bench (duel/tutor/doctrine/cohort/replays) |
 | `war-room.ts` | the War Room: SPAR (doctrine Duelist + Autopsy + ladder) · DRILLS · CHAMBERS · X-RAY |
 | `falcon.ts` | the Millennium Falcon: 16-axis, 3-tier product intelligence engine — Material Ground + Observer Reading fire in parallel, Validation + the Rupture (axis 16) fire last, sequentially |
-| `flock.ts` | Flock — social-media intelligence: brand kits, on-brand ideate/caption, the Brand Guardian (continuity scoring), image generate/edit, video stub, multi-channel post fan-out |
-| `flock-providers.ts` | Flock's swappable model seam: image (Workers AI / sovereign self-hosted, with fallback), video, and posting adapters — where the sovereign-model transfer lives |
+| `flock.ts` | Flock — social-media intelligence: brand kits, on-brand ideate/caption, the Brand Guardian (continuity scoring), image generate/edit, video stub, multi-channel post fan-out (Bluesky publishes for real; other platforms dry-run until wired) |
+| `flock-providers.ts` | Flock's swappable model seam: image (Workers AI / sovereign self-hosted, with fallback), video, and posting adapters — where the sovereign-model transfer lives. `publishToChannelLive` dispatches to a real adapter when one exists for the platform (see `flock-bluesky.ts`), else the honest dry-run/not-implemented path |
+| `flock-bluesky.ts` | the first real live-publishing adapter: app-password auth (createSession → uploadBlob ≤4 images → createRecord), UTF-8-byte-offset rich-text facets for hashtags/links, 300-grapheme cap. Free, no OAuth server round-trip — the "this actually posts" proof for the flock fan-out |
 | `madmind.ts` / `diagnose.ts` / `research.ts` / `widget.ts` | submissions, diagnostics, research cron, embeddable widget |
 | `security-network.ts` | dynamic-adaptive security network: 48L/AOW attacker-tactic taxonomy, decaying per-actor posture, malware/polyglot scan + runtime hash blocklist |
 | `helix.ts` | COROS signal crypto tunnel: AES-256-GCM + φ-corkscrew covertness (length-hiding, whitening) + forward ratchet + constant-rate framing |

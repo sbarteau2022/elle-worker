@@ -22,6 +22,8 @@
 // here silently pretends to have posted or rendered something it did not.
 // ============================================================
 
+import { resolveBlueskyCreds, publishToBluesky, type BlueskyMedia } from './flock-bluesky';
+
 // ── Environment surface these adapters read ─────────────────────────────────
 export interface FlockProviderEnv {
   // Same structural shape as LLMEnv.AI (llm.ts) so FlockEnv can extend both.
@@ -259,12 +261,17 @@ export interface PublishResult {
   detail: string;
 }
 
+// Platforms with a REAL live adapter wired below. Everything else runs the
+// honest not-implemented / dry-run path in publishToChannel.
+export const LIVE_ADAPTERS: ReadonlySet<string> = new Set(['bluesky']);
+export function hasLiveAdapter(platform: string): boolean { return LIVE_ADAPTERS.has(platform); }
+
 export function publishToChannel(req: PublishRequest): PublishResult {
   const hasCreds = !!(req.credentials && Object.keys(req.credentials).length);
   const caption = `${req.caption}${req.hashtags.length ? '\n\n' + req.hashtags.map(h => (h.startsWith('#') ? h : `#${h}`)).join(' ') : ''}`;
   if (hasCreds) {
-    // A real adapter would run here. None implemented yet ⇒ be honest rather
-    // than claim a publish. Still not a dry run: the operator asked for live.
+    // A real adapter would run here. None implemented for THIS platform ⇒ be
+    // honest rather than claim a publish. Still not a dry run: caller asked live.
     return {
       platform: req.platform, ok: false, dryRun: false,
       detail: `Credentials present for ${req.platform}, but no live adapter is implemented yet. Payload validated (${caption.length} chars, ${req.assetKeys.length} asset(s)). Implement the ${req.platform} adapter to publish for real.`,
@@ -275,4 +282,31 @@ export function publishToChannel(req: PublishRequest): PublishResult {
     externalId: `dryrun-${crypto.randomUUID().slice(0, 8)}`,
     detail: `DRY RUN — would publish to ${req.platform}${req.handle ? ` (@${req.handle})` : ''}: ${caption.length} char caption, ${req.assetKeys.length} asset(s). Connect ${req.platform} to publish for real.`,
   };
+}
+
+// The live path: if the platform has a real adapter AND credentials are present,
+// actually publish; otherwise fall through to the sync validation/dry-run above.
+// Additive — nothing that worked before changes, and a platform without an
+// adapter behaves exactly as it did.
+export async function publishToChannelLive(
+  req: PublishRequest,
+  opts?: { media?: BlueskyMedia[] },
+): Promise<PublishResult> {
+  const hasCreds = !!(req.credentials && Object.keys(req.credentials).length);
+  if (hasCreds && req.platform === 'bluesky') {
+    const creds = resolveBlueskyCreds(req.credentials as Record<string, unknown>);
+    if (!creds) {
+      return {
+        platform: req.platform, ok: false, dryRun: false,
+        detail: 'Bluesky channel is missing credentials — config needs { identifier, app_password } (an App Password from Settings → App Passwords, plus an optional { service } PDS host).',
+      };
+    }
+    const r = await publishToBluesky(creds, { caption: req.caption, hashtags: req.hashtags, media: opts?.media });
+    return {
+      platform: req.platform, ok: r.ok, dryRun: false,
+      externalId: r.externalId,
+      detail: r.url ? `${r.detail} ${r.url}` : r.detail,
+    };
+  }
+  return publishToChannel(req);
 }
