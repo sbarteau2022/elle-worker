@@ -595,6 +595,33 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     methodology TEXT, sample_size INTEGER, date_range TEXT,
     data_completeness_pct REAL, updated_at TEXT DEFAULT (datetime('now'))
   )`,
+    // flock.ts — social-media intelligence subsystem. Brand kits are the
+    // continuity source; assets/posts/channels condition on them.
+    `CREATE TABLE IF NOT EXISTS flock_brands (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
+    mission TEXT, voice TEXT, palette TEXT, fonts TEXT, taboos TEXT,
+    audience TEXT, keywords TEXT, visual_style TEXT,
+    created_at INTEGER, updated_at INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS flock_channels (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+    platform TEXT NOT NULL, handle TEXT, status TEXT DEFAULT 'stub',
+    config TEXT, created_at INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS flock_assets (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, brand_id TEXT,
+    kind TEXT NOT NULL, prompt TEXT, resolved_prompt TEXT,
+    provider TEXT, model TEXT, r2_key TEXT, mime TEXT,
+    width INTEGER, height INTEGER, parent_id TEXT,
+    status TEXT DEFAULT 'ready', created_at INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS flock_posts (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL, brand_id TEXT NOT NULL,
+    title TEXT, caption TEXT, hashtags TEXT, asset_ids TEXT, channel_ids TEXT,
+    status TEXT DEFAULT 'draft', scheduled_at INTEGER,
+    continuity_score REAL, continuity_report TEXT,
+    created_at INTEGER, updated_at INTEGER)`,
+    `CREATE TABLE IF NOT EXISTS flock_reasoning_log (
+    id TEXT PRIMARY KEY, user_id TEXT, brand_id TEXT, post_id TEXT,
+    kind TEXT, premises TEXT, framework TEXT, alternatives TEXT,
+    would_change TEXT, created_at INTEGER)`,
   ];
   await db.batch(creates.map((s) => db.prepare(s)));
 
@@ -612,6 +639,11 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // events.ts
     `CREATE INDEX IF NOT EXISTS idx_events_run ON elle_events(run_id, step_index)`,
     `CREATE INDEX IF NOT EXISTS idx_events_time ON elle_events(created_at DESC)`,
+    // flock.ts — user-scoped listing + brand fan-out
+    `CREATE INDEX IF NOT EXISTS idx_flock_brands_user ON flock_brands(user_id, updated_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_flock_channels_brand ON flock_channels(user_id, brand_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_flock_assets_user ON flock_assets(user_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_flock_posts_user ON flock_posts(user_id, created_at DESC)`,
     // falcon.ts / observer.ts — drain picks the oldest queued row for a user
     `CREATE INDEX IF NOT EXISTS idx_falcon_queue ON falcon_queue(user_id, status, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_observer_queue ON observer_queue(user_id, status, created_at)`,

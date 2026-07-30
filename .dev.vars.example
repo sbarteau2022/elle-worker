@@ -37,3 +37,22 @@ CLOUDFLARE_ACCOUNT_ID=f60c2e6068e002f5dbad7cd562a5c165
 # Or bind both sides in one shot:  ./scripts/set-sandbox-key.sh
 # SANDBOX_AGENT_KEY=change-me-to-a-long-random-string
 
+
+# ── Flock — social-media intelligence (src/flock.ts) ─────────────────────────
+# Image generation runs on Cloudflare Workers AI (env.AI) by default — free,
+# always-on, NO config needed. To transition to a SOVEREIGN / self-hosted image
+# model, flip the provider and point it at your endpoint; the whole app then
+# draws on your own model with zero code change:
+#   FLOCK_IMAGE_PROVIDER=sovereign      # 'workers-ai' (default) | 'sovereign' | 'auto'
+#   FLOCK_IMAGE_URL=https://<your-image-endpoint>
+#   FLOCK_IMAGE_KEY=<bearer, optional>
+#   FLOCK_IMAGE_MODEL=<txt2img model id on your endpoint>
+#   FLOCK_IMAGE_MODEL_EDIT=<img2img model id on your endpoint>
+# Endpoint contract: POST {prompt, negative_prompt?, width?, height?, model?,
+#   image?(base64), strength?} -> JSON {image:"<base64>"} | {images:[...]} OR raw bytes.
+#
+# Video is a stub until a provider is wired (same call path activates for real):
+#   FLOCK_VIDEO_PROVIDER=sovereign
+#   FLOCK_VIDEO_URL=https://<your-text-to-video-endpoint>
+#   FLOCK_VIDEO_KEY=<bearer, optional>
+#   FLOCK_VIDEO_MODEL=<model id>

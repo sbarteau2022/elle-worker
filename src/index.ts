@@ -23,6 +23,7 @@ import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema, r
 import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
 import { handleGrantIntelligence, type GrantEnv } from './grant-intelligence';
+import { handleFlock, type FlockEnv } from './flock';
 import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
 import { runResearchCycle } from './research';
@@ -187,6 +188,21 @@ export interface Env extends LLMEnv {
   ELLE_MAX_SYMBOL_FRAC?: string;
   // GitHub — corpus ops
   GITHUB_TOKEN?: string;
+  // Flock — social-media intelligence (src/flock.ts + flock-providers.ts).
+  // Image gen runs on Workers AI (env.AI) by default and needs no config. To
+  // transition to a sovereign / self-hosted image model, set the provider to
+  // 'sovereign' (or 'auto') and point FLOCK_IMAGE_URL at your endpoint — the
+  // whole app then draws on your own model with no code change. Video + live
+  // posting stay stubbed until FLOCK_VIDEO_* / per-platform OAuth are wired.
+  FLOCK_IMAGE_PROVIDER?: string;   // 'workers-ai' (default) | 'sovereign' | 'auto'
+  FLOCK_IMAGE_URL?: string;
+  FLOCK_IMAGE_KEY?: string;
+  FLOCK_IMAGE_MODEL?: string;
+  FLOCK_IMAGE_MODEL_EDIT?: string;
+  FLOCK_VIDEO_PROVIDER?: string;
+  FLOCK_VIDEO_URL?: string;
+  FLOCK_VIDEO_KEY?: string;
+  FLOCK_VIDEO_MODEL?: string;
   // Optimus journal — A/B flag for the generation conditioning path. When set
   // truthy the daily canvas includes the single most-recent entry's prose for
   // voice continuity; when falsy it conditions on extracted threads ALONE and
@@ -1454,6 +1470,21 @@ export default {
       });
     }
 
+    // Flock media — brand imagery/video the subsystem generated, straight from
+    // R2. Public by unguessable UUID, same posture as /vfar above.
+    if (path.startsWith('/flock/asset/') && request.method === 'GET') {
+      if (!/^\/flock\/asset\/[0-9a-f]{32}\.(png|jpg|jpeg|mp4)$/.test(path)) return err('Not found', 404);
+      const obj = await env.DOCUMENTS.get(`flock/assets/${path.slice('/flock/asset/'.length)}`);
+      if (!obj) return err('Not found', 404);
+      return new Response(obj.body, {
+        headers: {
+          'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          ...corsHeaders(),
+        },
+      });
+    }
+
     // The door's privacy policy — public, served from the mind itself so the
     // app stores can link it and it can never drift from what the code does.
     // Every claim below corresponds to a real control in the app (You surface)
@@ -2636,6 +2667,11 @@ export default {
     // sub-engine, both tracks (nonprofit + small-business — see
     // docs/GRANT_INTELLIGENCE_SUITE_MAP.md). Member-gated like its siblings.
     if (path === '/api/elle-grants')             return handleGrantIntelligence(body, env as unknown as GrantEnv, user.id);
+    // FLOCK — the social-media intelligence subsystem (src/flock.ts). Brand
+    // kits + on-brand content + brand-conditioned image gen + multi-channel
+    // "flock" fan-out, all member-gated. Generated media is served publicly by
+    // unguessable id below (/flock/asset/…), same posture as /vfar.
+    if (path === '/api/flock')                   return handleFlock(body, env as unknown as FlockEnv, user.id);
     // THE SPINE — unified Falcon: three tier-collapses in order, dissent holds
     // (does not collapse), Axis 17 predicts. SHADOW — gates no real decision;
     // κ accrues across runs, the same regulator that sizes a position.
