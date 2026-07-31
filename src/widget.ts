@@ -6,7 +6,7 @@
 //   <script src="https://elle-worker.sbarteau2022.workers.dev/widget.js" defer></script>
 //
 // Optional attributes:
-//   data-accent="#C9A84C"   accent color override
+//   data-accent="#5980a6"   accent color override (Industry design system steel-blue)
 //   data-title="Elle"        header title
 //   data-greeting="..."      first message
 //
@@ -20,46 +20,54 @@ if (window.__elleWidget) return; window.__elleWidget = true;
 
 var script = document.currentScript || (function(){var s=document.getElementsByTagName('script');return s[s.length-1];})();
 var WORKER = (script && script.src) ? script.src.replace(/\\/widget\\.js.*$/,'') : 'https://elle-worker.sbarteau2022.workers.dev';
-var ACCENT = (script && script.getAttribute('data-accent')) || '#C9A84C';
+var ACCENT = (script && script.getAttribute('data-accent')) || '#5980a6';
 var TITLE  = (script && script.getAttribute('data-title')) || 'Elle';
 var GREET  = (script && script.getAttribute('data-greeting')) || "I'm Elle \\u2014 the intelligence behind The Ethical Intelligence Project. Say what you're actually here to think about; we'll start there.";
 
 var css = document.createElement('style');
 css.textContent = '\\
-@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400&display=swap");\\
-.elw-btn{position:fixed;bottom:22px;right:22px;width:54px;height:54px;border-radius:14px;background:#0f0f1a;border:1px solid '+ACCENT+'55;box-shadow:0 8px 30px rgba(0,0,0,.45);cursor:pointer;z-index:999998;display:flex;align-items:center;justify-content:center;transition:transform .15s,box-shadow .15s;padding:0}\\
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;700&family=Barlow+Condensed:wght@600&family=JetBrains+Mono:wght@400&display=swap");\\
+.elw-btn{position:fixed;bottom:22px;right:22px;width:54px;height:54px;border-radius:0;background:#2b2b2d;border:1px solid '+ACCENT+'55;box-shadow:0 8px 30px rgba(0,0,0,.45);cursor:pointer;z-index:999998;display:flex;align-items:center;justify-content:center;transition:transform .15s,box-shadow .15s;padding:0}\\
 .elw-btn:hover{transform:translateY(-2px);box-shadow:0 12px 36px rgba(0,0,0,.55)}\\
-.elw-panel{position:fixed;bottom:88px;right:22px;width:390px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 120px);background:#0f0f1a;border:1px solid '+ACCENT+'40;border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6);z-index:999999;display:none;flex-direction:column;overflow:hidden;font-family:Inter,system-ui,sans-serif}\\
+.elw-panel{position:fixed;bottom:88px;right:22px;width:390px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 120px);background:#2b2b2d;border:1px solid '+ACCENT+'40;border-radius:0;box-shadow:0 30px 80px rgba(0,0,0,.6);z-index:999999;display:none;flex-direction:column;overflow:hidden;font-family:Barlow,system-ui,sans-serif}\\
 .elw-panel.open{display:flex;animation:elwUp .18s cubic-bezier(.16,1,.3,1) both}\\
 @keyframes elwUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}\\
-.elw-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid '+ACCENT+'26;background:rgba(201,168,76,.04)}\\
-.elw-head-t{font-family:"Playfair Display",serif;font-size:17px;color:#F5F0E8;letter-spacing:.01em}\\
+.elw-panel>.elw-corner{position:absolute;width:9px;height:9px;color:'+ACCENT+'80;pointer-events:none;z-index:2}\\
+.elw-panel>.elw-corner::before,.elw-panel>.elw-corner::after{content:"";position:absolute;background:currentColor}\\
+.elw-panel>.elw-corner::before{left:4px;top:0;width:1px;height:100%}\\
+.elw-panel>.elw-corner::after{top:4px;left:0;width:100%;height:1px}\\
+.elw-panel>.elw-corner.tl{top:5px;left:5px}\\
+.elw-panel>.elw-corner.tr{top:5px;right:5px}\\
+.elw-panel>.elw-corner.bl{bottom:5px;left:5px}\\
+.elw-panel>.elw-corner.br{bottom:5px;right:5px}\\
+.elw-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid '+ACCENT+'26;background:rgba(89,128,166,.04)}\\
+.elw-head-t{font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:19px;color:#f5f5f8;letter-spacing:.01em}\\
 .elw-head-s{font-size:10px;color:'+ACCENT+'AA;font-family:"JetBrains Mono",monospace;margin-top:1px}\\
-.elw-x{margin-left:auto;background:none;border:none;color:#F5F0E866;font-size:18px;cursor:pointer;padding:4px 8px;line-height:1}\\
-.elw-x:hover{color:#F5F0E8}\\
+.elw-x{margin-left:auto;background:none;border:none;color:#f5f5f866;font-size:18px;cursor:pointer;padding:4px 8px;line-height:1}\\
+.elw-x:hover{color:#f5f5f8}\\
 .elw-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}\\
 .elw-msgs::-webkit-scrollbar{width:4px}.elw-msgs::-webkit-scrollbar-thumb{background:'+ACCENT+'33;border-radius:2px}\\
-.elw-m{max-width:86%;padding:10px 13px;border-radius:12px;font-size:13.5px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word}\\
-.elw-m.elle{align-self:flex-start;background:rgba(245,240,232,.05);border:1px solid '+ACCENT+'22;color:#F5F0E8;border-bottom-left-radius:4px}\\
-.elw-m.user{align-self:flex-end;background:'+ACCENT+'1f;border:1px solid '+ACCENT+'38;color:#F5F0E8;border-bottom-right-radius:4px}\\
+.elw-m{max-width:86%;padding:10px 13px;border-radius:0;font-size:13.5px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word}\\
+.elw-m.elle{align-self:flex-start;background:rgba(245,245,248,.05);border:1px solid '+ACCENT+'22;color:#f5f5f8}\\
+.elw-m.user{align-self:flex-end;background:'+ACCENT+'1f;border:1px solid '+ACCENT+'38;color:#f5f5f8}\\
 .elw-m.err{color:#e08585}\\
-.elw-think-btn{align-self:flex-start;background:none;border:1px solid '+ACCENT+'30;border-radius:6px;color:'+ACCENT+';font-size:10px;font-family:"JetBrains Mono",monospace;padding:2px 8px;cursor:pointer;margin:-4px 0 0 2px}\\
-.elw-think{align-self:flex-start;max-width:86%;font-size:11px;font-family:"JetBrains Mono",monospace;color:#F5F0E877;background:rgba(245,240,232,.03);border:1px solid '+ACCENT+'1a;border-radius:8px;padding:8px 11px;line-height:1.6;white-space:pre-wrap;max-height:180px;overflow-y:auto}\
+.elw-think-btn{align-self:flex-start;background:none;border:1px solid '+ACCENT+'30;border-radius:0;color:'+ACCENT+';font-size:10px;font-family:"JetBrains Mono",monospace;padding:2px 8px;cursor:pointer;margin:-4px 0 0 2px}\\
+.elw-think{align-self:flex-start;max-width:86%;font-size:11px;font-family:"JetBrains Mono",monospace;color:#f5f5f877;background:rgba(245,245,248,.03);border:1px solid '+ACCENT+'1a;border-radius:0;padding:8px 11px;line-height:1.6;white-space:pre-wrap;max-height:180px;overflow-y:auto}\
 .elw-acts{align-self:flex-start;display:flex;gap:6px;flex-wrap:wrap;margin:-3px 0 2px 2px}\
-.elw-act{background:none;border:1px solid '+ACCENT+'30;border-radius:6px;color:'+ACCENT+';font-size:10px;font-family:"JetBrains Mono",monospace;padding:3px 9px;cursor:pointer;transition:background .12s}\
+.elw-act{background:none;border:1px solid '+ACCENT+'30;border-radius:0;color:'+ACCENT+';font-size:10px;font-family:"JetBrains Mono",monospace;padding:3px 9px;cursor:pointer;transition:background .12s}\
 .elw-act:hover{background:'+ACCENT+'1f}\\
 .elw-typing{align-self:flex-start;display:flex;gap:4px;padding:12px 14px}\\
 .elw-typing i{width:5px;height:5px;border-radius:50%;background:'+ACCENT+';animation:elwB 1.2s infinite}\\
 .elw-typing i:nth-child(2){animation-delay:.15s}.elw-typing i:nth-child(3){animation-delay:.3s}\\
 @keyframes elwB{0%,60%,100%{opacity:.25}30%{opacity:1}}\\
-.elw-in{display:flex;gap:8px;padding:12px;border-top:1px solid '+ACCENT+'26;background:rgba(245,240,232,.02)}\\
-.elw-ta{flex:1;background:rgba(245,240,232,.05);border:1px solid '+ACCENT+'2a;border-radius:10px;color:#F5F0E8;font-size:13px;font-family:Inter,sans-serif;padding:10px 12px;resize:none;outline:none;line-height:1.5;max-height:90px}\\
+.elw-in{display:flex;gap:8px;padding:12px;border-top:1px solid '+ACCENT+'26;background:rgba(245,245,248,.02)}\\
+.elw-ta{flex:1;background:rgba(245,245,248,.05);border:1px solid '+ACCENT+'2a;border-radius:0;color:#f5f5f8;font-size:13px;font-family:Barlow,sans-serif;padding:10px 12px;resize:none;outline:none;line-height:1.5;max-height:90px}\\
 .elw-ta:focus{border-color:'+ACCENT+'66}\\
-.elw-ta::placeholder{color:#F5F0E833}\\
-.elw-send{width:38px;height:38px;align-self:flex-end;border-radius:10px;border:1px solid '+ACCENT+'44;background:'+ACCENT+'22;color:'+ACCENT+';font-size:15px;cursor:pointer;transition:all .12s}\\
+.elw-ta::placeholder{color:#f5f5f833}\\
+.elw-send{width:38px;height:38px;align-self:flex-end;border-radius:0;border:1px solid '+ACCENT+'44;background:'+ACCENT+'22;color:'+ACCENT+';font-size:15px;cursor:pointer;transition:all .12s}\\
 .elw-send:hover:not(:disabled){background:'+ACCENT+'38}\\
 .elw-send:disabled{opacity:.35;cursor:default}\\
-.elw-foot{text-align:center;font-size:9px;color:#F5F0E833;font-family:"JetBrains Mono",monospace;padding:0 0 8px}\\
+.elw-foot{text-align:center;font-size:9px;color:#f5f5f833;font-family:"JetBrains Mono",monospace;padding:0 0 8px}\\
 @media(max-width:480px){.elw-panel{right:8px;bottom:80px;width:calc(100vw - 16px);height:calc(100vh - 100px)}}';
 document.head.appendChild(css);
 
@@ -71,7 +79,7 @@ document.body.appendChild(btn);
 
 var panel = document.createElement('div');
 panel.className = 'elw-panel';
-panel.innerHTML = '<div class="elw-head"><div>'+MARK+'</div><div><div class="elw-head-t">'+TITLE+'</div><div class="elw-head-s">ethical intelligence \\u00b7 live</div></div><button class="elw-x" aria-label="Close">\\u00d7</button></div><div class="elw-msgs"></div><div class="elw-in"><textarea class="elw-ta" rows="1" placeholder="Ask Elle\\u2026"></textarea><button class="elw-send">\\u2191</button></div><div class="elw-foot">powered by elle \\u00b7 the ethical intelligence project</div>';
+panel.innerHTML = '<i class="elw-corner tl"></i><i class="elw-corner tr"></i><i class="elw-corner bl"></i><i class="elw-corner br"></i><div class="elw-head"><div>'+MARK+'</div><div><div class="elw-head-t">'+TITLE+'</div><div class="elw-head-s">ethical intelligence \\u00b7 live</div></div><button class="elw-x" aria-label="Close">\\u00d7</button></div><div class="elw-msgs"></div><div class="elw-in"><textarea class="elw-ta" rows="1" placeholder="Ask Elle\\u2026"></textarea><button class="elw-send">\\u2191</button></div><div class="elw-foot">powered by elle \\u00b7 the ethical intelligence project</div>';
 document.body.appendChild(panel);
 
 var msgs = panel.querySelector('.elw-msgs');
@@ -122,7 +130,7 @@ function printArtifact(text){
   var w = window.open('', '_blank');
   if (!w){ return; }
   var esc = String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Elle</title><style>body{font:14px/1.7 Georgia,serif;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 24px;white-space:pre-wrap}h1{font:600 12px monospace;color:#888;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid #ddd;padding-bottom:8px}</style></head><body><h1>Elle \\u00b7 '+new Date().toLocaleString()+'</h1>'+esc+'</body></html>');
+  w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Elle</title><style>body{font:15px/1.7 Barlow,system-ui,sans-serif;color:#1d1f20;max-width:720px;margin:40px auto;padding:0 24px;white-space:pre-wrap}h1{font:600 12px "Barlow Condensed",monospace;color:#5980a6;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid #ddd;padding-bottom:8px}</style></head><body><h1>Elle \\u00b7 '+new Date().toLocaleString()+'</h1>'+esc+'</body></html>');
   w.document.close(); w.focus();
   setTimeout(function(){ try{ w.print(); }catch(e){} }, 250);
 }
