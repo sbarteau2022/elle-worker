@@ -9,9 +9,13 @@ import { sessionBrief } from './brief.ts';
 import aiEngineerStackJson from './courses/ai-engineer-stack.json';
 import aiEngineerCurriculumJson from './courses/ai-engineer-curriculum.json';
 
-// The vendored engine running against the REAL bundled course artifact —
-// the same object the worker serves. If the JSON drifts out of shape with
-// the engine (a bad re-sync), these fail before deploy does.
+// These two JSON files are pinned test fixtures, not runtime data — the
+// customcoursebuilder Worker is the ingester/maintainer of the live course
+// database and src/education/index.ts reads courses through the
+// CUSTOMCOURSEBUILDER service binding instead. This suite runs the vendored
+// engine against a real, current course shape (re-synced alongside the
+// engine by scripts/sync-education.sh) so a bad engine re-sync, or a
+// course shape drift, fails here before it fails in production.
 const course = aiEngineerStackJson as unknown as Course;
 
 const T0 = new Date('2026-08-01T09:00:00Z');
@@ -129,9 +133,9 @@ describe('scope', () => {
 describe('ai-engineer-curriculum — the first-party, ours-to-teach course', () => {
   const curriculumCourse = aiEngineerCurriculumJson as unknown as Course;
 
-  it('is real, generated content covering the foundation tier, with contracts everywhere', () => {
+  it('is real, generated content covering the foundation and core tiers, with contracts everywhere', () => {
     expect(curriculumCourse.id).toBe('ai-engineer-curriculum');
-    expect(curriculumCourse.units.length).toBe(39); // 6 foundation courses' worth of module packets
+    expect(curriculumCourse.units.length).toBe(68); // 10 landed courses' worth of module packets
     for (const u of curriculumCourse.units) {
       expect(u.adaptation.watchFor.length, u.id).toBeGreaterThan(0);
       expect(u.tiers.observerReading.length, u.id).toBeGreaterThan(40);

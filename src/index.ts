@@ -147,6 +147,11 @@ export interface Env extends LLMEnv {
   // router's own tool calls by the native RAPID_DB below; kept in case anything
   // else still wants it.
   RAPID_AI?:        Fetcher;
+  // Service binding to the customcoursebuilder Worker — the ingester and
+  // maintainer of the course database. src/education/index.ts reads course
+  // data live through this binding (fetchCourse) instead of vendoring a
+  // static JSON copy. See CustomCourseBuilder's README ("The Worker").
+  CUSTOMCOURSEBUILDER?: Fetcher;
   // Native D1 onto rapid2ai-db — the router's rapid_* tools query it directly
   // (src/rapid.ts) instead of proxying HTTP. Venue-scoped by VENUE_ID.
   RAPID_DB?:    D1Database;

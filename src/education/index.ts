@@ -6,10 +6,20 @@
 // CustomCourseBuilder repo (typed course data, tests, CLI); this
 // directory vendors the pure engine files verbatim (course-types /
 // state / signals / engine / seal / brief — provenance headers in
-// each) plus the built course JSON, and adds the two things only
-// the worker can provide: D1-backed learner state and the tool
-// surface. Update path: build in CustomCourseBuilder, re-copy —
+// each) and adds the two things only the worker can provide:
+// D1-backed learner state and the tool surface. Update path for the
+// engine files: build in CustomCourseBuilder, re-copy —
 // scripts/sync-education.sh does exactly that.
+//
+// Course DATA is no longer vendored here. The customcoursebuilder
+// Worker is the ingester and maintainer of the course database (its
+// own D1, populated from the same CustomCourseBuilder TS sources) and
+// serves it over HTTP; this module reads courses live via the
+// CUSTOMCOURSEBUILDER service binding (fetchCourse below) instead of
+// importing a static JSON snapshot that goes stale as new courses
+// land. ./courses/*.json still exists, but only as pinned test
+// fixtures for the engine tests in education.test.ts — it is not
+// imported by any runtime code path in this file.
 //
 // Division of labor (docs in FACILITATOR.md, bundled below): the
 // ENGINE decides — signals, moves, gates, sealing are computed
@@ -26,21 +36,41 @@ import { sealReading, verifyChain } from './seal.ts';
 import { availableUnits, completeUnit, phaseReview, recordSession, unitById } from './engine.ts';
 import { evidenceFraction } from './signals.ts';
 import { sessionBrief } from './brief.ts';
-import aiEngineerStackJson from './courses/ai-engineer-stack.json';
-import aiEngineerCurriculumJson from './courses/ai-engineer-curriculum.json';
 import facilitatorStance from './FACILITATOR.md';
 
-const COURSES: Record<string, Course> = {
-  'ai-engineer-stack': aiEngineerStackJson as unknown as Course,
-  // First-party, ours-to-teach curriculum — descend/build/re-ascend, generated
-  // from curriculum/ai-engineer/ (CustomCourseBuilder) as each tier's modules
-  // are authored and gated. Currently covers the foundation tier only; more
-  // units arrive as later tiers land and this JSON is regenerated + re-synced.
-  'ai-engineer-curriculum': aiEngineerCurriculumJson as unknown as Course,
-};
 const DEFAULT_COURSE = 'ai-engineer-stack';
 
-export interface EduEnv { DB: D1Database }
+export interface EduEnv { DB: D1Database; CUSTOMCOURSEBUILDER?: Fetcher }
+
+// ── course data, fetched live from the customcoursebuilder Worker ──
+// Service binding, not a public workers.dev fetch (same-account
+// worker→worker over the public URL is blocked — see src/skills.ts's
+// note on error 1042). The hostname in the URL is irrelevant; the
+// binding routes the request directly to the bound Worker. Cached
+// per-isolate for the isolate's lifetime — course content changes
+// only when a new course lands and is redeployed, so a cold-start-scale
+// cache is the right lifetime, not a per-request fetch.
+const courseCache = new Map<string, Course>();
+
+async function fetchCourse(env: EduEnv, courseId: string): Promise<Course | null> {
+  const cached = courseCache.get(courseId);
+  if (cached) return cached;
+  if (!env.CUSTOMCOURSEBUILDER) throw new Error('education: CUSTOMCOURSEBUILDER service binding not configured');
+  const res = await env.CUSTOMCOURSEBUILDER.fetch(`https://customcoursebuilder.internal/courses/${courseId}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`education: customcoursebuilder returned ${res.status} for course "${courseId}"`);
+  const course = await res.json() as Course;
+  courseCache.set(courseId, course);
+  return course;
+}
+
+async function fetchCourseIds(env: EduEnv): Promise<string[]> {
+  if (!env.CUSTOMCOURSEBUILDER) throw new Error('education: CUSTOMCOURSEBUILDER service binding not configured');
+  const res = await env.CUSTOMCOURSEBUILDER.fetch('https://customcoursebuilder.internal/courses');
+  if (!res.ok) throw new Error(`education: customcoursebuilder returned ${res.status} listing courses`);
+  const summaries = await res.json() as { id: string }[];
+  return summaries.map((s) => s.id);
+}
 
 // ── D1-backed learner state ─────────────────────────────────
 // One row per learner; the engine operates on the whole state, so the
@@ -73,8 +103,8 @@ async function saveEdu(env: EduEnv, state: LearnerState): Promise<void> {
   ).bind(state.learnerId, state.courseId, JSON.stringify(state), Date.now()).run();
 }
 
-function courseFor(state: LearnerState): Course {
-  const course = COURSES[state.courseId];
+async function courseFor(env: EduEnv, state: LearnerState): Promise<Course> {
+  const course = await fetchCourse(env, state.courseId);
   if (!course) throw new Error(`course not found: ${state.courseId}`);
   return course;
 }
@@ -87,8 +117,11 @@ function courseFor(state: LearnerState): Course {
 
 export async function eduEnroll(env: EduEnv, userId: string, args: Record<string, unknown>): Promise<string> {
   const courseId = String(args.course || DEFAULT_COURSE);
-  const course = COURSES[courseId];
-  if (!course) return `edu_enroll: unknown course "${courseId}" (available: ${Object.keys(COURSES).join(', ')})`;
+  const course = await fetchCourse(env, courseId);
+  if (!course) {
+    const available = await fetchCourseIds(env);
+    return `edu_enroll: unknown course "${courseId}" (available: ${available.join(', ')})`;
+  }
   const existing = await loadEdu(env, userId);
   if (existing) return `already enrolled in ${existing.courseId} — edu_status shows where things stand`;
   const state = newLearnerState(userId, course.id, course.version, new Date());
@@ -101,7 +134,7 @@ export async function eduEnroll(env: EduEnv, userId: string, args: Record<string
 export async function eduLog(env: EduEnv, userId: string, args: Record<string, unknown>): Promise<string> {
   const state = await loadEdu(env, userId);
   if (!state) return 'not enrolled — edu_enroll first';
-  const course = courseFor(state);
+  const course = await courseFor(env, state);
   const unitId = String(args.unit || '');
   const minutes = Number(args.minutes || 0);
   if (!unitId) return 'edu_log: unit required';
@@ -159,7 +192,7 @@ export async function eduSeal(env: EduEnv, userId: string, args: Record<string, 
 export async function eduBrief(env: EduEnv, userId: string): Promise<string> {
   const state = await loadEdu(env, userId);
   if (!state) return 'not enrolled — edu_enroll first';
-  const course = courseFor(state);
+  const course = await courseFor(env, state);
   const brief = sessionBrief(course, state, new Date());
   await saveEdu(env, state); // sessionBrief runs advise(); the witness log grew
   return `${brief.markdown}\n\n---\nFACILITATOR STANCE (binding for how you speak this):\n\n${facilitatorStance}`;
@@ -168,7 +201,7 @@ export async function eduBrief(env: EduEnv, userId: string): Promise<string> {
 export async function eduComplete(env: EduEnv, userId: string, args: Record<string, unknown>): Promise<string> {
   const state = await loadEdu(env, userId);
   if (!state) return 'not enrolled — edu_enroll first';
-  const course = courseFor(state);
+  const course = await courseFor(env, state);
   const unitId = String(args.unit || '');
   if (!unitId) return 'edu_complete: unit required';
   try {
@@ -184,7 +217,7 @@ export async function eduComplete(env: EduEnv, userId: string, args: Record<stri
 export async function eduStatus(env: EduEnv, userId: string, args: Record<string, unknown>): Promise<string> {
   const state = await loadEdu(env, userId);
   if (!state) return 'not enrolled — edu_enroll starts the AI Engineer Stack';
-  const course = courseFor(state);
+  const course = await courseFor(env, state);
   const now = new Date();
   const chain = verifyChain(state.sealedReadings);
   const lines: string[] = [];
