@@ -613,8 +613,32 @@ for it.
 
 ## 10. Open work — Gate 0 / 1 / 2, stated as buildable phases
 
-None of the following exists yet. Each is a genuinely separate piece of work
-with its own acceptance criteria; do not conflate them.
+The *gates* below remain open. What is **now built** (new) is the **runner that
+executes them**: `kappa-memory/validate.ts::runValidateKappa`, surfaced as the
+`validate_kappa` router tool (full scope) and the `/api/admin/validate-kappa`
+endpoint (admin-gated, driveable from GitHub Actions against the deployed worker
+the same way as prune-corpus). It reads `bending_trace`, computes the two
+kill-tests' ROC-AUC (Mann–Whitney, tie-aware) against the independent lexical
+label `settled_open`, and returns `KILL` / `BUILD` / `INSUFFICIENT` per test
+against the thresholds pre-registered in `validate.ts::GATE` (committed in code,
+before the data). Three properties are enforced, not promised:
+
+- **It never writes the seam.** `seam_written` is `false` by construction;
+  Invariant Q3 (§6.2) is preserved — a gate is flipped by a human committing the
+  one-line `seam.ts` edit after a BUILD, never by the runner. The runner prints
+  that exact edit and stops there.
+- **BUILD is necessary, not sufficient.** `settled_open` is an *internal* proxy
+  (a lexical readout of the response tail — a different channel from the
+  κ-series predictors, so the test isn't circular, but a lower bar than the
+  blind human-rater Gate 2 this section still requires). A BUILD clears the
+  proxy and *escalates* to Gate 2; a KILL is decisive.
+- **The master gate is reported un-validatable** until Gate 0 lands: the runner
+  says so plainly rather than scoring a κ definition that doesn't exist.
+
+So the gates are open exactly as written; the difference is that "a `validate_kappa`
+run" is now a real thing you can run, not a named placeholder. Each phase below
+is still a genuinely separate piece of work with its own acceptance criteria; do
+not conflate them.
 
 **Gate 0 — definition decision.** Pick exactly one candidate for `κ(T,t)`
 (Track B, §6.2). This is a decision, not a computation — it can be made

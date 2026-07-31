@@ -31,9 +31,10 @@ import { z } from 'zod';
 import { ensureAllSchemas } from './db/schema';
 import { jsonLLM, type LLMEnv } from './llm';
 import {
-  generateImage, generateVideo, videoConfigured, publishToChannel,
-  KNOWN_PLATFORMS, type FlockProviderEnv,
+  generateImage, generateVideo, videoConfigured, publishToChannelLive, hasLiveAdapter,
+  KNOWN_PLATFORMS, LIVE_ADAPTERS, type FlockProviderEnv,
 } from './flock-providers';
+import type { BlueskyMedia } from './flock-bluesky';
 
 export interface FlockEnv extends LLMEnv, FlockProviderEnv {
   DB: D1Database;
@@ -485,18 +486,49 @@ export async function handleFlock(body: unknown, env: FlockEnv, userId: string):
         }
         const channelIds = parseList(post.channel_ids);
         if (!channelIds.length) return err('post has no channels — set channel_ids and try again');
-        const assetKeys = parseList(post.asset_ids).map(a => `flock/assets/${a}`);
+        const assetIds = parseList(post.asset_ids);
+        const assetKeys = assetIds.map(a => `flock/assets/${a}`);
         const hashtags = parseList(post.hashtags);
+
+        // Media for a live adapter: resolve the post's image assets to their real
+        // R2 objects (bytes + mime), up to 4. Loaded once and shared across
+        // channels; only fetched when at least one channel has a live adapter, so
+        // dry-run-only fan-outs pay nothing. Best-effort — a missing/failed asset
+        // is skipped, never fatal.
+        let media: BlueskyMedia[] | undefined;
+        const loadMedia = async (): Promise<BlueskyMedia[]> => {
+          if (media) return media;
+          const out: BlueskyMedia[] = [];
+          if (assetIds.length) {
+            const ph = assetIds.map((_, i) => `?${i + 2}`).join(',');
+            const rows = await env.DB.prepare(
+              `SELECT id, r2_key, mime, kind FROM flock_assets WHERE user_id = ?1 AND id IN (${ph})`
+            ).bind(userId, ...assetIds).all().catch(() => ({ results: [] as unknown[] }));
+            for (const row of (rows.results as Array<{ r2_key: string; mime: string; kind: string }>)) {
+              if (out.length >= 4) break;
+              if (row.kind !== 'image') continue; // Bluesky embed lane is images
+              try {
+                const obj = await env.DOCUMENTS.get(row.r2_key);
+                if (!obj) continue;
+                out.push({ bytes: new Uint8Array(await obj.arrayBuffer()), mime: row.mime || 'image/png', alt: post.caption || '' });
+              } catch { /* skip */ }
+            }
+          }
+          media = out;
+          return out;
+        };
+
         const results = [];
         for (const cid of channelIds) {
           const ch = await env.DB.prepare('SELECT platform, handle, config FROM flock_channels WHERE id = ?1 AND user_id = ?2')
             .bind(cid, userId).first() as { platform: string; handle: string | null; config: string | null } | null;
           if (!ch) { results.push({ channel_id: cid, platform: '?', ok: false, dryRun: false, detail: 'channel not found' }); continue; }
-          const r = publishToChannel({
+          const creds = ch.config ? JSON.parse(ch.config) : null;
+          const live = hasLiveAdapter(ch.platform) && !!(creds && Object.keys(creds).length);
+          const r = await publishToChannelLive({
             platform: ch.platform, handle: ch.handle ?? undefined,
-            caption: post.caption || '', hashtags, assetKeys,
-            credentials: ch.config ? JSON.parse(ch.config) : null,
-          });
+            caption: post.caption || '', hashtags, assetKeys, credentials: creds,
+          }, live ? { media: await loadMedia() } : undefined);
           results.push({ channel_id: cid, ...r });
         }
         const allOk = results.every(r => r.ok);
@@ -516,6 +548,7 @@ export async function handleFlock(body: unknown, env: FlockEnv, userId: string):
           sovereign_image_configured: !!env.FLOCK_IMAGE_URL,
           video_configured: videoConfigured(env),
           platforms: KNOWN_PLATFORMS,
+          live_publish_platforms: [...LIVE_ADAPTERS], // platforms that publish for real when a channel has credentials
           actions: [
             'brand.create', 'brand.update', 'brand.list', 'brand.get',
             'channel.add', 'channel.list', 'channel.remove',

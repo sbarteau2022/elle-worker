@@ -34,6 +34,7 @@ import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState, KAPPA_DEF } from './journal';
 import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
 import { kappaMemoryState, recordTurnTrace } from './kappa-memory/integration';
+import { runValidateKappa, type TraceRow as KappaTraceRow } from './kappa-memory/validate';
 import { parseUpload } from './upload';
 import { analyzeCode } from './cyber';
 import {
@@ -2469,6 +2470,19 @@ export default {
     // Admin corpus prune — deletes a bounded batch per call (see
     // handlePruneCorpus above); caller loops on done:false until done:true.
     if (path === '/api/admin/prune-corpus') { if (!svc) return err('Unauthorized', 401); return handlePruneCorpus(body as { target?: string }, env); }
+    // The pre-registered κ validation run (docs/MEMORY_KERNEL_SPEC.md §10). Reads
+    // bending_trace over the deployed worker (GitHub Actions can reach D1 with real
+    // volume, unlike a sandboxed dev env) and returns the KILL/BUILD/INSUFFICIENT
+    // report. Read-only: it never writes SEAM.KAPPA_VALIDATED — the flip stays a
+    // manual commit (Invariant Q3). Admin-gated, same family as prune-corpus.
+    if (path === '/api/admin/validate-kappa') {
+      if (!svc) return err('Unauthorized', 401);
+      const limit = Math.max(1, Math.min(50000, Number((body as { limit?: number })?.limit) || 20000));
+      const r = await env.DB.prepare(
+        `SELECT settled_open, reserve, velocity_peak FROM bending_trace ORDER BY created_at DESC LIMIT ?`
+      ).bind(limit).all().catch(() => ({ results: [] as unknown[] }));
+      return json(runValidateKappa((r.results as unknown as KappaTraceRow[]) || []));
+    }
     // Multimodal corpus intake — the worker-side eye. Images/audio → Workers AI
     // (vision + whisper) → one assembled text → the SAME ingest pipeline above.
     // Video = caller-supplied keyframes (image parts) + audio track (audio part).
