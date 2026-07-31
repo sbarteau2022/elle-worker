@@ -102,14 +102,42 @@ import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from
 import { runJudgeBatch, kappaCorrelationReport } from './judge';
 
 // ── /privacy — the door's policy, in plain language ──────────────────────────
+// Styled with the Industry design system (tokens copied verbatim from
+// /home/user/.designref/industry-design-system/styles.css): light ground,
+// Barlow/Barlow Condensed, single steel-blue accent, square corners, and the
+// blueprint corner-mark frame around the page's one content card. Inlined
+// (no external stylesheet) since this worker has no static-asset pipeline —
+// same pattern the page already used for its dark theme.
 const PRIVACY_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Elle — Privacy</title>
 <style>
-  body{background:#0f0f1a;color:#F5F0E8;font:17px/1.6 Georgia,serif;max-width:640px;margin:0 auto;padding:48px 24px}
-  h1{color:#C9A84C;font-weight:600} h2{color:#C9A84C;font-size:1.05em;margin-top:2em}
-  a{color:#C9A84C} .mono{font-family:ui-monospace,monospace;font-size:.85em;color:#8a8a9a}
+  @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;700&family=Barlow+Condensed:wght@600&display=swap');
+  :root{
+    --color-bg:#f2f2f3;
+    --color-text:#1d1f20;
+    --color-accent:#5980a6;
+    --color-accent-700:#416180;
+    --color-divider:color-mix(in srgb, #1d1f20 16%, transparent);
+    --font-heading:"Barlow Condensed", system-ui, sans-serif;
+    --font-body:"Barlow", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--color-bg);color:var(--color-text);font:17px/1.6 var(--font-body);max-width:640px;margin:0 auto;padding:48px 24px}
+  h1{font-family:var(--font-heading);font-weight:600;color:var(--color-accent);font-size:34px;letter-spacing:-.015em;margin:0 0 6px}
+  h2{font-family:var(--font-heading);font-weight:600;color:var(--color-accent-700);font-size:1.15em;margin-top:2em}
+  a{color:var(--color-accent-700);text-underline-offset:3px}
+  .mono{font-family:ui-monospace,monospace;font-size:.85em;color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+  .blueprint{position:relative;border:1px solid var(--color-divider);border-radius:0;padding:40px 32px;margin-top:16px}
+  .blueprint>.corner{position:absolute;width:11px;height:11px;color:color-mix(in srgb, var(--color-text) 55%, transparent)}
+  .blueprint>.corner::before,.blueprint>.corner::after{content:"";position:absolute;background:currentColor}
+  .blueprint>.corner::before{left:5px;top:0;width:1px;height:100%}
+  .blueprint>.corner::after{top:5px;left:0;width:100%;height:1px}
+  .blueprint>.corner.tl{top:-6px;left:-6px} .blueprint>.corner.tr{top:-6px;right:-6px}
+  .blueprint>.corner.bl{bottom:-6px;left:-6px} .blueprint>.corner.br{bottom:-6px;right:-6px}
 </style></head><body>
+<div class="blueprint">
+<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
 <h1>Elle — Privacy</h1>
 <p class="mono">Effective July 2026 · applies to the Elle mobile app and its backend</p>
 <p>Elle is an AI with memory. Talking to her means she remembers you — that is the point of the app,
@@ -132,6 +160,7 @@ There is no marketing and no re-engagement machinery.</p>
 solely to produce her replies. Voice output uses your device's speech engine; audio is not uploaded.</p>
 <h2>Contact</h2>
 <p>sbarteau2022@gmail.com</p>
+</div>
 </body></html>`;
 
 export interface Env extends LLMEnv {
