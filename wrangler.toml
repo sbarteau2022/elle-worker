@@ -48,6 +48,13 @@ binding = "AI"
 binding = "RAPID_AI"
 service = "rapid2ai-ai-worker"
 
+# Service binding to the customcoursebuilder Worker — the ingester and
+# maintainer of the course database. src/education/index.ts reads course
+# data live through this instead of vendoring a static JSON copy.
+[[services]]
+binding = "CUSTOMCOURSEBUILDER"
+service = "customcoursebuilder"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "elle-corpus"

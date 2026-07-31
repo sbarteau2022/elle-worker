@@ -24,10 +24,14 @@ vendor src/runtime/signals.ts signals.ts
 vendor src/runtime/engine.ts  engine.ts
 vendor src/runtime/seal.ts    seal.ts
 vendor src/runtime/brief.ts   brief.ts
+# These two JSON files are NOT runtime data — the customcoursebuilder Worker
+# is the ingester/maintainer of the live course database, and
+# src/education/index.ts reads courses through the CUSTOMCOURSEBUILDER
+# service binding, not these files. They're kept only as pinned test
+# fixtures (src/education/education.test.ts runs the vendored engine above
+# against real course shape) and should still be re-synced whenever the
+# engine is, so the tests exercise current course data, not a stale snapshot.
 cp "$CCB/dist/courses/ai-engineer-stack.json" "$DEST/courses/ai-engineer-stack.json"
-# ai-engineer-curriculum is GENERATED in CCB (src/generate-course-from-curriculum.ts)
-# from curriculum/ai-engineer/ — `npm run build` there regenerates it from
-# whatever materials have landed before this script vendors the JSON.
 cp "$CCB/dist/courses/ai-engineer-curriculum.json" "$DEST/courses/ai-engineer-curriculum.json"
 cp "$CCB/docs/FACILITATOR.md" "$DEST/FACILITATOR.md"
 
