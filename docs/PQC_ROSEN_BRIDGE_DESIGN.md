@@ -243,11 +243,26 @@ whole bridge relies on identical outputs across runtimes.
 ### 4.5 Migration / rollout
 1. Ship the handshake **flag-gated** (`ELLE_LANE_PROTOCOL=v2`), default off.
    v1 pasted-root path stays the default and untouched.
-2. Land the **cross-runtime interop test** first (extend
-   `rosen-bridge.test.cjs` / the session-bus self-test): a v2 handshake on the
-   worker side must open on the laptop side and vice-versa, proving byte parity
-   of the noble outputs and the combiner before anything relies on it.
-3. Enable v2 on the operator's own device; run both in parallel; confirm.
+   **DONE (crypto core).** The hybrid lane-root agreement is built on both
+   runtimes — worker `src/lane-handshake.ts`, laptop
+   `Elle/electron/native/providers/lane-handshake.cjs` — reusing the vetted
+   pqc-hybrid legs. It's purely additive: the live bus still runs v1, so
+   nothing on the wire changed. `laneChannelV2(root_lane)` seeds `initHypChannel`
+   directly; everything downstream is unchanged.
+2. Land the **cross-runtime interop test** first. **DONE.** `deriveLaneRoot` is
+   deterministic over its byte inputs, so a shared **known-answer vector** pins
+   the combiner: `lane-handshake.test.ts` (worker) and `lane-handshake.test.cjs`
+   (laptop) assert the *identical* hex from the same inputs — byte parity of the
+   noble outputs + HKDF combiner across workerd and Node, proven before anything
+   relies on it. Both suites also run the full two-role handshake and a v2 lane
+   seal/open round-trip.
+3. **NEXT** — enable v2 on the operator's own device; run both in parallel.
+   This is the live-routing pass: an epoch + handshake row in
+   `elle_session_bus_state` (+ laptop `.bus-state/`), the
+   `/api/sandbox-bus/handshake` route (sealed under the pre-shared root during
+   migration), and version negotiation on the poll. The crypto it needs is now
+   done and proven; what remains is transport plumbing + state, deliberately
+   kept as its own reviewed pass.
 4. Phase 3: make v2 default, drop the pre-shared term from the combiner to a
    rotation-only enrollment secret, retire the "paste `SANDBOX_AGENT_KEY`" step.
 

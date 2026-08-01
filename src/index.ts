@@ -54,6 +54,7 @@ import { cognitiveObliquitySelfTest } from './cognitive-obliquity';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { pqcHybridSelfTest } from './pqc-hybrid';
+import { laneHandshakeSelfTest } from './lane-handshake';
 import { handleLattice, type LatticeEnv } from './lattice';
 import { handleMadmind } from './madmind';
 import { handleMindmapPost, handleMindmapGet } from './mindmap';
@@ -2488,6 +2489,16 @@ export default {
     if (path === '/api/elle-pqc-hybrid-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await pqcHybridSelfTest());
+    }
+    // PQC Phase-1 lane handshake self-test (src/lane-handshake.ts). Proves the
+    // hybrid (X25519 + ML-KEM-768) lane-root agreement: both roles derive one
+    // root_lane, it drives a working v2 lane channel, and it's bound to both the
+    // transcript and the pre-shared secret. The reviewed crypto core — proven
+    // byte-identical to the laptop port by a shared known-answer vector — but
+    // NOT yet wired into live session-bus routing (that cutover is its own pass).
+    if (path === '/api/elle-lane-handshake-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await laneHandshakeSelfTest());
     }
     // The Lattice — 32-axis, 3-layer security deduction engine (Seed of Life
     // 7 + Flower of Life 12 + Fruit of Life 11, then Validation + The

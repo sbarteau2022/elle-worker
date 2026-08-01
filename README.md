@@ -532,12 +532,20 @@ full self-test including all three `or_security_*` checks. It is now wired
 into **`signal-collapse.ts`'s rekey** — the post-compromise-recovery ratchet
 agrees its fresh secret with the hybrid KEM (X25519 + ML-KEM-768) instead of
 the bare P-256 ECDH it used to, retiring the repo's last Shor-vulnerable
-primitive and satisfying the design doc's §2.4 hard prerequisite. **It is
-still not wired into the live lane-key derivation** — `lane-envelope.ts` is
-unchanged, because that (Phase 1) needs the laptop side
-(`Elle/electron/native/providers/rosen-bridge.cjs`, a separate repo) to
-derive byte-identical output first, plus a cross-runtime interop test and
-version negotiation before any cutover.
+primitive and satisfying the design doc's §2.4 hard prerequisite.
+
+The **Phase-1 lane handshake** (`lane-handshake.ts`) is also built: the hybrid
+lane-root agreement that replaces "the lane root *is* the pasted secret" with
+"the lane root is *derived* from an X25519 + ML-KEM-768 key agreement, still
+bound to the pre-shared secret" — forward-secret and PQ-harvest-resistant
+(design §4.1). Its combiner (`deriveLaneRoot`) is proven **byte-identical to
+the laptop port** (`Elle/electron/native/providers/lane-handshake.cjs`) by a
+shared known-answer vector both test suites assert — the cross-runtime interop
+proof the doc requires. It is **additive and flag-gated in spirit**: the live
+`session-bus.ts` routing still runs v1, so nothing on the wire changed. The
+remaining cutover (epoch state + the `/handshake` route + version negotiation,
+then making v2 default) is its own reviewed pass — the crypto it needs is now
+done and proven.
 
 ## Security — recent hardening
 
@@ -853,8 +861,9 @@ with real internet access to the deployed worker.
 | `fixed-math.ts` | integer CORDIC core (sin/cos/tanh/atanh/sqrt via add-subtract-shift only) — bit-identical on any spec-compliant JS engine |
 | `hyperbolic-sync-fixed.ts` | the hyperbolic-geodesic sync rebuilt on fixed-math.ts — cross-platform-safe counterpart to hyperbolic-sync.ts |
 | `signal-collapse.ts` | burn-on-breach (observable evidence → immediate lockout, tied to the Witness) + hybrid PQC rekey (real post-compromise recovery) — the ratchet agrees its fresh secret with X25519 + ML-KEM-768 (`pqc-hybrid.ts`), retiring the repo's last Shor-vulnerable primitive |
-| `pqc-hybrid.ts` | the hybrid post-quantum KEM: ML-KEM-768 + X25519 (+ opt-in QC-MDPC) combined by HKDF, OR-security proven by self-test — deployed and callable, not yet wired into live lane-key derivation |
+| `pqc-hybrid.ts` | the hybrid post-quantum KEM: ML-KEM-768 + X25519 (+ opt-in QC-MDPC) combined by HKDF, OR-security proven by self-test — now the fresh-secret source for both the signal-collapse rekey and the Phase-1 lane handshake |
 | `pqc-qcmdpc.ts` | the hand-rolled, unreviewed QC-MDPC leg (syndrome decoding) — opt-in, additive-only under `pqc-hybrid.ts`'s profile rule |
+| `lane-handshake.ts` | PQC Phase-1: the hybrid (X25519 + ML-KEM-768) lane-root agreement (design §4.1) — `deriveLaneRoot` folds the KEM secret with the pre-shared root, `laneChannelV2` seeds the geodesic. Proven byte-identical to the laptop port (`Elle/.../lane-handshake.cjs`) by a shared known-answer vector. Additive — live routing still v1 |
 | `coherence-layer.ts` | depth/relational decoupling, measured: derivation edges = deep hierarchy, recognition edges = small-world coherence shortcut; quantifies the path-length gain on a real graph |
 | `harmonic-coherence.ts` | the grounding gate: harmonic (phase-tolerant) coherence + four verdicts that keep self-consistency and correspondence structurally distinct — `grounded` is unreachable without a world-coupled channel |
 | `scaffold.ts` | the structural substrate: 5 load-bearing pentagon pillars (equal load, C5-symmetric, no privileged pillar) + the bridge fabric where any node may reach any other with **no privileged node** — hubless and bottleneck-free (degree Gini, Brandes betweenness, articulation points), proven by measuring the egalitarian Watts–Strogatz build against a hub-forming preferential-attachment control |
