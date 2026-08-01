@@ -2471,8 +2471,9 @@ export default {
       return json(await hyperbolicSyncFixedSelfTest());
     }
     // Signal-collapse self-test — burn-on-breach lifecycle, burst detection,
-    // and the ECDH rekey's post-compromise-recovery proof (a leaked master
-    // key, alone, cannot reproduce the next epoch's key).
+    // and the hybrid PQC rekey's post-compromise-recovery proof (a leaked master
+    // key, alone, cannot reproduce the next epoch's key — and the ratchet round
+    // is X25519 + ML-KEM-768, not the bare P-256 it replaces).
     if (path === '/api/elle-signal-collapse-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await signalCollapseSelfTest());

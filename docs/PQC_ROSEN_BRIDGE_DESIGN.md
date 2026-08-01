@@ -32,10 +32,12 @@ we should not do it for PQC alone either.
 handshake behind a version flag, both runtimes → (2) optional ML-DSA origin
 signatures → (3) cutover + retire pasted `SANDBOX_AGENT_KEY`.
 
-**Hard prerequisite (see §2.4):** the same hybrid combiner MUST be dropped into
-`signal-collapse.ts`'s `rekey()` before that P-256 ECDH ratchet is ever wired to
-a live path — it is the repo's only Shor-vulnerable primitive, and shipping it
-bare would be the first genuine harvest-now-decrypt-later exposure.
+**Hard prerequisite (see §2.4): DONE.** `signal-collapse.ts`'s `rekey()` no
+longer uses bare P-256 ECDH — the ratchet now agrees its fresh secret with the
+hybrid KEM (`pqc-hybrid.ts`: X25519 + ML-KEM-768), so the repo's last
+Shor-vulnerable primitive is retired *before* the ratchet is ever wired to a
+live path. What remains for the bridge itself is Phase 1 (the lane handshake),
+which is still open below.
 
 ---
 
@@ -92,7 +94,18 @@ Cloudflare's edge, separately.) The moment Phase 1 introduces a lane handshake,
 we introduce a harvestable exchange — which is exactly why that handshake must
 be **hybrid PQC from day one**, not classical-then-upgrade.
 
-### 2.4 The latent handshake: `signal-collapse.ts` (correction)
+### 2.4 The latent handshake: `signal-collapse.ts` (RESOLVED)
+
+> **Update — the prerequisite in this section is now implemented.** `rekey()`
+> was restructured from a symmetric bare-P-256 ECDH step into a hybrid KEM
+> ratchet: the responder publishes a fresh `pqcHybridKeygen()` public key, the
+> initiator `pqcHybridEncaps()`-ulates to it, and both fold the agreed hybrid
+> secret (X25519 + ML-KEM-768) into the old master via HKDF (fresh secret as
+> salt → post-compromise recovery preserved, now quantum-safe). The self-test
+> gained a `rekey_is_post_quantum` check. The bare P-256 primitive is gone. The
+> narrative below is kept for the record of why it mattered.
+
+
 
 An audit of every `crypto.subtle` call site (Rosen-bridge structural pass) turned
 up the **one asymmetric primitive in the repo**, and it changes the "no key
