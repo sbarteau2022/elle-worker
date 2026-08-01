@@ -528,14 +528,16 @@ load-bearing.
 `POST /api/elle-pqc-hybrid-selftest` (service-key gated, same family as the
 worker's other crypto self-tests: `elle-signal-collapse-selftest`,
 `elle-hyperbolic-fixed-selftest`, `elle-session-bus-selftest`, …) runs the
-full self-test including all three `or_security_*` checks. **It is not yet
-wired into the live lane-key derivation** — `lane-envelope.ts` is unchanged,
-because the laptop side (`Elle/electron/native/providers/rosen-bridge.cjs`)
-is a separate repo that must derive byte-identical output first, plus a
-cross-runtime interop test and version negotiation before any cutover.
-`signal-collapse.ts`'s `rekey()` also still uses bare P-256 ECDH — the
-repo's one remaining Shor-vulnerable primitive, and the design doc's
-prerequisite for that path going live.
+full self-test including all three `or_security_*` checks. It is now wired
+into **`signal-collapse.ts`'s rekey** — the post-compromise-recovery ratchet
+agrees its fresh secret with the hybrid KEM (X25519 + ML-KEM-768) instead of
+the bare P-256 ECDH it used to, retiring the repo's last Shor-vulnerable
+primitive and satisfying the design doc's §2.4 hard prerequisite. **It is
+still not wired into the live lane-key derivation** — `lane-envelope.ts` is
+unchanged, because that (Phase 1) needs the laptop side
+(`Elle/electron/native/providers/rosen-bridge.cjs`, a separate repo) to
+derive byte-identical output first, plus a cross-runtime interop test and
+version negotiation before any cutover.
 
 ## Security — recent hardening
 
@@ -850,7 +852,7 @@ with real internet access to the deployed worker.
 | `hyperbolic-mixing.ts` | mixing diagnostics: measured Lyapunov exponent (hyperbolic vs. flat-torus control) + state-space coverage — numbers, not adjectives |
 | `fixed-math.ts` | integer CORDIC core (sin/cos/tanh/atanh/sqrt via add-subtract-shift only) — bit-identical on any spec-compliant JS engine |
 | `hyperbolic-sync-fixed.ts` | the hyperbolic-geodesic sync rebuilt on fixed-math.ts — cross-platform-safe counterpart to hyperbolic-sync.ts |
-| `signal-collapse.ts` | burn-on-breach (observable evidence → immediate lockout, tied to the Witness) + ECDH rekey (real post-compromise recovery) — the rekey still uses bare P-256, the repo's one remaining Shor-vulnerable primitive |
+| `signal-collapse.ts` | burn-on-breach (observable evidence → immediate lockout, tied to the Witness) + hybrid PQC rekey (real post-compromise recovery) — the ratchet agrees its fresh secret with X25519 + ML-KEM-768 (`pqc-hybrid.ts`), retiring the repo's last Shor-vulnerable primitive |
 | `pqc-hybrid.ts` | the hybrid post-quantum KEM: ML-KEM-768 + X25519 (+ opt-in QC-MDPC) combined by HKDF, OR-security proven by self-test — deployed and callable, not yet wired into live lane-key derivation |
 | `pqc-qcmdpc.ts` | the hand-rolled, unreviewed QC-MDPC leg (syndrome decoding) — opt-in, additive-only under `pqc-hybrid.ts`'s profile rule |
 | `coherence-layer.ts` | depth/relational decoupling, measured: derivation edges = deep hierarchy, recognition edges = small-world coherence shortcut; quantifies the path-length gain on a real graph |

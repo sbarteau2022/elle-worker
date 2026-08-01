@@ -51,6 +51,10 @@
 
 import type { Env } from './index';
 import { getPosture, recordThreat } from './security-network';
+import {
+  pqcHybridKeygen, pqcHybridEncaps, pqcHybridDecaps,
+  type PqcProfile, type PqcPublicKey, type PqcCiphertext,
+} from './pqc-hybrid';
 
 // ── burn-on-breach ───────────────────────────────────────────────────────
 export type BreachReason = 'replay_attempt' | 'burst_failures' | 'witness_blocked' | 'manual_duress';
@@ -125,48 +129,65 @@ export async function checkWitnessPosture(env: Env, guard: ChannelGuard, actorKe
   return false;
 }
 
-// ── post-compromise recovery — the DH ratchet step ──────────────────────
-// P-256 ECDH: chosen for universal WebCrypto support (every implementation,
-// Cloudflare Workers included, has long-standing ECDH/P-256 support) over a
-// faster curve that raises an "is this available here" question.
-export interface EphemeralKeyPair { privateKey: CryptoKey; publicKeyRaw: Uint8Array }
+// ── post-compromise recovery — the HYBRID PQC ratchet step ──────────────────
+// This used to be a bare P-256 ECDH ratchet. P-256 is exactly what Shor breaks,
+// so a ratchet built on it is the one place a future quantum adversary gets
+// retroactive decryption of everything that rode it (the harvest-now-decrypt-
+// later exposure the design doc §2.4 flags as the hard prerequisite). The fresh
+// secret is now agreed with the hybrid KEM (src/pqc-hybrid.ts): X25519 +
+// ML-KEM-768, combined so an attacker must break BOTH legs to learn it. HKDF +
+// AES-256-GCM downstream were already quantum-safe and are unchanged — only the
+// key-agreement primitive moves.
+//
+// A KEM is asymmetric (unlike the old symmetric DH), so the round has two roles:
+// the RESPONDER publishes a fresh ratchet public key, the INITIATOR encapsulates
+// to it (its own fresh ephemeral inside pqcHybridEncaps gives forward secrecy),
+// and both fold the agreed hybrid secret into the old master. KEM correctness
+// puts them on the identical new master without either transmitting it.
+//
+// Default profile is 'vetted' (two audited legs). 'experimental' additionally
+// mixes the repo's own unreviewed QC-MDPC leg; by the hybrid OR-property that
+// can only ever ADD strength, never subtract it.
+export interface RatchetKeyPair { publicKey: PqcPublicKey; secretKey: import('./pqc-hybrid').PqcSecretKey }
 
-export async function generateEphemeral(): Promise<EphemeralKeyPair> {
-  const pair = (await crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'],
-  )) as CryptoKeyPair;
-  // exportKey's return type is a union (ArrayBuffer | JsonWebKey) because the
-  // Cloudflare typings don't discriminate on the format string literal; 'raw'
-  // always yields an ArrayBuffer at runtime.
-  const raw = (await crypto.subtle.exportKey('raw', pair.publicKey)) as ArrayBuffer;
-  return { privateKey: pair.privateKey, publicKeyRaw: new Uint8Array(raw) };
+export function generateRatchetKeys(profile: PqcProfile = 'vetted'): RatchetKeyPair {
+  return pqcHybridKeygen(profile);
 }
 
-// Combine the OLD master with a FRESH ECDH shared secret into the NEW master.
-// Both sides run this with their own ephemeral private key and the peer's
-// ephemeral public key; ECDH guarantees they land on the identical shared
-// secret without ever transmitting it. Using the DH output as the HKDF SALT
-// (rather than concatenating it into the input key material) means the
-// extraction step is an HMAC keyed by the fresh secret — so the output is
-// unpredictable to anyone who lacks the DH secret, REGARDLESS of whether
-// they have the old master. That is the actual post-compromise-recovery
-// property: a leaked old master, on its own, buys the attacker nothing here.
-export async function rekey(
-  oldMaster: Uint8Array, myEphemeral: EphemeralKeyPair, peerPublicKeyRaw: Uint8Array,
-): Promise<Uint8Array> {
-  const peerKey = await crypto.subtle.importKey('raw', peerPublicKeyRaw, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
-  // The real Web Crypto API (and the actual workerd runtime) names this field
-  // `public` — Cloudflare's workers-types package mistypes it as `$public`
-  // (a codegen artifact escaping the reserved word), so this is a narrow,
-  // deliberate cast to send the correct runtime shape past an incorrect type.
-  const ecdhParams = { name: 'ECDH', public: peerKey } as unknown as SubtleCryptoDeriveKeyAlgorithm;
-  const sharedBits = await crypto.subtle.deriveBits(ecdhParams, myEphemeral.privateKey, 256);
+// Fold a fresh hybrid KEM secret into the old master to make the new one. The
+// hybrid secret is the HKDF SALT and the old master is the IKM — so extraction
+// is an HMAC keyed by the fresh secret, and the output is unpredictable to
+// anyone lacking that secret REGARDLESS of whether they hold the old master.
+// That is the post-compromise-recovery property (a leaked old master alone buys
+// nothing), preserved byte-for-shape from the classical ratchet — now with a
+// quantum-safe fresh secret. (Salt=fresh / IKM=old is inverted from the
+// Signal/Noise convention but is exactly what yields PCR here; do not "correct"
+// it into IKM=fresh, which would drop the property.)
+async function foldMaster(hybridSecret: Uint8Array, oldMaster: Uint8Array): Promise<Uint8Array> {
   const base = await crypto.subtle.importKey('raw', oldMaster, 'HKDF', false, ['deriveBits']);
   const newMaster = await crypto.subtle.deriveBits(
-    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(sharedBits), info: new TextEncoder().encode('coros-dh-ratchet-v1') },
+    { name: 'HKDF', hash: 'SHA-256', salt: hybridSecret, info: new TextEncoder().encode('coros-pq-ratchet-v1') },
     base, 256,
   );
   return new Uint8Array(newMaster);
+}
+
+// INITIATOR: encapsulate to the responder's fresh ratchet public key, fold the
+// agreed secret into the old master, and hand back the ciphertext to send.
+export async function rekeyInitiate(
+  oldMaster: Uint8Array, peerPublicKey: PqcPublicKey,
+): Promise<{ ciphertext: PqcCiphertext; newMaster: Uint8Array }> {
+  const { ciphertext, sharedSecret } = await pqcHybridEncaps(peerPublicKey);
+  return { ciphertext, newMaster: await foldMaster(sharedSecret, oldMaster) };
+}
+
+// RESPONDER: decapsulate the initiator's ciphertext with the ratchet secret key,
+// fold into the old master. Lands on the identical new master as the initiator.
+export async function rekeyRespond(
+  oldMaster: Uint8Array, myKeys: RatchetKeyPair, ciphertext: PqcCiphertext,
+): Promise<Uint8Array> {
+  const sharedSecret = await pqcHybridDecaps(myKeys.secretKey, myKeys.publicKey, ciphertext);
+  return foldMaster(sharedSecret, oldMaster);
 }
 
 // ── self-test — the burn lifecycle, burst detection, and the actual proof
@@ -182,6 +203,7 @@ export interface SignalCollapseSelfTest {
   secret_scrubbed: boolean;
   rekey_parties_agree: boolean;
   rekey_heals_a_leaked_master: boolean; // an attacker with the OLD master alone cannot reproduce the new one
+  rekey_is_post_quantum: boolean;       // the ratchet round carries an ML-KEM ciphertext (hybrid, not bare ECDH)
   note: string;
 }
 
@@ -203,26 +225,32 @@ export async function signalCollapseSelfTest(): Promise<SignalCollapseSelfTest> 
     if (r.burst) burst_detected = true;
   }
 
-  // post-compromise recovery: Alice and Bob derive the identical new master
+  // post-compromise recovery: the responder (Bob) publishes a fresh ratchet
+  // public key, the initiator (Alice) encapsulates to it. Both fold the agreed
+  // hybrid secret into the old master and land on the identical new master.
   const oldMaster = crypto.getRandomValues(new Uint8Array(32));
-  const alice = await generateEphemeral();
-  const bob = await generateEphemeral();
-  const aliceNew = await rekey(oldMaster, alice, bob.publicKeyRaw);
-  const bobNew = await rekey(oldMaster, bob, alice.publicKeyRaw);
+  const bob = generateRatchetKeys();
+  const { ciphertext, newMaster: aliceNew } = await rekeyInitiate(oldMaster, bob.publicKey);
+  const bobNew = await rekeyRespond(oldMaster, bob, ciphertext);
   const rekey_parties_agree = aliceNew.every((b, i) => b === bobNew[i]);
 
-  // an attacker who captured `oldMaster` but has neither party's ephemeral
-  // private key generates their OWN keypair (the only thing they can do) and
-  // gets a DIFFERENT result — proving the leaked master alone is insufficient.
-  const attacker = await generateEphemeral();
-  const attackerGuess = await rekey(oldMaster, attacker, bob.publicKeyRaw);
+  // an attacker who captured `oldMaster` and the on-wire ciphertext + public key
+  // but NOT bob's ratchet secret key cannot decapsulate; their own keypair lands
+  // on a different secret (ML-KEM's implicit rejection) ⇒ a different master —
+  // proving the leaked master alone is insufficient.
+  const attacker = generateRatchetKeys();
+  const attackerGuess = await rekeyRespond(oldMaster, attacker, ciphertext);
   const rekey_heals_a_leaked_master = !attackerGuess.every((b, i) => b === aliceNew[i]);
 
+  // the round is genuinely hybrid-PQ: it carries an ML-KEM ciphertext and a
+  // fresh ephemeral X25519 key, not a bare P-256 point.
+  const rekey_is_post_quantum = ciphertext.mlkem.length > 0 && ciphertext.epk.length > 0;
+
   const ok = burn_blocks_further_use && burst_detected && secret_scrubbed &&
-    rekey_parties_agree && rekey_heals_a_leaked_master;
+    rekey_parties_agree && rekey_heals_a_leaked_master && rekey_is_post_quantum;
   return {
     ok, burn_blocks_further_use, burst_detected, secret_scrubbed,
-    rekey_parties_agree, rekey_heals_a_leaked_master,
-    note: 'Burn is a local lockout + Witness notification, not a retroactive undo — nothing un-intercepts bytes already captured. Rekey is the real self-healing mechanism: a fresh ECDH exchange means a leaked master, by itself, does not compromise the next epoch. A purely passive interceptor who never touches this system remains undetectable by definition — no design changes that.',
+    rekey_parties_agree, rekey_heals_a_leaked_master, rekey_is_post_quantum,
+    note: 'Burn is a local lockout + Witness notification, not a retroactive undo — nothing un-intercepts bytes already captured. Rekey is the real self-healing mechanism: a fresh HYBRID (X25519 + ML-KEM-768) key agreement means a leaked master, by itself, does not compromise the next epoch — and a recorded ratchet round cannot be solved by a future quantum computer (the bare-P-256 version this replaces could). A purely passive interceptor who never touches this system remains undetectable by definition — no design changes that.',
   };
 }
