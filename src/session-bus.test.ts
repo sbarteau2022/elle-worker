@@ -18,6 +18,18 @@ describe('sessionBusSelfTest — the event bus that replaces the socket (COROS o
     expect((await sessionBusSelfTest()).awaits_time_out_honestly).toBe(true);
   });
 
+  it('the hybrid v2 handshake, wired into the real engine, round-trips a job end-to-end', async () => {
+    expect((await sessionBusSelfTest()).v2_handshake_roundtrip).toBe(true);
+  });
+
+  it('a v2 wire is genuinely v2 — the v1 pre-shared channel cannot open it', async () => {
+    expect((await sessionBusSelfTest()).v2_is_really_v2).toBe(true);
+  });
+
+  it('the ELLE_LANE_PROTOCOL flag gates it: with v2 off, a stored handshake root is ignored and v1 is used', async () => {
+    expect((await sessionBusSelfTest()).flag_off_stays_v1).toBe(true);
+  });
+
   it('the whole certificate is green', async () => {
     expect((await sessionBusSelfTest()).ok).toBe(true);
   });

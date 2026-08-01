@@ -36,8 +36,10 @@ signatures → (3) cutover + retire pasted `SANDBOX_AGENT_KEY`.
 longer uses bare P-256 ECDH — the ratchet now agrees its fresh secret with the
 hybrid KEM (`pqc-hybrid.ts`: X25519 + ML-KEM-768), so the repo's last
 Shor-vulnerable primitive is retired *before* the ratchet is ever wired to a
-live path. What remains for the bridge itself is Phase 1 (the lane handshake),
-which is still open below.
+live path. Phase 1's crypto core (the lane handshake) is built and proven
+byte-identical across both runtimes, and its **worker-side live routing is now
+wired** (flag-gated `/api/sandbox-bus/handshake` + version-negotiated poll — see
+§4.5 step 3). What remains for the bridge is the laptop-side initiator.
 
 ---
 
@@ -232,13 +234,14 @@ whole bridge relies on identical outputs across runtimes.
 
 ### 4.4 Where it slots in
 
-| Concern | New/edited |
-|---|---|
-| handshake messages + combiner | new `lane-handshake.ts` (worker) + `lane-handshake.cjs` (laptop), mirrored like the existing port |
-| root source | `laneChannel()` gains a `root` param already; feed it `root_lane` instead of `laneMaster(preshared)` |
-| epoch + ephemeral/handshake state | extend `elle_session_bus_state` with an `epoch` + a `handshake` row; laptop `.bus-state/` gains the peer keys |
-| routes | `/api/sandbox-bus/handshake` (sealed under preshared root during migration) alongside poll/submit |
-| version negotiation | `info` strings bump `v1`→`v2`; poll advertises supported versions |
+| Concern | New/edited | Status |
+|---|---|---|
+| handshake messages + combiner | new `lane-handshake.ts` (worker) + `lane-handshake.cjs` (laptop), mirrored like the existing port | **DONE** |
+| root source | `session-bus.ts`'s `resolveChannel()` feeds `root_lane` into `laneChannelV2()` instead of the pre-shared `laneChannel()`, per (lane, direction) | **DONE (worker)** |
+| epoch + handshake state | new `elle_session_bus_handshake (channel, epoch, root_lane)` table; a new epoch clears that channel's forward-only state and prunes superseded roots | **DONE (worker)** |
+| routes | `/api/sandbox-bus/handshake` (the worker is the responder; gated on `ELLE_LANE_PROTOCOL=v2`, authenticated by the pre-shared `x-sandbox-key` + folded into the combiner) alongside poll/submit | **DONE (worker)** |
+| version negotiation | the poll response carries `protocol: { supported, v2, epoch }`; v2 `info` strings already carry `v2:<lane>:<epoch>` | **DONE (worker)** |
+| laptop initiator | `rosen-bridge.cjs` runs the HELLO/ACCEPT round per direction, persists `root_lane` in `.bus-state/`, and switches to `laneChannelV2` when the poll advertises v2 | **remaining (Elle repo)** |
 
 ### 4.5 Migration / rollout
 1. Ship the handshake **flag-gated** (`ELLE_LANE_PROTOCOL=v2`), default off.
@@ -256,13 +259,35 @@ whole bridge relies on identical outputs across runtimes.
    noble outputs + HKDF combiner across workerd and Node, proven before anything
    relies on it. Both suites also run the full two-role handshake and a v2 lane
    seal/open round-trip.
-3. **NEXT** — enable v2 on the operator's own device; run both in parallel.
-   This is the live-routing pass: an epoch + handshake row in
-   `elle_session_bus_state` (+ laptop `.bus-state/`), the
-   `/api/sandbox-bus/handshake` route (sealed under the pre-shared root during
-   migration), and version negotiation on the poll. The crypto it needs is now
-   done and proven; what remains is transport plumbing + state, deliberately
-   kept as its own reviewed pass.
+3. Enable v2 on the operator's own device; run both in parallel. This is the
+   live-routing pass. **Worker side DONE** — `session-bus.ts` now carries the
+   whole responder half, flag-gated behind `ELLE_LANE_PROTOCOL=v2`:
+   - the `/api/sandbox-bus/handshake` route answers one HELLO per (lane,
+     direction), encapsulates to the laptop's hybrid public key, and persists the
+     agreed `root_lane` in the new `elle_session_bus_handshake` table;
+   - `resolveChannel()` seals/opens each direction under `laneChannelV2(root_lane)`
+     the moment a root exists for it, falling back to the v1 pre-shared geodesic
+     otherwise — so a lane can migrate one direction at a time without desync;
+   - the poll response advertises `protocol: { supported, v2, epoch }` for
+     negotiation, and epoch is monotonic per channel (a stale/replayed HELLO is
+     refused, and a new epoch clears that channel's forward-only state so both
+     ends restart cleanly under the fresh root, then prunes the old root for FS);
+   - it is strictly additive and reversible: with the flag unset the worker
+     advertises v1 only, ignores any stored roots, and behaves exactly as before.
+     The `sessionBusSelfTest` gained three invariants that run the handshake
+     through the *same* engine production uses (`v2_handshake_roundtrip`,
+     `v2_is_really_v2`, `flag_off_stays_v1`).
+
+   **Remaining:** the laptop initiator in the Elle repo's `rosen-bridge.cjs`
+   (drive the HELLO/ACCEPT round per direction, persist `root_lane` in
+   `.bus-state/`, switch to `laneChannelV2` when the poll advertises v2). The
+   crypto core it calls is already ported and proven byte-identical.
+
+   *Rollback note:* flipping `ELLE_LANE_PROTOCOL` back to unset resumes the v1
+   pasted-root path immediately for all NEW handshakes/epochs, but any lane
+   already carrying advanced v2 sender/receiver state should be re-handshaked (or
+   its `elle_session_bus_state` rows cleared) so both ends restart on the same
+   geodesic — the per-epoch state clear already does this on every fresh handshake.
 4. Phase 3: make v2 default, drop the pre-shared term from the combiner to a
    rotation-only enrollment secret, retire the "paste `SANDBOX_AGENT_KEY`" step.
 
