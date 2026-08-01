@@ -7,12 +7,13 @@ inference lane now ride a stateless event bus: the cloud enqueues a sealed
 job, the laptop polls for it over plain HTTPS, executes, and submits the
 sealed result back. One root secret, not several.**
 
-Code: `src/session-bus.ts` · tests (5) · self-test
+Code: `src/session-bus.ts` · tests (8) · self-test
 `GET /api/elle-session-bus-selftest` (admin) · doors: `POST
-/api/sandbox-bus/poll`, `POST /api/sandbox-bus/submit` (shared-secret,
-laptop-authenticated) · consumes `src/lane-envelope.ts` (COROS sealed under
-hyperbolic-sync) · replaces `src/sandbox-agent.ts` (removed) · wrangler
-migration `v4` (`deleted_classes = ["SandboxAgent"]`) · 2026
+/api/sandbox-bus/poll`, `POST /api/sandbox-bus/submit`, `POST
+/api/sandbox-bus/handshake` (shared-secret, laptop-authenticated) · consumes
+`src/lane-envelope.ts` (COROS sealed under hyperbolic-sync) + `src/lane-handshake.ts`
+(hybrid X25519+ML-KEM lane-root, PQC Phase 1) · replaces `src/sandbox-agent.ts`
+(removed) · wrangler migration `v4` (`deleted_classes = ["SandboxAgent"]`) · 2026
 
 ---
 
@@ -93,7 +94,7 @@ production uses and an in-memory implementation used *only* by
 simulation of the logic, it's the actual logic with a different storage
 backend.
 
-**Five checks, each isolating one real property:**
+**Each check isolates one real property:**
 
 - `job_roundtrip` — a job enqueued cloud-side, polled, and answered with a
   genuinely sealed result (the self-test's "local" side calls the exact same
@@ -105,9 +106,43 @@ backend.
   immediately after one.
 - `awaits_time_out_honestly` — a job nobody ever answers times out and
   returns `null`, not a hang and not a fabricated result.
+- `v2_handshake_roundtrip` — a hybrid handshake per direction, then the
+  **same** enqueue/poll/submit/await engine seals a job end-to-end under the
+  agreed `root_lane` (see the v2 section below).
+- `v2_is_really_v2` — that wire cannot be opened by the v1 pre-shared channel,
+  so v2 is genuinely in effect, not a silent fallback.
+- `flag_off_stays_v1` — with `ELLE_LANE_PROTOCOL` unset, a stored handshake
+  root is ignored and traffic seals under the v1 geodesic.
 
-Verified live outside the test suite too: raw `tsx` execution reproduced
-`ok: true` with all four sub-checks green.
+## Optional v2: the hybrid PQC lane handshake, wired for real
+
+By default the lane root **is** the pre-shared secret (`laneChannel`). Set
+`ELLE_LANE_PROTOCOL=v2` and the bus arms the forward-secret path from
+`docs/PQC_ROSEN_BRIDGE_DESIGN.md` §4.1: the laptop (initiator) runs a hybrid
+X25519+ML-KEM handshake per `(lane, direction)`, and the worker (responder,
+this module) derives the agreed `root_lane` and seals that direction under
+`laneChannelV2(root_lane)` instead of the pasted secret.
+
+- **Door:** `POST /api/sandbox-bus/handshake {hellos:[…]}` → `{accepts:[…]}`.
+  One HELLO per `(lane, direction)`; the worker encapsulates to the laptop's
+  public key, persists `root_lane` in `elle_session_bus_handshake (channel,
+  epoch, root_lane)`, and returns the ACCEPT ciphertext. Gated on the flag
+  (`409` when disarmed); authenticated by the same `x-sandbox-key`, which is
+  *also* folded into the combiner — a caller without the pre-shared secret
+  cannot complete a handshake, and v2 is never weaker than v1 (design G3).
+- **Negotiation:** every poll response now carries `protocol: { supported,
+  v2, epoch }`; the laptop reads it to decide when to (re)handshake. Disarmed,
+  it reports `{ supported: [1], v2: false }` and nothing else changes.
+- **Per-direction migration:** `resolveChannel()` uses v2 for a direction the
+  moment a root exists for it, else v1 — a lane can migrate one direction at a
+  time without desync (each direction is an independent sender/receiver pair).
+- **Epoch is monotonic per channel:** a HELLO must carry a strictly-newer
+  epoch, so a replayed/stale HELLO can't reset a live channel; a fresh epoch
+  clears that channel's forward-only state (new root ⇒ new geodesic) and
+  prunes the superseded root for forward secrecy.
+- **Additive + reversible:** unset the flag and the pre-shared path resumes
+  with no wire change. This is the **worker** half; the laptop initiator in
+  `Elle`'s `rosen-bridge.cjs` is the remaining coordinated piece.
 
 ## What's still ahead — stated plainly
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   initGuard, recordFailedOpen, burnChannel, assertNotBurned,
-  generateEphemeral, rekey, signalCollapseSelfTest,
+  generateRatchetKeys, rekeyInitiate, rekeyRespond, signalCollapseSelfTest,
 } from './signal-collapse';
 
 describe('burn lifecycle', () => {
@@ -60,38 +60,44 @@ describe('burst detection (fishing / brute-force evidence)', () => {
   });
 });
 
-describe('ECDH rekey — post-compromise recovery', () => {
-  it('two legitimate parties derive the identical new master', async () => {
+describe('hybrid PQC rekey — post-compromise recovery', () => {
+  it('initiator and responder derive the identical new master', async () => {
     const oldMaster = new Uint8Array(32).fill(3);
-    const alice = await generateEphemeral();
-    const bob = await generateEphemeral();
-    const aliceNew = await rekey(oldMaster, alice, bob.publicKeyRaw);
-    const bobNew = await rekey(oldMaster, bob, alice.publicKeyRaw);
+    const bob = generateRatchetKeys();
+    const { ciphertext, newMaster: aliceNew } = await rekeyInitiate(oldMaster, bob.publicKey);
+    const bobNew = await rekeyRespond(oldMaster, bob, ciphertext);
     expect(Array.from(aliceNew)).toEqual(Array.from(bobNew));
   });
 
   it('the new master differs from the old one and across runs (fresh ephemerals)', async () => {
     const oldMaster = new Uint8Array(32).fill(3);
-    const a1 = await generateEphemeral(), b1 = await generateEphemeral();
-    const a2 = await generateEphemeral(), b2 = await generateEphemeral();
-    const new1 = await rekey(oldMaster, a1, b1.publicKeyRaw);
-    const new2 = await rekey(oldMaster, a2, b2.publicKeyRaw);
+    const b1 = generateRatchetKeys();
+    const b2 = generateRatchetKeys();
+    const { newMaster: new1 } = await rekeyInitiate(oldMaster, b1.publicKey);
+    const { newMaster: new2 } = await rekeyInitiate(oldMaster, b2.publicKey);
     expect(Array.from(new1)).not.toEqual(Array.from(oldMaster));
     expect(Array.from(new1)).not.toEqual(Array.from(new2));
   });
 
   it('THE core property: an attacker holding the old master alone cannot reproduce the new one', async () => {
     const oldMaster = new Uint8Array(32).fill(7); // "leaked" — the attacker has this
-    const alice = await generateEphemeral();
-    const bob = await generateEphemeral();
-    const legitimateNew = await rekey(oldMaster, alice, bob.publicKeyRaw);
+    const bob = generateRatchetKeys();
+    const { ciphertext, newMaster: legitimateNew } = await rekeyInitiate(oldMaster, bob.publicKey);
 
-    // The attacker has oldMaster and can see bob's public key on the wire,
-    // but has neither alice's nor bob's private key — the only move available
-    // is generating their own keypair, which lands on a different shared secret.
-    const attacker = await generateEphemeral();
-    const attackerGuess = await rekey(oldMaster, attacker, bob.publicKeyRaw);
+    // The attacker has oldMaster and can see the ciphertext + bob's public key on
+    // the wire, but not bob's ratchet secret key — the only move available is
+    // generating their own keypair, which decapsulates to a different secret.
+    const attacker = generateRatchetKeys();
+    const attackerGuess = await rekeyRespond(oldMaster, attacker, ciphertext);
     expect(Array.from(attackerGuess)).not.toEqual(Array.from(legitimateNew));
+  });
+
+  it('the ratchet round is hybrid post-quantum (carries an ML-KEM ciphertext)', async () => {
+    const oldMaster = new Uint8Array(32).fill(5);
+    const bob = generateRatchetKeys();
+    const { ciphertext } = await rekeyInitiate(oldMaster, bob.publicKey);
+    expect(ciphertext.mlkem.length).toBeGreaterThan(0); // ML-KEM-768 ciphertext present
+    expect(ciphertext.epk.length).toBe(32);             // fresh ephemeral X25519 public key
   });
 });
 
@@ -103,6 +109,7 @@ describe('signalCollapseSelfTest — end-to-end invariant check', () => {
     expect(r.secret_scrubbed).toBe(true);
     expect(r.rekey_parties_agree).toBe(true);
     expect(r.rekey_heals_a_leaked_master).toBe(true);
+    expect(r.rekey_is_post_quantum).toBe(true);
     expect(r.ok).toBe(true);
   });
 });

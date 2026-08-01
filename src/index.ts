@@ -54,6 +54,7 @@ import { cognitiveObliquitySelfTest } from './cognitive-obliquity';
 import { hyperbolicSyncFixedSelfTest } from './hyperbolic-sync-fixed';
 import { signalCollapseSelfTest } from './signal-collapse';
 import { pqcHybridSelfTest } from './pqc-hybrid';
+import { laneHandshakeSelfTest } from './lane-handshake';
 import { handleLattice, type LatticeEnv } from './lattice';
 import { handleMadmind } from './madmind';
 import { handleMindmapPost, handleMindmapGet } from './mindmap';
@@ -63,7 +64,8 @@ import { reasonWithCorpus } from './corpus-reasoning';
 import { topologySelfTest } from './topology-lock';
 import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport, sandboxRegistrySelfTest } from './sandbox-registry';
 import { laneEnvelopeSelfTest } from './lane-envelope';
-import { sessionBusConfigured, busPoll, busSubmit, sessionBusSelfTest } from './session-bus';
+import { sessionBusConfigured, busPoll, busSubmit, busHandshake, busProtocolInfo, laneProtocolV2Enabled, sessionBusSelfTest } from './session-bus';
+import type { LaneHelloWire } from './lane-handshake';
 import { runConductor, handleIntents, dedupeSessionHistory } from './conductor';
 import { handleIdeas, ideaToForgeSpec } from './ideas';
 import { runForge, validateForgeSpec, forgeRegistry, type ForgeSpec } from './forge-loop';
@@ -198,6 +200,14 @@ export interface Env extends LLMEnv {
   // ⇒ the tools report "not configured" and the poll/submit doors 401.
   // Set as a Worker secret: `wrangler secret put SANDBOX_AGENT_KEY`.
   SANDBOX_AGENT_KEY?: string;
+  // PQC lane protocol selector (docs/PQC_ROSEN_BRIDGE_DESIGN.md §4.5). Unset or
+  // any value other than 'v2' ⇒ the session bus runs the v1 pre-shared-root path
+  // unchanged and advertises v1 only. Set to 'v2' to arm the hybrid
+  // X25519+ML-KEM lane handshake: the worker then answers /api/sandbox-bus/
+  // handshake and, once a lane's directions are handshaken, seals them under the
+  // agreed forward-secret root instead of the pasted secret. Additive + reversible
+  // — flip back to unset and the pre-shared path resumes with no wire change.
+  ELLE_LANE_PROTOCOL?: string;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
   // One client ID, or a comma-separated allowlist (web + iOS client IDs from
@@ -2305,8 +2315,34 @@ export default {
       if (!sandboxKeyOk(request, env)) return err('Unauthorized', 401);
       const b = body as { lane?: string; limit?: number; meta?: Record<string, unknown> };
       const lane = String(b.lane || 'primary');
-      const jobs = await busPoll(env, lane, { limit: b.limit, meta: b.meta });
-      return json({ jobs });
+      // Version negotiation rides the poll: the laptop reads `protocol` to decide
+      // whether to (re)run the hybrid handshake. With v2 disarmed this reports
+      // { supported: [1], v2: false } and nothing else changes.
+      const [jobs, protocol] = await Promise.all([
+        busPoll(env, lane, { limit: b.limit, meta: b.meta }),
+        busProtocolInfo(env, lane),
+      ]);
+      return json({ jobs, protocol });
+    }
+    // The hybrid (X25519+ML-KEM) lane handshake — the worker is the RESPONDER.
+    // The laptop POSTs one HELLO per (lane, direction); the worker encapsulates,
+    // persists the agreed forward-secret root_lane, and returns the ACCEPTs. The
+    // pre-shared secret both authenticates this door (x-sandbox-key) and is folded
+    // into every derived root, so a caller without it cannot complete a handshake.
+    // Inert unless ELLE_LANE_PROTOCOL=v2 — the live-routing cutover is opt-in.
+    if (path === '/api/sandbox-bus/handshake') {
+      if (!sessionBusConfigured(env)) return err('sandbox bus not configured', 503);
+      if (!sandboxKeyOk(request, env)) return err('Unauthorized', 401);
+      if (!laneProtocolV2Enabled(env)) return err('lane protocol v2 not enabled (set ELLE_LANE_PROTOCOL=v2)', 409);
+      const b = body as { hellos?: LaneHelloWire[] };
+      const hellos = Array.isArray(b.hellos) ? b.hellos : [];
+      if (!hellos.length) return err('hellos[] required', 400);
+      try {
+        const accepts = await busHandshake(env, hellos);
+        return json({ accepts });
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e), 400);
+      }
     }
     if (path === '/api/sandbox-bus/submit') {
       if (!sessionBusConfigured(env)) return err('sandbox bus not configured', 503);
@@ -2471,8 +2507,9 @@ export default {
       return json(await hyperbolicSyncFixedSelfTest());
     }
     // Signal-collapse self-test — burn-on-breach lifecycle, burst detection,
-    // and the ECDH rekey's post-compromise-recovery proof (a leaked master
-    // key, alone, cannot reproduce the next epoch's key).
+    // and the hybrid PQC rekey's post-compromise-recovery proof (a leaked master
+    // key, alone, cannot reproduce the next epoch's key — and the ratchet round
+    // is X25519 + ML-KEM-768, not the bare P-256 it replaces).
     if (path === '/api/elle-signal-collapse-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await signalCollapseSelfTest());
@@ -2487,6 +2524,16 @@ export default {
     if (path === '/api/elle-pqc-hybrid-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await pqcHybridSelfTest());
+    }
+    // PQC Phase-1 lane handshake self-test (src/lane-handshake.ts). Proves the
+    // hybrid (X25519 + ML-KEM-768) lane-root agreement: both roles derive one
+    // root_lane, it drives a working v2 lane channel, and it's bound to both the
+    // transcript and the pre-shared secret. The reviewed crypto core — proven
+    // byte-identical to the laptop port by a shared known-answer vector — but
+    // NOT yet wired into live session-bus routing (that cutover is its own pass).
+    if (path === '/api/elle-lane-handshake-selftest') {
+      if (!svc) return err('Unauthorized', 401);
+      return json(await laneHandshakeSelfTest());
     }
     // The Lattice — 32-axis, 3-layer security deduction engine (Seed of Life
     // 7 + Flower of Life 12 + Fruit of Life 11, then Validation + The
