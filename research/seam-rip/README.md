@@ -30,8 +30,13 @@ uncoupled tones       kappa=0.0385  p=0.2697  -> NULL
   the lock must survive, self-test pre-registered at p<0.01.
 - `vision_emit.swift` — Apple Vision -> CSV (head pose + optical flow). Scaffold;
   compile/adjust on macOS. The CSV contract is the fixed part.
-- `SESSION_AUDIT_2026-07-13.md` — dated record of what was built and what the
-  data showed in the session that produced `rip.py`, kept as-is (historical).
+- `flow_emit.py` — Linux/pure-numpy port of the `flow_mag` channel (same
+  physical quantity — mean dense-optical-flow magnitude per frame — same CSV
+  contract). Runs where `vision_emit.swift` can't. Optional `cv2` Farneback
+  path; reads real video via `imageio`. `--selftest` validates the extractor
+  on synthetic frames.
+- `SESSION_AUDIT_2026-07-13.md` / `SESSION_AUDIT_2026-08-01.md` — dated records
+  of what was built and what the data showed, kept as-is (historical).
 
 ## Run
 ```
@@ -45,7 +50,15 @@ python3 phase_eight.py --csv vision.csv --slow yaw --fast flow_mag --fps 30
 
 ## The ladder (each rung gated by the one below returning signal)
 1. seam harness — **DONE**, validated, returns null correctly.
-2. real footage, one channel — does the signal have a seam at all?
+2. real footage, one channel — does the signal have a seam at all? **NOT
+   CLEARED.** Extractor is ported and runnable on any platform (`flow_emit.py`)
+   and the frames→flow→rip path is validated null-capable on synthetic motion
+   (PASS on a planted seam, NULL on uncoupled motion) — but **no real footage
+   has been run**: this environment's egress policy blocks external video hosts
+   (see `SESSION_AUDIT_2026-08-01.md`). Provide a clip to clear it. Pre-flight
+   caveat: `rip.py`'s fast band (8–20 Hz) is near/above Nyquist at broadcast
+   fps (25–30) — a NULL there may be instrumental; source higher fps or use the
+   audio channel, do **not** retune the band.
 3. cross-mode v2 — head-pose <-> flow-envelope.
 4. lightweight Poincare embedding — is the structure hyperbolic-shaped? (cheap, 8GB M1)
 5. dynamic hyperbolic / toroidal net — only after 2-4 return signal; let the
