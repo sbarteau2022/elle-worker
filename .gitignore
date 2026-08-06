@@ -4,3 +4,6 @@ dist/
 .dev.vars
 *.local__pycache__/
 *.pyc
+
+# local protocol harness output (machine-specific measurements, never committed)
+harness-report.json
