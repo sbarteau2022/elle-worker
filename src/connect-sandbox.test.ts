@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseRepoTarget, normalizeCloneTarget } from './connect-sandbox';
+import { parseRepoTarget, normalizeCloneTarget, resolveLlmTimeoutMs, buildLlmJob } from './connect-sandbox';
 
 describe('sandbox_clone target routing — which lane carries it', () => {
   it('recognizes owner/name as GitHub-shaped (the always-open cloud lane)', () => {
@@ -42,5 +42,41 @@ describe('normalizeCloneTarget — bare own-repo names find their owner', () => 
   it('passes unknown bare names through for the laptop lane to try', () => {
     expect(normalizeCloneTarget('some-other-project')).toBe('some-other-project');
     expect(normalizeCloneTarget('')).toBe('');
+  });
+});
+
+describe('resolveLlmTimeoutMs — the local inference timeout, env-tunable', () => {
+  it('defaults to 180s when unset or garbage', () => {
+    expect(resolveLlmTimeoutMs(undefined)).toBe(180_000);
+    expect(resolveLlmTimeoutMs('')).toBe(180_000);
+    expect(resolveLlmTimeoutMs('not-a-number')).toBe(180_000);
+    expect(resolveLlmTimeoutMs('-5')).toBe(180_000);
+    expect(resolveLlmTimeoutMs('0')).toBe(180_000);
+  });
+
+  it('honors a real override, clamped to the dispatch band', () => {
+    expect(resolveLlmTimeoutMs('60000')).toBe(60_000);
+    expect(resolveLlmTimeoutMs('50')).toBe(1_000);        // below the floor → floor
+    expect(resolveLlmTimeoutMs('999999999')).toBe(600_000); // above the ceiling → ceiling
+  });
+});
+
+describe('buildLlmJob — temperature rides the wire only when real', () => {
+  const msgs = [{ role: 'user' as const, content: 'hi' }];
+
+  it('omits temperature when unset — an older client sees the exact old shape', () => {
+    const job = buildLlmJob('j1', 'sys', msgs, 2048, 180_000);
+    expect(job).toEqual({ id: 'j1', system: 'sys', messages: msgs, max_tokens: 2048, timeout_ms: 180_000 });
+    expect('temperature' in job).toBe(false);
+  });
+
+  it('carries a finite temperature, including a deliberate 0', () => {
+    expect(buildLlmJob('j2', 's', msgs, 512, 1_000, 0.9).temperature).toBe(0.9);
+    expect(buildLlmJob('j2', 's', msgs, 512, 1_000, 0).temperature).toBe(0);
+  });
+
+  it('drops NaN and Infinity rather than sending them to the laptop', () => {
+    expect('temperature' in buildLlmJob('j3', 's', msgs, 512, 1_000, NaN)).toBe(false);
+    expect('temperature' in buildLlmJob('j3', 's', msgs, 512, 1_000, Infinity)).toBe(false);
   });
 });

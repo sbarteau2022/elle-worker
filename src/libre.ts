@@ -6,7 +6,7 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
-import { type LLMEnv, type LLMResponse } from './llm';
+import { callLLM, type LLMEnv, type LLMResponse } from './llm';
 import { sovereignText } from './connect-sandbox';
 import { generateWithOverlapGate } from './journal';
 import type { Env } from './index';
@@ -105,7 +105,13 @@ async function conductResearch(queries: string[], env: LibreEnv): Promise<string
   // Use the LLM's web search capability — one call, multiple angles
   const searchPrompt = queries.slice(0, 3).map(q => `"${q}"`).join(', ');
 
-  const result = await sovereignText(env as unknown as Env, 'reasoning',
+  // GROUNDED, not sovereign, on purpose: the whole value of this step is live
+  // web search, which only the hosted 'research' lane has (callLLM never
+  // serves that task locally or from Workers AI — see llm.ts). Through
+  // sovereignText this call lands on the laptop's model whenever the lane is
+  // up, and a local model asked to "search for current information"
+  // confidently invents its findings — poisoning the libre session's facts.
+  const result = await callLLM('research',
     `You are conducting research on behalf of Elle, a philosophical intelligence.
 Search for current, substantive information about the following topics and return
 a dense factual summary of what you find. Be specific. Include dates, names,
@@ -115,7 +121,7 @@ Topics: ${searchPrompt}
 
 Return a structured research summary. No hedging. Dense and specific.`,
     [{ role: 'user', content: `Research these topics for my libre session: ${searchPrompt}` }],
-    1500
+    1500, env
   );
 
   return result.content;

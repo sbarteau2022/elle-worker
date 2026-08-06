@@ -200,6 +200,10 @@ export interface Env extends LLMEnv {
   // ⇒ the tools report "not configured" and the poll/submit doors 401.
   // Set as a Worker secret: `wrangler secret put SANDBOX_AGENT_KEY`.
   SANDBOX_AGENT_KEY?: string;
+  // Per-worker override (ms) for the local inference lane's job timeout —
+  // resolveLlmTimeoutMs in connect-sandbox.ts clamps it to [1s, 600s].
+  // Unset ⇒ the 180s default. Config var, not a secret.
+  SANDBOX_LLM_TIMEOUT_MS?: string;
   // PQC lane protocol selector (docs/PQC_ROSEN_BRIDGE_DESIGN.md §4.5). Unset or
   // any value other than 'v2' ⇒ the session bus runs the v1 pre-shared-root path
   // unchanged and advertises v1 only. Set to 'v2' to arm the hybrid
