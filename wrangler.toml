@@ -134,7 +134,8 @@ max_batch_timeout = 30
 
 # A single */1 cron trigger drives all daemon loops via clock-dispatch in
 # scheduled() (heartbeat every min; trading :*/15; research hourly; dream 03:00
-# UTC; journal 20:00 UTC). Uses 1 of the 5-per-account cron budget, not 5.
+# UTC; journal 20:00 UTC; grant_ingest 06:00 UTC). Uses 1 of the 5-per-account
+# cron budget, not 5.
 # IMPORTANT: keep this block — `wrangler deploy` reconciles triggers to this file,
 # so removing it deletes the live cron and silently stops the daemon.
 [triggers]
