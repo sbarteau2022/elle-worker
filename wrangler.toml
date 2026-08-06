@@ -68,6 +68,17 @@ binding = "RAPID_DB"
 database_name = "rapid2ai-db"
 database_id = "3e31b005-eca1-4c62-bd7c-5f6527ef751e"
 
+# Native binding onto the GrantIntelligence repo's grant-worker database.
+# grant-intelligence.ts reads grant_opportunities/grant_funder_990_overview
+# directly — that worker owns ingestion/verification/dedup/maintenance for
+# them entirely (moved out of this repo; see
+# docs/GRANT_INTELLIGENCE_SUITE_MAP.md). Same "no HTTP, no latency/failure
+# coupling to another worker's uptime" rationale as RAPID_DB above.
+[[d1_databases]]
+binding = "GRANT_DB"
+database_name = "grant-intelligence-db"
+database_id = "5c9cbfec-ec99-4d88-a61b-7663801944d2"
+
 [[kv_namespaces]]
 binding = "SESSIONS"
 id = "b659cdfdac084cbc9d502c4f26962047"

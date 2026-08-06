@@ -23,7 +23,6 @@ import { runTradingCycle, runDailyJournal, marketOpen, ensureTradingExtSchema, r
 import { ensureScoutSchema } from './symbol-scout';
 import { handleFalcon, type FalconEnv } from './falcon';
 import { handleGrantIntelligence, type GrantEnv } from './grant-intelligence';
-import { runGrantIngest, type GrantIngestEnv } from './grant-ingest';
 import { handleFlock, type FlockEnv } from './flock';
 import { handleObserver, drainObserverQueue, seedObserverDocket, backfillObserverEmbeddings, backfillObserverBlankets, type ObserverEnv } from './observer';
 import { handleSpine, type SpineEnv } from './spine';
@@ -188,6 +187,15 @@ export interface Env extends LLMEnv {
   // (src/rapid.ts) instead of proxying HTTP. Venue-scoped by VENUE_ID.
   RAPID_DB?:    D1Database;
   VENUE_ID?:    string;
+  // Native D1 onto grant-intelligence-db — the GrantIntelligence repo's
+  // grant-worker owns ingestion/verification/dedup/maintenance for
+  // grant_opportunities and grant_funder_990_overview entirely; elle-worker
+  // only ever reads them (grant-intelligence.ts), same native-binding
+  // pattern as RAPID_DB above so nothing about that worker's uptime or
+  // latency touches this one's request path. elle-worker keeps its own
+  // grant_organizations + reasoning tables (grant_fit_analyses,
+  // grant_necaif_evaluations, grant_reasoning_log) in DB.
+  GRANT_DB?:    D1Database;
   // Router scratchpad (src/scratchpad.ts) — short-TTL working memory so a long
   // tool chain retains findings past the per-observation truncation.
   SCRATCHPAD?:  KVNamespace;
@@ -1407,10 +1415,6 @@ async function runJob(job: string, env: Env): Promise<{ ran: string }> {
     }
     case 'consolidate': return { ran: await runConsolidation(env, embed) };
     case 'research': await runResearchCycle(env); return { ran: 'research' };
-    case 'grant_ingest': {
-      const r = await runGrantIngest(env as unknown as GrantIngestEnv);
-      return { ran: `grant_ingest (fetched ${r.fetched}, inserted ${r.inserted}, updated ${r.updated}, closed ${r.closed}, errors ${r.errors.length})` };
-    }
     case 'journal':  await runDailyJournal(env); return { ran: 'journal' };
     case 'optimus':  await runOptimusJournal(env, embed); return { ran: 'optimus' };
     case 'optimus_backfill': {
@@ -1515,7 +1519,7 @@ Write back below. This isn't a welcome packet. It's the first entry in a manuscr
       return { ran: 'seed_welcome:created' };
     }
     default:
-      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|conductor|consolidate|seed_corpus|seed_welcome|grant_ingest)`);
+      throw new Error(`unknown job: ${job} (expected heartbeat|trading|research|dream|journal|optimus|conductor|consolidate|seed_corpus|seed_welcome)`);
   }
   } catch (e) {
     const emsg = (e as Error).message || String(e);
@@ -3093,7 +3097,6 @@ export default {
     if (h === 21 && m === 10) fire('journal');
     if (h === 7 && m === 0) fire('optimus');  // 07:00 UTC — Elle's daily canvas (reads reader, writes unprompted)
     if (h === 5 && m === 0) fire('seed_corpus'); // 05:00 UTC — ingest any missing bundled seed docs (idempotent)
-    if (h === 6 && m === 0) fire('grant_ingest'); // 06:00 UTC — live Grants.gov/SBIR.gov pull + close stale rows (grant-ingest.ts)
   },
 
   // ── Queue consumer ─────────────────────────────────────────

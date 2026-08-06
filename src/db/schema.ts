@@ -705,24 +705,13 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     entity_stage TEXT, necaif_profile_json TEXT,
     created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
   )`,
-    // funder_type/necaif_applicable is the gate: NECAI-F donor-ethics evaluation
-    // only ever runs against foundation/corporate funders, never federal
-    // agencies, state programs, or accelerators (see the map doc's rollout §3).
-    `CREATE TABLE IF NOT EXISTS grant_opportunities (
-    id TEXT PRIMARY KEY, source TEXT NOT NULL, funder_name TEXT NOT NULL,
-    funder_type TEXT NOT NULL CHECK (funder_type IN ('federal','state','foundation','corporate','international','accelerator')),
-    program_name TEXT, program_track TEXT,
-    amount_min REAL, amount_max REAL, deadline TEXT, requirements_json TEXT,
-    stated_priorities TEXT, actual_priorities_json TEXT, observer_position TEXT,
-    necaif_applicable INTEGER NOT NULL DEFAULT 0,
-    status TEXT DEFAULT 'open', updated_at TEXT DEFAULT (datetime('now')),
-    created_at TEXT DEFAULT (datetime('now'))
-  )`,
-    `CREATE TABLE IF NOT EXISTS grant_recipients (
-    id TEXT PRIMARY KEY, opportunity_id TEXT, recipient_type_profile TEXT,
-    award_amount REAL, award_year INTEGER, source_filing TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  )`,
+    // grant_opportunities, grant_recipients, and grant_funder_990_overview
+    // (below) moved OUT of this database entirely — they now live in the
+    // GrantIntelligence repo's grant-worker, which owns ingestion,
+    // verification, dedup, and maintenance for them. elle-worker reads them
+    // via a direct D1 binding (env.GRANT_DB — see index.ts's Env interface
+    // and wrangler.toml) rather than creating/writing them here. See
+    // docs/GRANT_INTELLIGENCE_SUITE_MAP.md for the full history.
     `CREATE TABLE IF NOT EXISTS grant_fit_analyses (
     id TEXT PRIMARY KEY, org_id TEXT NOT NULL, opportunity_id TEXT NOT NULL,
     fit_index REAL, confidence_interval TEXT, sample_size INTEGER,
@@ -766,21 +755,6 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     id TEXT PRIMARY KEY, funder_id TEXT, feature_weights_json TEXT NOT NULL,
     methodology TEXT, sample_size INTEGER, date_range TEXT,
     data_completeness_pct REAL, updated_at TEXT DEFAULT (datetime('now'))
-  )`,
-    // grant-990.ts — the 990-PF financial overview layer (spec §II Module 1:
-    // "Foundation: 990-PF analysis of every major private foundation").
-    // Summary financials only (ProPublica Nonprofit Explorer API) — NOT an
-    // itemized grants-paid recipient list, which needs the real 990-PF
-    // Schedule I/XV (a documented next step, not this table). One row per
-    // funder_name, replaced on re-fetch (a filing-year snapshot, not a series).
-    `CREATE TABLE IF NOT EXISTS grant_funder_990_overview (
-    funder_name TEXT PRIMARY KEY, ein TEXT, ntee_code TEXT, city TEXT, state TEXT,
-    most_recent_filing_year INTEGER,
-    total_revenue_cents INTEGER, total_expenses_cents INTEGER,
-    total_assets_end_cents INTEGER, total_liabilities_end_cents INTEGER,
-    contributions_gifts_grants_cents INTEGER, program_revenue_cents INTEGER,
-    pdf_only_filing_years TEXT, source_url TEXT,
-    fetched_at TEXT, error TEXT
   )`,
     // flock.ts — social-media intelligence subsystem. Brand kits are the
     // continuity source; assets/posts/channels condition on them.
@@ -949,8 +923,6 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     // grant-intelligence.md §VI tables — deadline/status lookups (Module 1
     // and Module 4 both scan by this), fit-ranking per org, and reasoning-log
     // lookups by the row that produced the conclusion.
-    `CREATE INDEX IF NOT EXISTS idx_grant_opportunities_deadline ON grant_opportunities(status, deadline)`,
-    `CREATE INDEX IF NOT EXISTS idx_grant_opportunities_funder_type ON grant_opportunities(funder_type, necaif_applicable)`,
     `CREATE INDEX IF NOT EXISTS idx_grant_organizations_track ON grant_organizations(track)`,
     `CREATE INDEX IF NOT EXISTS idx_grant_fit_org ON grant_fit_analyses(org_id, fit_index DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_grant_fit_opportunity ON grant_fit_analyses(opportunity_id)`,
