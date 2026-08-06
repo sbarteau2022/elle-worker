@@ -376,11 +376,11 @@ export async function handleGrantIntelligence(body: Record<string, unknown>, env
     const funderType = body.funder_type ? String(body.funder_type) : null;
     const rows = funderType
       ? await env.DB.prepare(
-          `SELECT id, funder_name, funder_type, program_name, amount_min, amount_max, deadline, necaif_applicable, status
+          `SELECT id, source, funder_name, funder_type, program_name, amount_min, amount_max, deadline, necaif_applicable, status
            FROM grant_opportunities WHERE status = 'open' AND funder_type = ? ORDER BY deadline ASC LIMIT ?`
         ).bind(funderType, limit).all().catch(() => ({ results: [] }))
       : await env.DB.prepare(
-          `SELECT id, funder_name, funder_type, program_name, amount_min, amount_max, deadline, necaif_applicable, status
+          `SELECT id, source, funder_name, funder_type, program_name, amount_min, amount_max, deadline, necaif_applicable, status
            FROM grant_opportunities WHERE status = 'open' ORDER BY deadline ASC LIMIT ?`
         ).bind(limit).all().catch(() => ({ results: [] }));
     return json({ opportunities: rows.results || [] });

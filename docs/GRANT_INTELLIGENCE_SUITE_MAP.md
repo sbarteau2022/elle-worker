@@ -2,9 +2,19 @@
 
 **Status:** Module 1's fit-index reasoning, the NECAI-F donor sub-engine, and
 the 990-PF financial-overview layer are live (`src/grant-intelligence.ts`,
-`src/grant-990.ts`, `POST /api/elle-grants`). Opportunity data is seeded from
-`grant-strategy-map.md` (manual, not live-ingested yet). See
-"What's actually built" below for the exact boundary of what runs today.
+`src/grant-990.ts`, `POST /api/elle-grants`). Opportunity data comes from two
+places: the one-time manual seed from `grant-strategy-map.md`, and — as of
+`src/grant-ingest.ts` — a daily live pull from Grants.gov and SBIR.gov (both
+free/keyless), narrowed to the funders/topics the map doc names (VA, SAMHSA,
+NSF), on the existing `*/1` cron's clock-dispatch (06:00 UTC, `grant_ingest`
+job — no new Cloudflare cron slot spent). It also closes any previously-open
+row from a source that fetched cleanly but no longer contains that row. The
+private foundations/accelerators the map doc names (Bob Woodruff, Arch
+Grants, Mozilla, McGovern, Open Philanthropy) have no public opportunity API
+and still need the manual seed or RAPIDAi's atlas-capture browser extension
+(operator-driven; no promotion path from its staging table into this
+database exists yet — see "Not built" below). See "What's actually built"
+below for the exact boundary of what runs today.
 
 This is the same kind of note as `docs/WAR_ROOM_TODO.md`: reconcile the spec
 against what this repo actually runs, and leave a sequenced build plan for
@@ -174,11 +184,20 @@ rows exist.
 
 **Not built — in spec rollout order (§X), adapted for both tracks:**
 
-1. **Live Module 1 ingest.** `seed_opportunities` is a one-time manual load
-   from `grant-strategy-map.md`; nothing pulls Grants.gov/SAM.gov (both
-   tracks) or SBIR.gov (business track) yet. Next real work: a scheduled
-   ingest (Queues + `/api/cron`, same pattern as the existing daemon loop)
-   writing fresh `grant_opportunities` rows. `funder_990_overview`/
+1. **Live Module 1 ingest — DONE for Grants.gov + SBIR.gov.**
+   `src/grant-ingest.ts`'s `runGrantIngest` (cron job `grant_ingest`, 06:00
+   UTC, also reachable on demand via `POST /api/cron {"job":"grant_ingest"}`)
+   pulls both, narrowed to VA/SAMHSA/NSF and veteran/recovery/AI keyword
+   queries — not a full-catalog pull. Still missing: **SAM.gov** (needs a
+   registered API key, deliberately deferred) and any source for the
+   private-foundation/accelerator rows (Bob Woodruff, Arch Grants, Mozilla,
+   McGovern, Open Philanthropy) — none of those publish a searchable
+   opportunity API; RAPIDAi's atlas-capture browser extension can capture
+   them by hand into RAPIDAi's own staging table, but nothing promotes that
+   staging data into `grant_opportunities` yet (`grant-observation.ts` in
+   RAPIDAi's `workers/ingestion` — its own header comment has said "for a
+   human (or a later promotion job)" since before this ingest existed).
+   `funder_990_overview`/
    `funder_990_overview_all` (`src/grant-990.ts`) cover the 990-PF
    **financial-overview** half of this for the nonprofit track — summary
    revenue/expenses/assets per foundation, not itemized grants-paid. Still
