@@ -1,20 +1,34 @@
 # Grant Intelligence Suite — architecture map (build note)
 
-**Status:** Module 1's fit-index reasoning, the NECAI-F donor sub-engine, and
-the 990-PF financial-overview layer are live (`src/grant-intelligence.ts`,
-`src/grant-990.ts`, `POST /api/elle-grants`). Opportunity data comes from two
-places: the one-time manual seed from `grant-strategy-map.md`, and — as of
-`src/grant-ingest.ts` — a daily live pull from Grants.gov and SBIR.gov (both
-free/keyless), narrowed to the funders/topics the map doc names (VA, SAMHSA,
-NSF), on the existing `*/1` cron's clock-dispatch (06:00 UTC, `grant_ingest`
-job — no new Cloudflare cron slot spent). It also closes any previously-open
-row from a source that fetched cleanly but no longer contains that row. The
-private foundations/accelerators the map doc names (Bob Woodruff, Arch
-Grants, Mozilla, McGovern, Open Philanthropy) have no public opportunity API
-and still need the manual seed or RAPIDAi's atlas-capture browser extension
-(operator-driven; no promotion path from its staging table into this
-database exists yet — see "Not built" below). See "What's actually built"
-below for the exact boundary of what runs today.
+**Status:** the suite is split across two workers now. elle-worker
+(`src/grant-intelligence.ts`, `POST /api/elle-grants`) does the REASONING
+only — Module 1's fit-index, the NECAI-F donor sub-engine — over data it
+reads but does not own. The whole grant DATA layer (ingestion, parsing,
+verification, dedup, DB maintenance, and multimodal/vision intake) was
+moved OUT of this repo entirely into the GrantIntelligence repo's
+`workers/grant-worker/` — see that worker's own README for what it does.
+elle-worker reads `grant_opportunities`/`grant_funder_990_overview` via a
+direct D1 binding (`GRANT_DB` in `wrangler.toml`, same native-binding
+pattern as `RAPID_DB`) — never HTTP, so nothing about that worker's uptime
+or latency touches this repo's request path. elle-worker keeps its own
+`grant_organizations` (user-entered applicant profiles) and reasoning
+tables (`grant_fit_analyses`, `grant_necaif_evaluations`,
+`grant_reasoning_log`) — those are elle's analysis output, not ingested
+data. `src/grant-ingest.ts` and `src/grant-990.ts` no longer exist in this
+repo; their logic lives in the grant-worker now (same filenames, ported
+near-verbatim). See "What's actually built" below for the exact boundary
+of what runs today.
+
+Why the split: a synchronous cross-worker call from an ingest/write path
+into anything else is a latency and reliability risk this codebase avoids
+everywhere else (grant-990's ProPublica fetch, the dream job's sweep
+trigger, Pulse's live-metrics fetch — every cross-service call degrades
+silently rather than propagating). Putting ingestion inside elle-worker
+would have made elle's own request path depend on Grants.gov/SBIR.gov's
+uptime for no reason; a dedicated worker with its own D1 database and its
+own Workers AI binding for multimodal intake has zero dependency on
+anything else, and elle-worker's read-only D1 binding to it costs nothing
+in latency or failure surface.
 
 This is the same kind of note as `docs/WAR_ROOM_TODO.md`: reconcile the spec
 against what this repo actually runs, and leave a sequenced build plan for
@@ -119,13 +133,15 @@ rows exist.
   `TABLE_CATALOG`.
 - `src/grant-intelligence.ts` + `POST /api/elle-grants` (member-gated, wired
   in `index.ts` next to `/api/falcon` and `/api/observer`):
-  - `seed_opportunities` — idempotent upsert of the nine opportunities
-    already named in `grant-strategy-map.md` (both tracks — `SEED_OPPORTUNITIES`
-    in the file, with a `track_hint` documenting which track named it, though
-    the columns that actually gate behavior are `funder_type`/
-    `necaif_applicable` on the row itself).
+  - ~~`seed_opportunities`~~ — MOVED OUT along with `SEED_OPPORTUNITIES`
+    itself (nine opportunities named in `grant-strategy-map.md`, both
+    tracks) to the grant-worker's `grant-ingest.ts` — this repo no longer
+    has a `seed_opportunities` action at all. `list_opportunities` below is
+    now the read-only replacement for consuming that same data.
   - `create_organization` — applicant profile, `track` discriminator.
-  - `list_opportunities` — filterable by `funder_type`.
+  - `list_opportunities` — filterable by `funder_type`, now reading
+    `grant_opportunities` via the `GRANT_DB` binding instead of a local
+    table.
   - `fit_analysis` — the Statistical Fit Index (spec §V): reasons over the
     org profile + opportunity + any `grant_recipients` rows on file (there
     are none yet — a fresh run explicitly flags that in `factual_gaps`
@@ -147,33 +163,18 @@ rows exist.
   both tracks represented) plus the guard clauses that fire before any LLM
   call (missing org/opportunity, the NECAI-F funder-type refusal).
 
-**Built in a follow-up session — the 990-PF financial overview layer:**
-- `src/grant-990.ts` — pulls ProPublica's Nonprofit Explorer API (public, no
-  key) for a named funder: resolves an EIN by name (`resolveFunderEin` —
-  exact case-insensitive match wins over ProPublica's own relevance ranking),
-  then pulls the most recent filing's summary financials (revenue, expenses,
-  assets, liabilities, contributions/grants received, program revenue).
-  Explicitly surfaces `pdfOnlyFilingYears` for a foundation that only files on
-  paper (no structured data) rather than silently treating that as zero.
-  Scope is honest: this is the **overview** layer (spec §II Module 1 — "what
-  they actually fund vs what they say" at the summary-financials level), NOT
-  an itemized grants-paid recipient list — that needs the real 990-PF
-  Schedule I/XV, a further step this doesn't attempt.
-- `grant_funder_990_overview` table (`src/db/schema.ts`) — one row per
-  `funder_name`, replaced on re-fetch (a filing-year snapshot, not a series).
-  Registered in `router.ts`'s `TABLE_CATALOG`.
-- Three new `POST /api/elle-grants` actions in `src/grant-intelligence.ts`:
-  `funder_990_overview` (one funder, by name or explicit EIN),
-  `funder_990_overview_all` (every distinct `funder_name` already seeded
-  under `funder_type IN ('foundation','corporate')` — sequential, not
-  parallel, since ProPublica has no documented bulk endpoint and this is a
-  handful of funders, not hundreds), `get_990_overview` (read back a
-  persisted overview).
-- `src/grant-990.test.ts` — EIN-resolution tie-breaking (exact match beats
-  ProPublica's relevance score), filing-year sorting, the PDF-only-filings
-  case, the EIN-override fast path, and every error path (no match, non-OK
-  response, org endpoint returning nothing) — all against a stubbed `fetch`,
-  no live ProPublica calls.
+**Built in a follow-up session, then MOVED OUT in a later one — the 990-PF
+financial overview layer:**
+
+`grant-990.ts` (ProPublica Nonprofit Explorer API — EIN resolution, most-
+recent-filing summary financials, explicit `pdfOnlyFilingYears` surfacing
+for paper-only filers) and its persistence into `grant_funder_990_overview`
+no longer live in this repo — they moved to the GrantIntelligence repo's
+`workers/grant-worker/src/grant-990.ts` near-verbatim, alongside the live
+opportunity ingest (see the top-of-file Status note on why). elle-worker
+kept a thin `get_990_overview` read action on `/api/elle-grants` (reads
+`grant_funder_990_overview` via the `GRANT_DB` binding) — the actual
+ProPublica fetch and the write only happen in the grant-worker now.
 
 **Already existed, unchanged:**
 - The spec itself, ingested into the corpus (`corpus-seed.ts`, series
@@ -184,23 +185,26 @@ rows exist.
 
 **Not built — in spec rollout order (§X), adapted for both tracks:**
 
-1. **Live Module 1 ingest — DONE for Grants.gov + SBIR.gov.**
-   `src/grant-ingest.ts`'s `runGrantIngest` (cron job `grant_ingest`, 06:00
-   UTC, also reachable on demand via `POST /api/cron {"job":"grant_ingest"}`)
-   pulls both, narrowed to VA/SAMHSA/NSF and veteran/recovery/AI keyword
-   queries — not a full-catalog pull. Still missing: **SAM.gov** (needs a
-   registered API key, deliberately deferred) and any source for the
-   private-foundation/accelerator rows (Bob Woodruff, Arch Grants, Mozilla,
-   McGovern, Open Philanthropy) — none of those publish a searchable
-   opportunity API; RAPIDAi's atlas-capture browser extension can capture
-   them by hand into RAPIDAi's own staging table, but nothing promotes that
-   staging data into `grant_opportunities` yet (`grant-observation.ts` in
-   RAPIDAi's `workers/ingestion` — its own header comment has said "for a
-   human (or a later promotion job)" since before this ingest existed).
-   `funder_990_overview`/
-   `funder_990_overview_all` (`src/grant-990.ts`) cover the 990-PF
-   **financial-overview** half of this for the nonprofit track — summary
-   revenue/expenses/assets per foundation, not itemized grants-paid. Still
+1. **Live Module 1 ingest — DONE for Grants.gov + SBIR.gov, now owned by
+   the GrantIntelligence repo's grant-worker, not this repo.**
+   `workers/grant-worker/src/grant-ingest.ts`'s `runGrantIngest` (daily
+   cron, 06:00 UTC, also reachable on demand via
+   `POST /internal/run-ingest`) pulls both, narrowed to VA/SAMHSA/NSF and
+   veteran/recovery/AI keyword queries — not a full-catalog pull. It also
+   holds the manual seed and the 990-overview fetch (see above) — this
+   repo's own copies of all three were deleted when the move happened.
+   Still missing: **SAM.gov** (needs a registered API key, deliberately
+   deferred) and any source for the private-foundation/accelerator rows
+   (Bob Woodruff, Arch Grants, Mozilla, McGovern, Open Philanthropy) — none
+   of those publish a searchable opportunity API; RAPIDAi's atlas-capture
+   browser extension can capture them by hand into RAPIDAi's own staging
+   table, and the grant-worker now exposes `POST /internal/visual-capture`
+   to receive a screenshot alongside that capture for its own vision-based
+   cross-check — but nothing on the RAPIDAi/atlas-capture side calls it
+   yet, and nothing promotes RAPIDAi's staging table into
+   `grant_opportunities` either (`grant-observation.ts` in RAPIDAi's
+   `workers/ingestion` — its own header comment has said "for a human (or a
+   later promotion job)" since before either ingest existed). Also still
    missing: a `grant_recipients` backfill (real 990-PF Schedule I/XV
    recipient lists for nonprofit, SBIR award history for business) so
    `fit_analysis` has real statistical ground instead of an honest "no data

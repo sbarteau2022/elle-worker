@@ -661,11 +661,13 @@ engine (`action: run|list|get|outcome`; `run` takes a `direction` string).
 content + brand-conditioned image gen + multi-channel fan-out (`action:
 brand.* | channel.* | content.* | image.* | video.* | post.* | asset.list |
 status`). Generated media is served from `/flock/asset/…`.
-`/api/elle-grants` — the Grant Intelligence engine (`src/grant-intelligence.ts`
-+ `grant-990.ts`): Module 1 fit analysis + the NECAI-F donor sub-engine +
-ProPublica 990-PF financial-overview per foundation/corporate funder
-(`action: seed_opportunities|list_opportunities|fit_analysis|
-necaif_evaluation|funder_990_overview|…`).
+`/api/elle-grants` — the Grant Intelligence engine's REASONING layer only
+(`src/grant-intelligence.ts`): Module 1 fit analysis + the NECAI-F donor
+sub-engine, reading `grant_opportunities`/`grant_funder_990_overview` via a
+direct D1 binding (`GRANT_DB`) to the GrantIntelligence repo's grant-worker,
+which owns ingestion/verification/dedup/maintenance for that data entirely
+(`action: create_organization|list_opportunities|fit_analysis|
+get_fit_analysis|necaif_evaluation|get_990_overview`).
 Small-business tax suite (its own `tax` scope, real personal financial data,
 authenticated only — no anonymous/demo path): `/api/tax` (conversational,
 tax-scoped router), `/api/tax/data` (structured JSON reads/writes for the
@@ -820,8 +822,7 @@ with real internet access to the deployed worker.
 | `tax-credits.ts` | the cited, versioned credit/deduction eligibility engine (`findCredits`) |
 | `tax-rules/` | federal + state (`MO`/`KS`/`IL`/`IN`) + local (KC/STL) tax constants by year (`federal/2026.ts`, `states/{mo,ks,il,in}/2026.ts`, `locals/mo-2026.ts`) |
 | `payroll/` | QuickBooks/Gusto/ADP OAuth connect/sync (`quickbooks.ts`, `gusto.ts`, `adp.ts`, `sync.ts`, `crypto.ts` for encrypted token storage, `tools.ts` for the `payroll_*` router tools) |
-| `grant-intelligence.ts` | the Grant Intelligence engine: Module 1 fit analysis (Statistical Fit Index) + the NECAI-F donor sub-engine, behind `/api/elle-grants` |
-| `grant-990.ts` | ProPublica 990-PF financial-overview fetch per foundation/corporate funder (revenue/expenses/assets, not itemized recipient lists) |
+| `grant-intelligence.ts` | the Grant Intelligence engine's reasoning layer: Module 1 fit analysis (Statistical Fit Index) + the NECAI-F donor sub-engine, behind `/api/elle-grants`. Reads `grant_opportunities`/`grant_funder_990_overview` via the `GRANT_DB` binding — ingestion/verification/dedup/multimodal intake live in the GrantIntelligence repo's `workers/grant-worker/`, not here |
 | `session-bus.ts` | the stateless connect-back bus (replaces the deleted `sandbox-agent.ts` DO): enqueue → laptop polls → executes → submits, sealed by `lane-envelope.ts`, state persisted in D1 since there's no DO to hold it in memory |
 | `connect-sandbox.ts` | worker-side face of the sandbox: run_code/run_shell/sandbox_clone/status/report + the sovereign LLM lane, now riding `session-bus.ts` |
 | `duplex.ts` | the duplex channel — sovereign (laptop) ↔ cloud, append-only ledger, `/api/duplex` |

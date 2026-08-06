@@ -6,14 +6,24 @@
 // Unification across the nonprofit and small-business tracks:
 // docs/GRANT_INTELLIGENCE_SUITE_MAP.md. Schema: src/db/schema.ts (grant_*).
 //
+// The grant DATA layer — ingestion, verification, dedup, and maintenance of
+// grant_opportunities and grant_funder_990_overview, plus multimodal
+// (vision) intake — lives entirely in the GrantIntelligence repo's
+// grant-worker now (workers/grant-worker/), NOT here. This file only
+// REASONS over that data: it reads grant_opportunities via a direct D1
+// binding (env.GRANT_DB, wrangler.toml — same native-binding pattern as
+// RAPID_DB) and writes its own analysis to elle-worker's OWN tables
+// (grant_organizations, grant_fit_analyses, grant_necaif_evaluations,
+// grant_reasoning_log). Nothing here ingests, seeds, or fetches external
+// grant data — that would reintroduce exactly the cross-worker dependency
+// this split was built to eliminate. See docs/GRANT_INTELLIGENCE_SUITE_MAP.md
+// for the full history of what moved and why.
+//
 // What this file builds, in spec order:
-//   - seedOpportunities   — the manual Module 1 seed from Stewart's own
-//     grant-strategy-map.md, both tracks (map doc's named first step, ahead
-//     of any live Grants.gov/SBIR.gov ingest).
 //   - runFitAnalysis      — the Statistical Fit Index (spec §V), reasoning
 //     over the applicant profile + opportunity + past recipient rows
-//     already on file. No live web search here: Module 1's own D1 data IS
-//     the material ground for a fit read.
+//     already on file. No live web search here: the opportunity/recipient
+//     data IS the material ground for a fit read.
 //   - runNecaifEvaluation — the NECAI-F donor sub-engine (spec §III), gated
 //     to funder_type IN ('foundation','corporate') per the map doc's rule
 //     (federal agencies/accelerators are never NECAI-F-evaluated). THIS one
@@ -32,69 +42,25 @@
 import { z } from 'zod';
 import { ensureAllSchemas } from './db/schema';
 import { callLLM, jsonLLM, type LLMEnv } from './llm';
-import { fetch990Overview, type Funder990Overview } from './grant-990';
 
 export interface GrantEnv extends LLMEnv {
   DB: D1Database;
+  GRANT_DB?: D1Database;
 }
 
 const id = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 const json = (d: unknown, s = 200) =>
   new Response(JSON.stringify(d), { status: s, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
 
-// ── Seed: the opportunities already named in corpus/business/grant-strategy-map.md ──
-// track_hint documents which applicant track the map named this opportunity
-// under; it is NOT written to grant_opportunities (funder_type/necaif_applicable
-// are the columns that actually gate behavior — see the map doc's table).
 type FunderType = 'federal' | 'state' | 'foundation' | 'corporate' | 'international' | 'accelerator';
-interface SeedOpportunity {
-  id: string;
-  funder_name: string;
-  funder_type: FunderType;
-  program_name: string;
-  amount_min?: number;
-  amount_max?: number;
-  deadline?: string;
-  stated_priorities?: string;
-  necaif_applicable: 0 | 1;
-  track_hint: 'nonprofit' | 'business';
-}
 
-export const SEED_OPPORTUNITIES: SeedOpportunity[] = [
-  // Witness Model / Social Impact track (nonprofit) — grant-strategy-map.md
-  { id: 'ssg-fox-fy26', funder_name: 'U.S. Dept. of Veterans Affairs', funder_type: 'federal', program_name: 'SSG Fox Suicide Prevention Grant', amount_min: 750000, amount_max: 750000, deadline: 'FY26 open', stated_priorities: 'Rural veteran focus; AI peer support in the gap between crisis and care; renewable', necaif_applicable: 0, track_hint: 'nonprofit' },
-  { id: 'samhsa-recovery-fy26', funder_name: 'Substance Abuse & Mental Health Services Admin.', funder_type: 'federal', program_name: 'SAMHSA Recovery Support Grant', amount_min: 125000, deadline: 'FY26', stated_priorities: 'Substance-use recovery support tool; varies by program', necaif_applicable: 0, track_hint: 'nonprofit' },
-  { id: 'bob-woodruff-rolling', funder_name: 'Bob Woodruff Foundation', funder_type: 'foundation', program_name: 'Veterans & Military Families (rolling)', deadline: 'Rolling', stated_priorities: 'Private foundation, faster than federal; no nonprofit required from the applicant', necaif_applicable: 1, track_hint: 'nonprofit' },
-  // Groundwork / Commercial track (business) — grant-strategy-map.md
-  { id: 'mtc-idea-jul26', funder_name: 'Missouri Technology Corporation', funder_type: 'state', program_name: 'MTC IDEA Fund — July 2026 cycle', amount_max: 5800000, deadline: '2026-05-05', stated_priorities: 'Missouri-based; provisional patent satisfies IP requirement; needs a lead investor', necaif_applicable: 0, track_hint: 'business' },
-  { id: 'arch-grants-rolling', funder_name: 'Arch Grants', funder_type: 'accelerator', program_name: 'Arch Grants — St. Louis', amount_min: 75000, amount_max: 75000, deadline: 'Rolling', stated_priorities: 'Equity-free; no institutional requirements beyond LLC formation; St. Louis presence', necaif_applicable: 0, track_hint: 'business' },
-  { id: 'mozilla-ai-2026', funder_name: 'Mozilla Foundation', funder_type: 'foundation', program_name: 'Mozilla Democracy × AI Incubator', amount_max: 300000, deadline: '2026', stated_priorities: 'Information ecosystem resilience; community-led AI governance; top 2 of 10 advance', necaif_applicable: 1, track_hint: 'business' },
-  { id: 'mcgovern-emergent-ai', funder_name: 'Patrick J. McGovern Foundation', funder_type: 'foundation', program_name: 'Emergent AI', amount_min: 250000, deadline: 'Prep now — letter of inquiry', stated_priorities: 'Emergent AI for public benefit; prior awards $250k-$600k in this space in 2026', necaif_applicable: 1, track_hint: 'business' },
-  { id: 'open-phil-ai-safety', funder_name: 'Open Philanthropy Project', funder_type: 'foundation', program_name: 'AI Safety RFP', amount_max: 40000000, deadline: 'Rolling', stated_priorities: '$40M committed across AI-safety directions (2025 cycle); theoretical-alignment track', necaif_applicable: 1, track_hint: 'business' },
-  { id: 'nsf-sbir-ai', funder_name: 'National Science Foundation', funder_type: 'federal', program_name: 'NSF SBIR — AI Track', amount_max: 2000000, deadline: 'Paused — reauthorization pending', stated_priorities: 'Non-dilutive, no equity; Human-Computer Interaction track', necaif_applicable: 0, track_hint: 'business' },
-];
-
-// Idempotent upsert — safe to re-run as grant-strategy-map.md is updated by hand.
-export async function seedOpportunities(env: GrantEnv): Promise<{ inserted: number; updated: number }> {
-  await ensureAllSchemas(env.DB);
-  let inserted = 0, updated = 0;
-  for (const o of SEED_OPPORTUNITIES) {
-    const existing = await env.DB.prepare(`SELECT id FROM grant_opportunities WHERE id = ?`).bind(o.id).first();
-    await env.DB.prepare(
-      `INSERT INTO grant_opportunities (id, source, funder_name, funder_type, program_name, amount_min, amount_max, deadline, stated_priorities, necaif_applicable, status)
-       VALUES (?,?,?,?,?,?,?,?,?,?, 'open')
-       ON CONFLICT(id) DO UPDATE SET
-         funder_name=excluded.funder_name, funder_type=excluded.funder_type, program_name=excluded.program_name,
-         amount_min=excluded.amount_min, amount_max=excluded.amount_max, deadline=excluded.deadline,
-         stated_priorities=excluded.stated_priorities, necaif_applicable=excluded.necaif_applicable,
-         updated_at=datetime('now')`
-    ).bind(
-      o.id, 'grant-strategy-map', o.funder_name, o.funder_type, o.program_name,
-      o.amount_min ?? null, o.amount_max ?? null, o.deadline ?? null, o.stated_priorities ?? null, o.necaif_applicable,
-    ).run();
-    if (existing) updated++; else inserted++;
-  }
-  return { inserted, updated };
+// grant-worker's D1 binding is optional in the type (Cloudflare bindings are
+// always technically "configurable or not"), but every action below needs
+// it — fail with a clear, specific error rather than a null-deref if it's
+// ever missing from wrangler.toml.
+function requireGrantDb(env: GrantEnv): D1Database {
+  if (!env.GRANT_DB) throw new Error('GRANT_DB binding not configured — see wrangler.toml (grant-intelligence-db)');
+  return env.GRANT_DB;
 }
 
 // ── Module 1: Statistical Fit Index (spec §V) ──────────────────────────────
@@ -136,11 +102,12 @@ export async function runFitAnalysis(
   env: GrantEnv, orgId: string, opportunityId: string,
 ): Promise<{ fitAnalysisId: string; reasoningLogId: string; data: FitAnalysis }> {
   await ensureAllSchemas(env.DB);
+  const grantDb = requireGrantDb(env);
   const org = await env.DB.prepare(`SELECT * FROM grant_organizations WHERE id = ?`).bind(orgId).first();
   if (!org) throw new Error(`grant_organizations: no row for id "${orgId}"`);
-  const opp = await env.DB.prepare(`SELECT * FROM grant_opportunities WHERE id = ?`).bind(opportunityId).first();
+  const opp = await grantDb.prepare(`SELECT * FROM grant_opportunities WHERE id = ?`).bind(opportunityId).first();
   if (!opp) throw new Error(`grant_opportunities: no row for id "${opportunityId}"`);
-  const recipients = await env.DB.prepare(
+  const recipients = await grantDb.prepare(
     `SELECT recipient_type_profile, award_amount, award_year FROM grant_recipients WHERE opportunity_id = ? ORDER BY award_year DESC LIMIT 20`
   ).bind(opportunityId).all().catch(() => ({ results: [] }));
   const recipientRows = recipients.results || [];
@@ -201,7 +168,8 @@ export async function runNecaifEvaluation(
   env: GrantEnv, opportunityId: string,
 ): Promise<{ evaluationId: string; data: NecaifEvaluation; alreadySealed: boolean }> {
   await ensureAllSchemas(env.DB);
-  const opp = await env.DB.prepare(
+  const grantDb = requireGrantDb(env);
+  const opp = await grantDb.prepare(
     `SELECT id, funder_name, funder_type FROM grant_opportunities WHERE id = ?`
   ).bind(opportunityId).first() as { id: string; funder_name: string; funder_type: string } | null;
   if (!opp) throw new Error(`grant_opportunities: no row for id "${opportunityId}"`);
@@ -271,70 +239,6 @@ export async function runNecaifEvaluation(
   return { evaluationId, data, alreadySealed: false };
 }
 
-// ── 990-PF financial overview (spec §II Module 1) ──────────────────────────
-// One row per funder_name, replaced on re-fetch — a filing-year snapshot, not
-// an append-only series (grant_reasoning_log is where history-of-conclusions
-// belongs; this is just the current picture).
-async function persist990Overview(env: GrantEnv, overview: Funder990Overview): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO grant_funder_990_overview
-       (funder_name, ein, ntee_code, city, state, most_recent_filing_year,
-        total_revenue_cents, total_expenses_cents, total_assets_end_cents, total_liabilities_end_cents,
-        contributions_gifts_grants_cents, program_revenue_cents, pdf_only_filing_years, source_url, fetched_at, error)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
-     ON CONFLICT(funder_name) DO UPDATE SET
-       ein=excluded.ein, ntee_code=excluded.ntee_code, city=excluded.city, state=excluded.state,
-       most_recent_filing_year=excluded.most_recent_filing_year,
-       total_revenue_cents=excluded.total_revenue_cents, total_expenses_cents=excluded.total_expenses_cents,
-       total_assets_end_cents=excluded.total_assets_end_cents, total_liabilities_end_cents=excluded.total_liabilities_end_cents,
-       contributions_gifts_grants_cents=excluded.contributions_gifts_grants_cents,
-       program_revenue_cents=excluded.program_revenue_cents, pdf_only_filing_years=excluded.pdf_only_filing_years,
-       source_url=excluded.source_url, fetched_at=excluded.fetched_at, error=NULL`
-  ).bind(
-    overview.funderName, overview.ein, overview.nteeCode, overview.city, overview.state, overview.mostRecentFilingYear,
-    overview.totalRevenueCents, overview.totalExpensesCents, overview.totalAssetsEndCents, overview.totalLiabilitiesEndCents,
-    overview.contributionsGiftsGrantsCents, overview.programRevenueCents,
-    JSON.stringify(overview.pdfOnlyFilingYears), overview.sourceUrl, overview.fetchedAt,
-  ).run();
-}
-
-async function persist990Error(env: GrantEnv, funderName: string, errorMessage: string): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO grant_funder_990_overview (funder_name, fetched_at, error) VALUES (?,?,?)
-     ON CONFLICT(funder_name) DO UPDATE SET fetched_at=excluded.fetched_at, error=excluded.error`
-  ).bind(funderName, new Date().toISOString(), errorMessage).run();
-}
-
-// Run + persist for one funder. Returns the overview (or the error) so both
-// the single-funder and the "all named foundations" actions share one path.
-export async function run990Overview(
-  env: GrantEnv, funderName: string, einOverride?: string,
-): Promise<Funder990Overview | { error: string }> {
-  const result = await fetch990Overview(funderName, einOverride);
-  if ('error' in result) { await persist990Error(env, funderName, result.error); return result; }
-  await persist990Overview(env, result);
-  return result;
-}
-
-// The spec's "every major private foundation" — every DISTINCT funder_name
-// already seeded under funder_type IN ('foundation','corporate') (the only
-// types NECAI-F/990 analysis applies to; see the map doc's rule). Runs
-// sequentially (ProPublica has no documented bulk endpoint and this is a
-// handful of funders, not hundreds) so one slow/failing lookup doesn't race
-// another's write to the same PRIMARY KEY-per-name row.
-export async function run990OverviewForAllFunders(
-  env: GrantEnv,
-): Promise<{ funderName: string; result: Funder990Overview | { error: string } }[]> {
-  const rows = await env.DB.prepare(
-    `SELECT DISTINCT funder_name FROM grant_opportunities WHERE funder_type IN ('foundation','corporate') ORDER BY funder_name`
-  ).all<{ funder_name: string }>().catch(() => ({ results: [] }));
-  const out: { funderName: string; result: Funder990Overview | { error: string } }[] = [];
-  for (const row of rows.results ?? []) {
-    out.push({ funderName: row.funder_name, result: await run990Overview(env, row.funder_name) });
-  }
-  return out;
-}
-
 // ── DB bootstrap — guarded, self-healing (house style, war-room.ts) ────────
 let grantSchemaReady = false;
 async function ensureGrantSchema(env: GrantEnv): Promise<void> {
@@ -347,10 +251,6 @@ async function ensureGrantSchema(env: GrantEnv): Promise<void> {
 export async function handleGrantIntelligence(body: Record<string, unknown>, env: GrantEnv, userId: string): Promise<Response> {
   await ensureGrantSchema(env);
   const action = String(body.action || '');
-
-  if (action === 'seed_opportunities') {
-    return json(await seedOpportunities(env));
-  }
 
   if (action === 'create_organization') {
     const name = String(body.name || '').trim();
@@ -371,15 +271,18 @@ export async function handleGrantIntelligence(body: Record<string, unknown>, env
     return json({ org_id: orgId, track });
   }
 
+  // Read-only — sourced from the grant-worker's D1 database (GRANT_DB), not
+  // owned here. See requireGrantDb()'s comment.
   if (action === 'list_opportunities') {
+    const grantDb = requireGrantDb(env);
     const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 200);
     const funderType = body.funder_type ? String(body.funder_type) : null;
     const rows = funderType
-      ? await env.DB.prepare(
+      ? await grantDb.prepare(
           `SELECT id, source, funder_name, funder_type, program_name, amount_min, amount_max, deadline, necaif_applicable, status
            FROM grant_opportunities WHERE status = 'open' AND funder_type = ? ORDER BY deadline ASC LIMIT ?`
         ).bind(funderType, limit).all().catch(() => ({ results: [] }))
-      : await env.DB.prepare(
+      : await grantDb.prepare(
           `SELECT id, source, funder_name, funder_type, program_name, amount_min, amount_max, deadline, necaif_applicable, status
            FROM grant_opportunities WHERE status = 'open' ORDER BY deadline ASC LIMIT ?`
         ).bind(limit).all().catch(() => ({ results: [] }));
@@ -419,33 +322,19 @@ export async function handleGrantIntelligence(body: Record<string, unknown>, env
     }
   }
 
-  if (action === 'funder_990_overview') {
-    const funderName = String(body.funder_name || '').trim();
-    if (!funderName) return json({ error: 'funder_name required' }, 400);
-    const ein = body.ein ? String(body.ein) : undefined;
-    const result = await run990Overview(env, funderName, ein);
-    if ('error' in result) return json({ funder_name: funderName, ...result }, 502);
-    return json({ overview: result });
-  }
-
-  if (action === 'funder_990_overview_all') {
-    const results = await run990OverviewForAllFunders(env);
-    return json({
-      funders: results.length,
-      succeeded: results.filter((r) => !('error' in r.result)).length,
-      results,
-    });
-  }
-
+  // Read-only — sourced from the grant-worker's D1 database. The FETCH from
+  // ProPublica (and the write) now happens exclusively in the grant-worker
+  // (see workers/grant-worker/src/grant-990.ts in the GrantIntelligence repo).
   if (action === 'get_990_overview') {
+    const grantDb = requireGrantDb(env);
     const funderName = String(body.funder_name || '').trim();
     if (!funderName) return json({ error: 'funder_name required' }, 400);
-    const row = await env.DB.prepare(`SELECT * FROM grant_funder_990_overview WHERE funder_name = ?`).bind(funderName).first();
+    const row = await grantDb.prepare(`SELECT * FROM grant_funder_990_overview WHERE funder_name = ?`).bind(funderName).first();
     if (!row) return json({ error: 'not found' }, 404);
     return json({ overview: row });
   }
 
   return json({
-    error: `unknown action "${action}" (seed_opportunities|create_organization|list_opportunities|fit_analysis|get_fit_analysis|necaif_evaluation|funder_990_overview|funder_990_overview_all|get_990_overview)`,
+    error: `unknown action "${action}" (create_organization|list_opportunities|fit_analysis|get_fit_analysis|necaif_evaluation|get_990_overview)`,
   }, 400);
 }
