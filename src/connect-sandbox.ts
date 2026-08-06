@@ -30,7 +30,7 @@ const PREVIEW = 4000;           // clip previews the way the event bus clips obs
 const CODE_TIMEOUT_MS = 120_000;
 const SHELL_TIMEOUT_MS = 300_000;
 const CLONE_TIMEOUT_MS = 120_000;
-const LLM_TIMEOUT_MS = 180_000; // a 4B on laptop hardware can take a while on a long window
+const LLM_TIMEOUT_MS = 180_000; // a dense local model generating a long answer is slow but legitimate work
 
 export interface RunCtx { runId?: string; sessionId?: string | null; source?: string; userId?: string }
 
@@ -39,13 +39,38 @@ export interface RunCtx { runId?: string; sessionId?: string | null; source?: st
 // now that the bus, not a DO, is the transport ─────────────────────────────
 export interface ExecJob { id: string; mode: 'code' | 'shell'; code?: string; language?: string; command?: string; cwd?: string; timeout_ms: number }
 export interface CloneJob { id: string; kind: 'path' | 'git'; target: string; timeout_ms: number }
-export interface LlmJob { id: string; system: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; max_tokens: number; timeout_ms: number }
+export interface LlmJob { id: string; system: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; max_tokens: number; timeout_ms: number; temperature?: number }
 export interface ExecResult { ok: boolean; stdout: string; stderr: string; exit: number; duration_ms: number; truncated?: boolean; path_open?: boolean }
 export interface CloneResult { ok: boolean; files?: Array<{ path: string; bytes: number }>; bundle?: string; language?: string; error?: string; path_open?: boolean }
 export interface LlmResult { ok: boolean; content?: string; model?: string; error?: string; duration_ms?: number; path_open?: boolean }
 export interface AgentStatus { open: boolean; meta?: { agent?: string; host?: string; platform?: string; root?: string; lastSeen?: number; since?: number } }
 
 function newId(): string { return crypto.randomUUID().replace(/-/g, '').slice(0, 20); }
+
+// Pure: the llm job timeout, per-worker tunable without a code change
+// (SANDBOX_LLM_TIMEOUT_MS, ms). Clamped to the same band dispatchToLane
+// enforces, so a typo can neither hang a run nor make every call die instantly.
+export function resolveLlmTimeoutMs(raw: string | undefined): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return LLM_TIMEOUT_MS;
+  return Math.min(Math.max(n, 1_000), 600_000);
+}
+
+// Pure: the wire payload for an llm job. temperature rides only as a real
+// finite number — absent means "the laptop's default", and an older client
+// that predates the field ignores it, leaving the exact pre-field shape.
+export function buildLlmJob(
+  id: string,
+  system: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  maxTokens: number,
+  timeoutMs: number,
+  temperature?: number,
+): LlmJob {
+  const job: LlmJob = { id, system, messages, max_tokens: maxTokens, timeout_ms: timeoutMs };
+  if (typeof temperature === 'number' && Number.isFinite(temperature)) job.temperature = temperature;
+  return job;
+}
 
 export function sandboxConfigured(env: Env): boolean { return sessionBusConfigured(env); }
 
@@ -87,13 +112,16 @@ export async function sandboxLLM(
   system: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   maxTokens: number,
-  timeoutMs: number = LLM_TIMEOUT_MS,
+  timeoutMs?: number,
+  temperature?: number,
 ): Promise<LlmResult> {
   if (!sandboxConfigured(env)) return { ok: false, error: 'sandbox not configured', path_open: false };
   const st = await pathOpen(env);
   if (!st.open) return { ok: false, error: 'sandbox path not open', path_open: false };
+  const ms = timeoutMs ?? resolveLlmTimeoutMs(env.SANDBOX_LLM_TIMEOUT_MS);
   try {
-    return (await dispatchToLane(env, 'primary', 'llm', { id: newId(), system, messages, max_tokens: maxTokens, timeout_ms: timeoutMs })) as LlmResult;
+    const job = buildLlmJob(newId(), system, messages, maxTokens, ms, temperature);
+    return (await dispatchToLane(env, 'primary', 'llm', job as unknown as Record<string, unknown>)) as LlmResult;
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e), path_open: false };
   }
@@ -113,16 +141,15 @@ export async function sovereignText(
   if (sandboxConfigured(env)) {
     const st = await pathOpen(env).catch((): AgentStatus => ({ open: false }));
     if (st.open) {
-      // The local lane has no temperature knob (Ollama job payload carries none),
-      // so a caller asking for a specific temperature (e.g. an overlap-gate retry
-      // that needs a genuinely different candidate) falls straight to hosted,
-      // where opts.temperature actually does something, rather than silently
-      // returning the same local candidate every retry.
-      if (opts.temperature == null) {
-        const local = await sandboxLLM(env, system, messages, maxTokens);
-        if (local.ok && local.content) return { content: local.content, model: local.model || 'local', provider: 'sovereign-local' };
-        console.error('[SOVEREIGN] local lane unavailable for standing work, falling back to hosted:', local.error || 'no content');
-      }
+      // temperature rides the job itself now (LlmJob.temperature — the laptop
+      // applies it to Ollama), so a caller asking for a specific temperature
+      // (e.g. an overlap-gate retry that needs a genuinely different candidate)
+      // no longer forfeits the local lane. A workbench client that predates the
+      // field ignores it, which costs that retry its sampling nudge — the same
+      // behavior every call had before the knob existed, never anything worse.
+      const local = await sandboxLLM(env, system, messages, maxTokens, undefined, opts.temperature);
+      if (local.ok && local.content) return { content: local.content, model: local.model || 'local', provider: 'sovereign-local' };
+      console.error('[SOVEREIGN] local lane unavailable for standing work, falling back to hosted:', local.error || 'no content');
     }
   }
   return callLLM(task, system, messages, maxTokens, env, { temperature: opts.temperature });
