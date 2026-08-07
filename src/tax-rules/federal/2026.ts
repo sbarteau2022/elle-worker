@@ -63,6 +63,7 @@ export const FEDERAL_2026: FederalConstants = {
   seTaxRate: 0.153,
   seNetEarningsFactor: 0.9235,
   ssWageBaseCents: dollars(184_500),
+  medicareRate: 0.029,
   addlMedicareRate: 0.009,
   addlMedicareThresholdCents: {
     single: dollars(200_000), mfj: dollars(250_000), mfs: dollars(125_000), hoh: dollars(200_000),
@@ -86,6 +87,12 @@ export const FEDERAL_2026: FederalConstants = {
     single: dollars(16_100), mfs: dollars(16_100), mfj: dollars(32_200), hoh: dollars(24_150),
   },
   brackets: { single: SINGLE_BRACKETS, mfs: MFS_BRACKETS, mfj: MFJ_BRACKETS, hoh: SINGLE_BRACKETS },
+  // HOH borrows the single-filer table outright (HOH's real brackets are more
+  // favourable, so this OVERSTATES their tax); MFS halves MFJ, unconfirmed at
+  // the 35%/37% bands. Both were disclosed only in this file's header comment
+  // before — which nobody filing taxes ever reads. Listing them here makes
+  // tax_estimate_quarterly surface the caveat to the actual user.
+  bracketsApproximateFor: ['hoh', 'mfs'],
   nec1099ThresholdCents: dollars(2_000),
   lastVerified: '2026-07-30',
   sources: [

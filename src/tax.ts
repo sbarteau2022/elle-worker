@@ -24,6 +24,7 @@ import {
   vehicleDeductionCents, computeSafeHarbor, allocateNetProfit, netProfitCents, federalIncomeTaxCents,
   stateIncomeTaxCents, standardDeductionCents, localEarningsTaxCents, payrollExpenseTaxCents, meets1099Threshold,
   computeFICA, splitSCorpCompensation, entityLevelPassThroughTaxCents, indianaCountyTaxCents,
+  detectLedgerPayroll, bracketApproximationNote, rulesAgeWarning,
   type TxSummary, type TaxFacts, type FilingStatus,
 } from './tax-calc';
 import { findCredits, DISCLAIMER } from './tax-credits';
@@ -275,6 +276,7 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
 
   const isSCorp = business.entity_type === 's_corp';
   let scorp: { split: ReturnType<typeof splitSCorpCompensation>; fica: ReturnType<typeof computeFICA> } | null = null;
+  let ledgerPayroll: ReturnType<typeof detectLedgerPayroll> | null = null;
   if (isSCorp) {
     // An S-corp estimate genuinely CANNOT proceed without a real
     // salary/distribution split — unlike the pass-through path, there is no
@@ -288,7 +290,18 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
     // salary — correct for a single-shareholder S-corp with no other
     // employees on payroll; a business with real staff would need
     // per-employee attribution to isolate just the owner's salary.
-    scorp = { split: splitSCorpCompensation(netCents, wages.totalWagesCents), fica: computeFICA(wages.totalWagesCents, fed) };
+    //
+    // Wages come from payroll_line_items; netCents comes from
+    // tax_transactions. Payroll sync never writes tax_transactions, so
+    // nothing reconciles the two — and whether the ledger already booked
+    // payroll as an expense decides whether salary is subtracted once or
+    // twice. Detect it instead of assuming; guessing wrong silently
+    // collapses the QBI base by the full salary.
+    ledgerPayroll = detectLedgerPayroll(tx.expenseCentsByCategory);
+    scorp = {
+      split: splitSCorpCompensation(netCents, wages.totalWagesCents, ledgerPayroll.convention),
+      fica: computeFICA(wages.totalWagesCents, fed),
+    };
   }
 
   const retirementCents = dollarsToCents(facts.retirement_contributions_ytd);
@@ -323,9 +336,18 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
   const addlMedicare = isSCorp ? 0 : additionalMedicareTaxCents(se.netEarningsCents, w2Cents, filingStatus, fed); // Additional Medicare Tax on wages is already withheld through payroll for an S-corp salary, not computed here
   const totalFederalTaxCents = ficaOrSeTaxCents + fedIncomeTax + addlMedicare;
 
+  // What the owner actually sends with Form 1040-ES — NOT the same as total
+  // federal liability for an S-corp. FICA on a W-2 salary is remitted by the
+  // corporation through payroll tax deposits (Form 941); folding it into the
+  // safe-harbor basis would tell the owner to pay it a second time. This is
+  // the same reasoning that already zeroes Additional Medicare Tax for
+  // S-corps two lines above — applied consistently.
+  // A sole proprietor's SE tax IS paid through 1040-ES, so it stays in.
+  const estimatedTaxBasisCents = isSCorp ? fedIncomeTax + addlMedicare : totalFederalTaxCents;
+
   const priorYearTaxCents = facts.prior_year_tax_liability != null ? dollarsToCents(facts.prior_year_tax_liability) : null;
   const priorYearAgiCents = facts.prior_year_agi != null ? dollarsToCents(facts.prior_year_agi) : null;
-  const safeHarbor = computeSafeHarbor(totalFederalTaxCents, priorYearTaxCents, priorYearAgiCents, filingStatus, fed);
+  const safeHarbor = computeSafeHarbor(estimatedTaxBasisCents, priorYearTaxCents, priorYearAgiCents, filingStatus, fed);
 
   const lines: string[] = [
     `Q${quarter} ${taxYear} estimated tax for business ${businessId} (${business.entity_type}):`,
@@ -336,8 +358,29 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
     `Federal income tax: ${centsToDollarStr(fedIncomeTax)}`,
     ...(addlMedicare > 0 ? [`Additional Medicare Tax: ${centsToDollarStr(addlMedicare)}`] : []),
     `Total federal tax (this basis): ${centsToDollarStr(totalFederalTaxCents)}`,
-    `Safe-harbor quarterly payment (${safeHarbor.basisUsed}): ${safeHarbor.requiredQuarterlyPaymentCents != null ? centsToDollarStr(safeHarbor.requiredQuarterlyPaymentCents) : 'n/a'}`,
+    // Spell out that the quarterly figure deliberately excludes FICA for an
+    // S-corp, so the difference from "total federal tax" reads as intentional
+    // rather than as an arithmetic slip.
+    ...(isSCorp
+      ? [`  of which ${centsToDollarStr(scorp!.fica.totalFICACents)} is FICA remitted by the corporation via payroll deposits (Form 941) — NOT paid through Form 1040-ES, so it is excluded from the quarterly figure below`]
+      : []),
+    `Safe-harbor quarterly payment (${safeHarbor.basisUsed})${isSCorp ? ', 1040-ES only' : ''}: ${safeHarbor.requiredQuarterlyPaymentCents != null ? centsToDollarStr(safeHarbor.requiredQuarterlyPaymentCents) : 'n/a'}`,
+    ...(isSCorp && ledgerPayroll
+      ? [ledgerPayroll.convention === 'includes_payroll'
+          ? `Ledger convention: payroll IS already booked as an expense (${ledgerPayroll.matchedCategories.join(', ')} = ${centsToDollarStr(ledgerPayroll.centsInLedger)}), so net profit is already net of salary and the distribution is the remaining profit — salary was not subtracted twice.`
+          : `Ledger convention: no payroll-categorised expenses found, so net profit is treated as stated BEFORE salary. If you do book payroll as an expense under a category name this did not match, tell your bookkeeper to rename it — otherwise the distribution figure above is understated.`]
+      : []),
   ];
+
+  // Surface bracket stand-ins and stale rule tables to the USER, not just to
+  // anyone reading the source. Same discipline as the QBI approximation flag.
+  const bracketNote = bracketApproximationNote(filingStatus, fed);
+  if (bracketNote) lines.push(`CAVEAT: ${bracketNote}`);
+  const staleNote = rulesAgeWarning(fed.lastVerified, now);
+  if (staleNote) lines.push(`CAVEAT: ${staleNote}`);
+  if (isSCorp && w2Cents > 0) {
+    lines.push(`CAVEAT: w2_income_estimate (${centsToDollarStr(w2Cents)}) was added on top of this S-corp's salary, which is already counted above — if that figure IS the owner's salary from this business, it is being counted twice; clear it or set it to outside-W-2 income only.`);
+  }
 
   await env.DB.prepare(
     `INSERT INTO tax_estimates (id, business_id, tax_year, quarter, jurisdiction, net_profit_cents, se_tax_cents, income_tax_cents, qbi_deduction_cents, total_estimated_tax_cents, safe_harbor_basis, rules_version, computed_at)
@@ -348,7 +391,16 @@ export async function taxEstimateQuarterly(env: Env, a: Record<string, unknown>)
   if (isStateSupported(business.state, taxYear)) {
     const st = getStateConstants(business.state!, taxYear);
     const stdDedState = st.standardDeductionCents[filingStatus] ?? st.standardDeductionCents.single;
-    const stateTaxableIncome = Math.max(0, incomeForOrdinaryTax - se.deductibleHalfCents - qbi.finalDeductionCents + w2Cents - stdDedState);
+    // MO, KS, IL and IN all begin from FEDERAL AGI, which means the state
+    // base follows AGI's rules, not the federal taxable-income rules:
+    //   - deductible half of SE tax, retirement contributions and SE health
+    //     premiums are ABOVE-the-line — they reduce AGI, so they carry through
+    //     to the state base.
+    //   - the QBI deduction is BELOW-the-line — it does NOT reduce federal
+    //     AGI, so it must NOT reduce the state base.
+    // This previously had it backwards in both directions (subtracting QBI,
+    // omitting retirement/health), which moved every state figure.
+    const stateTaxableIncome = Math.max(0, incomeForOrdinaryTax - se.deductibleHalfCents - retirementCents - seHealthCents + w2Cents - stdDedState);
     const stateTaxCents = stateIncomeTaxCents(stateTaxableIncome, filingStatus, st);
     // Illinois-style entity-level tax (e.g. the 1.5% Personal Property
     // Replacement Tax) — the ENTITY's own liability, on top of the owner's
