@@ -13,7 +13,7 @@ import {
   netProfitCents, computeSETax, additionalMedicareTaxCents, computeQBIDeduction,
   homeOfficeDeductionCents, vehicleDeductionCents, computeSafeHarbor, allocateNetProfit,
   meets1099Threshold, computeFICA, splitSCorpCompensation, indianaCountyTaxCents,
-  entityLevelPassThroughTaxCents,
+  entityLevelPassThroughTaxCents, detectLedgerPayroll, bracketApproximationNote, rulesAgeWarning,
 } from './tax-calc';
 import { FEDERAL_2026 } from './tax-rules/federal/2026';
 import { MO_2026 } from './tax-rules/states/mo/2026';
@@ -215,6 +215,74 @@ describe('splitSCorpCompensation', () => {
   });
   it('floors distributions at zero and flags when reported salary exceeds net profit', () => {
     expect(splitSCorpCompensation(3_000_000, 5_000_000)).toEqual({ salaryCents: 5_000_000, distributionCents: 0, salaryExceedsProfit: true });
+  });
+
+  // AUDIT E2 — the ledger convention decides whether salary comes out once or
+  // twice. Getting this wrong silently collapsed the QBI base by the entire
+  // salary; these pin both readings.
+  it('does NOT subtract salary again when the ledger already booked payroll as an expense', () => {
+    // $60k profit ALREADY net of a $60k salary — the distribution is that
+    // $60k, not zero.
+    expect(splitSCorpCompensation(6_000_000, 6_000_000, 'includes_payroll')).toEqual({
+      salaryCents: 6_000_000, distributionCents: 6_000_000, salaryExceedsProfit: false,
+    });
+  });
+  it('subtracts salary when the ledger states profit before payroll', () => {
+    expect(splitSCorpCompensation(12_000_000, 6_000_000, 'excludes_payroll').distributionCents).toBe(6_000_000);
+  });
+  it('defaults to the pre-payroll reading so existing callers keep their behaviour', () => {
+    expect(splitSCorpCompensation(12_000_000, 6_000_000)).toEqual(splitSCorpCompensation(12_000_000, 6_000_000, 'excludes_payroll'));
+  });
+});
+
+describe('detectLedgerPayroll', () => {
+  it('recognises the words a person actually types for payroll', () => {
+    for (const label of ['Payroll', 'wages', 'Wage expense', 'Salaries', 'salary', 'Officer Compensation']) {
+      expect(detectLedgerPayroll({ [label]: 500_000 }).convention).toBe('includes_payroll');
+    }
+  });
+  it('reports which categories matched and their total', () => {
+    const r = detectLedgerPayroll({ Payroll: 4_000_000, 'Salaries - admin': 2_000_000, Rent: 900_000 });
+    expect(r.convention).toBe('includes_payroll');
+    expect(r.matchedCategories.sort()).toEqual(['Payroll', 'Salaries - admin']);
+    expect(r.centsInLedger).toBe(6_000_000);
+  });
+  it('reads a ledger with no payroll categories as stating profit before payroll', () => {
+    const r = detectLedgerPayroll({ Rent: 900_000, Supplies: 120_000 });
+    expect(r.convention).toBe('excludes_payroll');
+    expect(r.centsInLedger).toBe(0);
+  });
+  it('ignores a payroll category with no actual spend', () => {
+    expect(detectLedgerPayroll({ Payroll: 0 }).convention).toBe('excludes_payroll');
+  });
+  it('never throws on an empty or missing ledger', () => {
+    expect(detectLedgerPayroll({}).convention).toBe('excludes_payroll');
+    expect(detectLedgerPayroll(undefined as unknown as Record<string, number>).convention).toBe('excludes_payroll');
+  });
+});
+
+describe('bracketApproximationNote', () => {
+  it('flags HOH and MFS, whose 2026 tables are stand-ins', () => {
+    expect(bracketApproximationNote('hoh', FEDERAL_2026)).toMatch(/stand-in bracket table/);
+    expect(bracketApproximationNote('mfs', FEDERAL_2026)).toMatch(/stand-in bracket table/);
+  });
+  it('stays silent for the filing statuses whose tables are the published ones', () => {
+    expect(bracketApproximationNote('single', FEDERAL_2026)).toBeNull();
+    expect(bracketApproximationNote('mfj', FEDERAL_2026)).toBeNull();
+  });
+});
+
+describe('rulesAgeWarning', () => {
+  const ms = (d: string) => Date.parse(`${d}T00:00:00Z`);
+  it('stays silent while the tables are inside the freshness window', () => {
+    expect(rulesAgeWarning('2026-07-30', ms('2026-08-04'))).toBeNull();
+  });
+  it('warns once the tables age past the threshold, naming the age', () => {
+    const w = rulesAgeWarning('2026-07-30', ms('2027-06-01'));
+    expect(w).toMatch(/last verified 2026-07-30 \(306 days ago\)/);
+  });
+  it('treats an unparseable date as unverified rather than as fresh', () => {
+    expect(rulesAgeWarning('not-a-date', ms('2026-08-04'))).toMatch(/unparseable/);
   });
 });
 

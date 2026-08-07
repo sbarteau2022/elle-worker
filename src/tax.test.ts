@@ -163,6 +163,74 @@ describe('taxEstimateQuarterly — entity-type gate is the safety-critical path'
     expect(federalInsert!.binds[6]).toBeGreaterThan(0);
   });
 
+  // AUDIT E1 — FICA on an S-corp salary is remitted by the corporation via
+  // Form 941 payroll deposits. It was being folded into the safe-harbor basis,
+  // telling the owner to pay it a second time through 1040-ES ($8,262/yr on
+  // this exact fixture).
+  it('keeps FICA OUT of the S-corp safe-harbor quarterly payment — it is remitted via Form 941, not 1040-ES', async () => {
+    const { env } = fakeEnv({
+      business: { ...soleProp, entity_type: 's_corp', state: null, locality: null }, facts: null,
+      txRows: [{ direction: 'income', category: 'income_gross_receipts', amount_cents: 12_000_000 }], // $120,000
+      payrollConnections: [{ id: 'conn_1', business_id: 'biz_1', provider: 'gusto', status: 'connected', last_synced_at: Date.now() }],
+      payrollRuns: [{ total_wages_cents: 6_000_000 }], // $60,000 salary → $9,180 FICA
+    });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+
+    const total = Number(/Total federal tax \(this basis\): \$([\d.]+)/.exec(out)![1]);
+    const quarterly = Number(/Safe-harbor quarterly payment \([^)]*\), 1040-ES only: \$([\d.]+)/.exec(out)![1]);
+    // 90% of a basis that still contained $9,180 of FICA would be at least
+    // 0.9 * 9180 / 4 = $2,065.50 higher than this.
+    expect(quarterly).toBeCloseTo(((total - 9180) * 0.9) / 4, 1);
+    expect(out).toMatch(/remitted by the corporation via payroll deposits \(Form 941\)/);
+    expect(out).toMatch(/excluded from the quarterly figure/);
+  });
+
+  it('still includes a sole proprietor\'s SE tax in the safe-harbor basis — that one IS paid through 1040-ES', async () => {
+    const { env } = fakeEnv({
+      business: { ...soleProp, state: null, locality: null }, facts: null,
+      txRows: [{ direction: 'income', category: 'income_gross_receipts', amount_cents: 12_000_000 }],
+    });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    const total = Number(/Total federal tax \(this basis\): \$([\d.]+)/.exec(out)![1]);
+    const quarterly = Number(/Safe-harbor quarterly payment \([^)]*\): \$([\d.]+)/.exec(out)![1]);
+    expect(quarterly).toBeCloseTo((total * 0.9) / 4, 1); // full basis, nothing removed
+    expect(out).not.toMatch(/Form 941/);
+  });
+
+  // AUDIT E2 — net profit comes from tax_transactions, wages from
+  // payroll_line_items, and nothing reconciles them. If the ledger already
+  // books payroll as an expense, subtracting salary again erased the entire
+  // QBI base.
+  it('does not subtract an S-corp salary twice when the ledger already books payroll as an expense', async () => {
+    const { env } = fakeEnv({
+      business: { ...soleProp, entity_type: 's_corp', state: null, locality: null }, facts: null,
+      txRows: [
+        { direction: 'income', category: 'income_gross_receipts', amount_cents: 12_000_000 },
+        { direction: 'expense', category: 'Payroll', amount_cents: 6_000_000 }, // salary already expensed → $60k net
+      ],
+      payrollConnections: [{ id: 'conn_1', business_id: 'biz_1', provider: 'gusto', status: 'connected', last_synced_at: Date.now() }],
+      payrollRuns: [{ total_wages_cents: 6_000_000 }],
+    });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    // Net profit is already net of salary, so the distribution is that $60,000
+    // — not $0, which is what subtracting the salary a second time produced.
+    expect(out).toMatch(/distributions \(\$60000\.00\)/);
+    expect(out).toMatch(/payroll IS already booked as an expense \(Payroll = \$60000\.00\)/);
+    expect(out).toMatch(/salary was not subtracted twice/);
+  });
+
+  it('states which ledger convention it used even when no payroll categories are found', async () => {
+    const { env } = fakeEnv({
+      business: { ...soleProp, entity_type: 's_corp', state: null, locality: null }, facts: null,
+      txRows: [{ direction: 'income', category: 'income_gross_receipts', amount_cents: 12_000_000 }],
+      payrollConnections: [{ id: 'conn_1', business_id: 'biz_1', provider: 'gusto', status: 'connected', last_synced_at: Date.now() }],
+      payrollRuns: [{ total_wages_cents: 6_000_000 }],
+    });
+    const out = await taxEstimateQuarterly(env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+    expect(out).toMatch(/no payroll-categorised expenses found/);
+    expect(out).toMatch(/distributions \(\$60000\.00\)/); // $120k - $60k
+  });
+
   it('never leaves an S-corp\'s local (KC/STL) tax silently unhandled — flags it as not-modeled rather than applying sole-prop mechanics', async () => {
     const { env } = fakeEnv({
       business: { ...soleProp, entity_type: 's_corp', locality: 'KC' }, facts: null, txRows: [],
@@ -182,6 +250,32 @@ describe('taxEstimateQuarterly — entity-type gate is the safety-critical path'
     expect(out).toMatch(/does not replace a CPA/);
     const jurisdictions = execs.filter((e) => /INSERT INTO tax_estimates/.test(e.sql)).map((e) => e.binds[4]);
     expect(jurisdictions.sort()).toEqual(['KC', 'MO', 'federal']);
+  });
+
+  // AUDIT E5 — MO/KS/IL/IN all begin from FEDERAL AGI. Retirement and SE
+  // health premiums are above-the-line (they reduce AGI, so they carry into
+  // the state base); the QBI deduction is below-the-line (it does not). This
+  // was inverted in both directions, which moved every state figure.
+  it('state base follows federal AGI: retirement + SE health reduce it, the QBI deduction does not', async () => {
+    const mk = (facts: Record<string, unknown> | null) => fakeEnv({
+      business: { ...soleProp, locality: null }, facts,
+      txRows: [{ direction: 'income', category: 'income_gross_receipts', amount_cents: 10_000_000 }], // $100,000
+    });
+    const stateTax = async (facts: Record<string, unknown> | null) => {
+      const out = await taxEstimateQuarterly(mk(facts).env, { business_id: 'biz_1', tax_year: 2026, quarter: 1 });
+      return Number(/MO state income tax: \$([\d.]+)/.exec(out)![1]);
+    };
+
+    const plain = await stateTax(null);
+    // $20,000 of above-the-line deductions must lower the Missouri base.
+    const withAboveTheLine = await stateTax({ retirement_contributions_ytd: 15_000, self_employed_health_premiums_ytd: 5_000 });
+    expect(withAboveTheLine).toBeLessThan(plain);
+
+    // MO's top marginal rate is well under 100%, so a $20,000 smaller base
+    // cannot move the tax by more than $20,000 — guards against the reduction
+    // being applied to the wrong quantity.
+    expect(plain - withAboveTheLine).toBeGreaterThan(0);
+    expect(plain - withAboveTheLine).toBeLessThan(20_000);
   });
 
   it('flags the St. Louis payroll expense tax as not-included (never a guess) when no payroll provider is synced', async () => {

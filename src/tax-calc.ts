@@ -23,12 +23,19 @@
 // against the primary source document — treat any real dollar output as an
 // estimate that supplements, not replaces, a CPA's review before filing.
 //
-// v1 scope: pass-through entities only (sole proprietorship, single- and
-// multi-member LLC taxed as pass-through). S-corp/C-corp computation
-// (payroll, reasonable salary, 1120-series, double taxation) is NOT
-// implemented here — callers must gate on entity_type before calling into
-// this module and return an explicit "not yet supported" message instead of
-// a guessed number. See tax.ts's tax_estimate_quarterly.
+// SCOPE (keep this accurate — a stale limit here is worse than no comment,
+// because the whole value of this module is being trustworthy about what it
+// does and does not compute):
+//   IMPLEMENTED — pass-through entities (sole proprietorship, single- and
+//     multi-member LLC) via computeSETax; S-corp via computeFICA +
+//     splitSCorpCompensation, which need a REAL salary figure from synced
+//     payroll (tax.ts refuses to estimate without one, never guesses);
+//     local earnings tax and St. Louis's payroll expense tax, the latter
+//     computed against real synced wages.
+//   NOT IMPLEMENTED — C-corp (1120-series, double taxation). Callers must
+//     gate on entity_type and return an explicit "not yet supported"
+//     message rather than a guessed number. See tax.ts's
+//     tax_estimate_quarterly.
 // ============================================================
 
 export type FilingStatus = 'single' | 'mfj' | 'mfs' | 'hoh';
@@ -52,6 +59,13 @@ export interface FederalConstants {
   seTaxRate: number;
   seNetEarningsFactor: number;
   ssWageBaseCents: number;
+  /**
+   * Base Medicare rate (employee + employer combined, 2.9%). Optional so
+   * existing constants modules and test fixtures keep type-checking; every
+   * read goes through medicareRate() below so there is exactly one place
+   * this number lives rather than the two hardcoded copies it replaced.
+   */
+  medicareRate?: number;
   addlMedicareRate: number;
   addlMedicareThresholdCents: Record<FilingStatus, number>;
   standardMileageRatePeriods: MileagePeriod[];
@@ -68,9 +82,45 @@ export interface FederalConstants {
   safeHarborHighIncomeThresholdCents: { default: number; mfs: number };
   standardDeductionCents: Record<FilingStatus, number>;
   brackets: Record<FilingStatus, TaxBracket[]>;
+  /**
+   * Filing statuses whose bracket table is an unverified STAND-IN rather
+   * than the published table (e.g. HOH borrowing the single-filer table).
+   * Disclosed in a source comment is not disclosure — nobody filing taxes
+   * reads source comments — so callers surface this to the user the same
+   * way QBIResult.aboveCeilingApproximation already is.
+   */
+  bracketsApproximateFor?: FilingStatus[];
   nec1099ThresholdCents: number;
   lastVerified: string;
   sources: string[];
+}
+
+/** Single source for the 2.9% base Medicare rate (see FederalConstants.medicareRate). */
+export function medicareRate(c: FederalConstants): number {
+  return c.medicareRate ?? 0.029;
+}
+
+/**
+ * Is this filing status's bracket table a stand-in rather than the real one?
+ * Returns a user-facing caveat, or null when the table is the published one.
+ */
+export function bracketApproximationNote(filingStatus: FilingStatus, c: FederalConstants): string | null {
+  if (!c.bracketsApproximateFor?.includes(filingStatus)) return null;
+  return `filing status "${filingStatus}" uses a stand-in bracket table (not the published ${filingStatus.toUpperCase()} table) — the federal income tax figure is approximate and needs a CPA's review before it is relied on`;
+}
+
+/**
+ * Warn when a rules module has not been re-verified recently. The numbers in
+ * tax-rules/** are the part that goes stale (the mechanics don't), and
+ * nothing else in this suite would ever notice. Pure + injected clock so it
+ * is testable and never time-flaky.
+ */
+export function rulesAgeWarning(lastVerified: string, nowMs: number, maxDays = 180): string | null {
+  const verifiedMs = Date.parse(`${lastVerified}T00:00:00Z`);
+  if (!Number.isFinite(verifiedMs)) return `rule tables carry an unparseable lastVerified ("${lastVerified}") — treat every figure as unverified`;
+  const ageDays = Math.floor((nowMs - verifiedMs) / 86_400_000);
+  if (ageDays <= maxDays) return null;
+  return `rule tables were last verified ${lastVerified} (${ageDays} days ago) — rates and thresholds may have changed since; re-verify against the primary source before relying on these figures`;
 }
 
 export interface LocalConstants {
@@ -215,11 +265,12 @@ export function computeSETax(netProfitCents: number, c: FederalConstants, priorS
   if (netProfitCents <= 0) {
     return { netEarningsCents: 0, socialSecurityTaxCents: 0, medicareTaxCents: 0, totalSeTaxCents: 0, deductibleHalfCents: 0 };
   }
+  const mcr = medicareRate(c);
   const netEarningsCents = Math.round(netProfitCents * c.seNetEarningsFactor);
   const ssRoom = Math.max(0, c.ssWageBaseCents - priorSSWagesCents);
   const ssTaxableCents = Math.min(netEarningsCents, ssRoom);
-  const socialSecurityTaxCents = Math.round(ssTaxableCents * (c.seTaxRate - 0.029));
-  const medicareTaxCents = Math.round(netEarningsCents * 0.029);
+  const socialSecurityTaxCents = Math.round(ssTaxableCents * (c.seTaxRate - mcr));
+  const medicareTaxCents = Math.round(netEarningsCents * mcr);
   const totalSeTaxCents = socialSecurityTaxCents + medicareTaxCents;
   return {
     netEarningsCents,
@@ -246,10 +297,11 @@ export interface FICAResult {
 
 export function computeFICA(wagesCents: number, c: FederalConstants, priorSSWagesCents = 0): FICAResult {
   if (wagesCents <= 0) return { socialSecurityTaxCents: 0, medicareTaxCents: 0, totalFICACents: 0, employeeShareCents: 0, employerShareCents: 0 };
+  const mcr = medicareRate(c);
   const ssRoom = Math.max(0, c.ssWageBaseCents - priorSSWagesCents);
   const ssTaxableCents = Math.min(wagesCents, ssRoom);
-  const socialSecurityTaxCents = Math.round(ssTaxableCents * (c.seTaxRate - 0.029));
-  const medicareTaxCents = Math.round(wagesCents * 0.029);
+  const socialSecurityTaxCents = Math.round(ssTaxableCents * (c.seTaxRate - mcr));
+  const medicareTaxCents = Math.round(wagesCents * mcr);
   const totalFICACents = socialSecurityTaxCents + medicareTaxCents;
   const employeeShareCents = Math.round(totalFICACents / 2);
   return { socialSecurityTaxCents, medicareTaxCents, totalFICACents, employeeShareCents, employerShareCents: totalFICACents - employeeShareCents };
@@ -262,9 +314,62 @@ export function computeFICA(wagesCents: number, c: FederalConstants, priorSSWage
 // case where reported salary exceeds net profit — distributions floor at
 // zero rather than going negative.
 export interface SCorpSplit { salaryCents: number; distributionCents: number; salaryExceedsProfit: boolean }
-export function splitSCorpCompensation(netProfitCents: number, salaryCents: number): SCorpSplit {
+
+/**
+ * Whether the transaction ledger's net profit is stated BEFORE or AFTER the
+ * owner's payroll. This is not a detail — it decides whether salary gets
+ * subtracted once or twice.
+ *
+ * `excludes_payroll` — net profit has not had payroll taken out yet, so the
+ *   distribution is what remains after salary.
+ * `includes_payroll` — payroll is already booked as an expense (ordinary
+ *   bookkeeping, and what a QuickBooks sync produces), so net profit IS the
+ *   distribution; subtracting salary again would erase it twice over and
+ *   silently collapse the QBI base.
+ *
+ * Payroll wages arrive from payroll_line_items and net profit from
+ * tax_transactions — two independent sources with nothing reconciling them —
+ * so the caller detects the convention rather than assuming one.
+ */
+export type LedgerPayrollConvention = 'excludes_payroll' | 'includes_payroll';
+
+export function splitSCorpCompensation(
+  netProfitCents: number,
+  salaryCents: number,
+  convention: LedgerPayrollConvention = 'excludes_payroll',
+): SCorpSplit {
+  if (convention === 'includes_payroll') {
+    return { salaryCents, distributionCents: Math.max(0, netProfitCents), salaryExceedsProfit: false };
+  }
   const raw = netProfitCents - salaryCents;
   return { salaryCents, distributionCents: Math.max(0, raw), salaryExceedsProfit: raw < 0 };
+}
+
+/**
+ * Expense-category labels are free-form operator text, so this matches on the
+ * words a person actually types for payroll rather than a fixed enum. Used to
+ * detect which LedgerPayrollConvention is in play.
+ */
+const PAYROLL_CATEGORY_PATTERN = /payroll|wages?|salar(?:y|ies)|compensation/i;
+
+export function detectLedgerPayroll(expenseCentsByCategory: Record<string, number>): {
+  convention: LedgerPayrollConvention;
+  matchedCategories: string[];
+  centsInLedger: number;
+} {
+  const matchedCategories: string[] = [];
+  let centsInLedger = 0;
+  for (const [category, cents] of Object.entries(expenseCentsByCategory || {})) {
+    if (PAYROLL_CATEGORY_PATTERN.test(category) && cents > 0) {
+      matchedCategories.push(category);
+      centsInLedger += cents;
+    }
+  }
+  return {
+    convention: matchedCategories.length ? 'includes_payroll' : 'excludes_payroll',
+    matchedCategories,
+    centsInLedger,
+  };
 }
 
 // ── Indiana's flat county income tax (layered on top of the flat state rate) ──
