@@ -53,9 +53,10 @@ export function extractCatalogNames(catalog: string): Set<string> {
 }
 
 export interface StepScore {
-  parsed: boolean;   // production bar: extractor recovered an object
+  parsed: boolean;   // extractor recovered an object
   strict: boolean;   // protocol bar: the reply IS the object, nothing else
-  kind: 'tool' | 'tools' | 'answer' | 'invalid';
+  fallback: boolean; // no JSON at all, but production ACCEPTS it as a prose answer (router.ts null-parse branch)
+  kind: 'tool' | 'tools' | 'answer' | 'prose' | 'invalid';
   tools: string[];   // tool names the step tried to call
   problems: string[];
 }
@@ -63,7 +64,17 @@ export interface StepScore {
 export function scoreStep(raw: string, names: Set<string>): StepScore {
   const problems: string[] = [];
   const obj = firstJsonObjectFrom(raw);
-  if (!obj) return { parsed: false, strict: false, kind: 'invalid', tools: [], problems: ['no JSON object recoverable'] };
+  if (!obj) {
+    // Mirror runRouter's null-parse branch exactly: pure prose (no JSON
+    // markers) is accepted as the answer; only a malformed/truncated blob
+    // that LOOKS like attempted JSON counts as a protocol break.
+    const trimmedRaw = String(raw ?? '').trim();
+    const looksLikeJson = trimmedRaw.startsWith('{') || trimmedRaw.startsWith('```') || trimmedRaw.includes('"tool"') || trimmedRaw.includes('"answer"');
+    if (trimmedRaw && !looksLikeJson) {
+      return { parsed: false, strict: false, fallback: true, kind: 'prose', tools: [], problems: [] };
+    }
+    return { parsed: false, strict: false, fallback: false, kind: 'invalid', tools: [], problems: ['no JSON object recoverable'] };
+  }
 
   const trimmed = String(raw).replace(/```json|```/g, '').trim();
   let strict = false;
@@ -99,7 +110,7 @@ export function scoreStep(raw: string, names: Set<string>): StepScore {
     kind = 'invalid';
     problems.push('neither tool, tools, nor answer');
   }
-  return { parsed: true, strict, kind, tools, problems };
+  return { parsed: true, strict, fallback: false, kind, tools, problems };
 }
 
 // ── pure: the chain driver ───────────────────────────────────
@@ -124,11 +135,24 @@ export async function runChain(
 ): Promise<ChainResult> {
   const messages: Chat = [{ role: 'user', content: sc.question }];
   const steps: StepScore[] = [];
+  let nudged = false;
   for (let i = 0; i < sc.maxSteps; i++) {
     const raw = await llm(messages);
     const score = scoreStep(raw, names);
     steps.push(score);
-    if (!score.parsed || score.kind === 'invalid') return { completed: false, steps, answer: null };
+    // Production truth (runRouter's null-parse branch): pure prose completes
+    // the turn as the answer; a malformed blob gets ONE corrective nudge —
+    // the router's exact wording — before the turn fails.
+    if (score.fallback) return { completed: true, steps, answer: raw };
+    if (!score.parsed || score.kind === 'invalid') {
+      if (!nudged && i < sc.maxSteps - 1) {
+        nudged = true;
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: 'Your last message was not valid JSON. Reply with exactly ONE compact JSON object — {"tool","args"} or {"answer"} — and keep "thought" short.' });
+        continue;
+      }
+      return { completed: false, steps, answer: null };
+    }
     messages.push({ role: 'assistant', content: raw });
     if (score.kind === 'answer') {
       const obj = firstJsonObjectFrom(raw) as { answer?: string } | null;
@@ -183,8 +207,15 @@ describe('harness scorer — proven against canned outputs before it judges a mo
     expect(scoreStep('{"thought":"next is code","tool":"read_sql","args":{"sql":"select 1"},"engine":"code"}', NAMES).problems).toEqual([]);
     expect(scoreStep('{"thought":"x","answer":""}', NAMES).problems.join()).toMatch(/empty answer/);
     expect(scoreStep('{"thought":"x","tool":"read_sql","args":{"sql":"s"},"engine":"warp"}', NAMES).problems.join()).toMatch(/unknown engine/);
-    expect(scoreStep('total prose, no braces at all', NAMES).parsed).toBe(false);
     expect(scoreStep('{"thought":"only a thought"}', NAMES).kind).toBe('invalid');
+  });
+
+  it('mirrors production on missing JSON: pure prose is an accepted fallback, a mangled blob is not', () => {
+    const prose = scoreStep('I would tend to pick the recursive coherence paper, honestly.', NAMES);
+    expect(prose).toMatchObject({ parsed: false, fallback: true, kind: 'prose', problems: [] });
+    const mangled = scoreStep('{"thought":"x","tool":"search_corpus","args":{"query":"unterminated', NAMES);
+    expect(mangled).toMatchObject({ parsed: false, fallback: false, kind: 'invalid' });
+    expect(scoreStep('', NAMES).fallback).toBe(false);
   });
 
   it('chain driver: completes a scripted happy path and fails an off-protocol one', async () => {
@@ -202,9 +233,26 @@ describe('harness scorer — proven against canned outputs before it judges a mo
     expect(good.answer).toBe('found it');
     expect(good.steps.every(s => s.problems.length === 0)).toBe(true);
 
-    const bad = await runChain(sc, NAMES, async () => 'I think I should search the corpus for that.');
-    expect(bad.completed).toBe(false);
-    expect(bad.steps[0].parsed).toBe(false);
+    // Pure prose mid-chain completes as the answer — production truth.
+    const prose = await runChain(sc, NAMES, async () => 'I think I should search the corpus for that.');
+    expect(prose.completed).toBe(true);
+    expect(prose.answer).toMatch(/search the corpus/);
+
+    // A mangled blob gets exactly one corrective nudge, then the chain can recover…
+    const recovery = ['{"thought":"x","tool":"search_corpus","args":{"query":"unterminated', '{"thought":"done","answer":"recovered"}'];
+    let r = 0;
+    let sawNudge = false;
+    const nudgedRun = await runChain(sc, NAMES, async (msgs) => {
+      if (r === 1) sawNudge = msgs.at(-1)!.content.includes('not valid JSON');
+      return recovery[r++];
+    });
+    expect(sawNudge).toBe(true);
+    expect(nudgedRun.completed).toBe(true);
+    expect(nudgedRun.answer).toBe('recovered');
+
+    // …but a model that stays mangled after the nudge fails the chain.
+    const stuck = await runChain(sc, NAMES, async () => '{"thought":"x","tool":"search_corpus","args":{"query":"unterminated');
+    expect(stuck.completed).toBe(false);
   });
 });
 
@@ -319,7 +367,7 @@ const CHAINS: ChainScenario[] = [
 
 interface Report {
   model: string; num_ctx: number; temperature: number; runs: number; at: string;
-  probes: Array<{ id: string; run: number; parsed: boolean; strict: boolean; kind: string; tools: string[]; aimed: boolean | null; problems: string[] }>;
+  probes: Array<{ id: string; run: number; parsed: boolean; strict: boolean; fallback: boolean; kind: string; tools: string[]; aimed: boolean | null; problems: string[] }>;
   chains: Array<{ name: string; completed: boolean; steps: number; cleanSteps: number; problems: string[] }>;
   summary: Record<string, number>;
 }
@@ -333,9 +381,10 @@ describe.skipIf(!OLLAMA)('live: single-step protocol probes', () => {
         const s = scoreStep(raw, NAMES);
         const aimed = probe.aimKind === 'any' ? null
           : s.kind === probe.aimKind && (!probe.aimTools || s.tools.some(t => probe.aimTools!.includes(t)));
-        report.probes.push({ id: probe.id, run, parsed: s.parsed, strict: s.strict, kind: s.kind, tools: s.tools, aimed, problems: s.problems });
-        // Hard bar per probe: production must be able to parse the step.
-        expect(s.parsed, `unparseable reply for "${probe.id}": ${raw.slice(0, 200)}`).toBe(true);
+        report.probes.push({ id: probe.id, run, parsed: s.parsed, strict: s.strict, fallback: s.fallback, kind: s.kind, tools: s.tools, aimed, problems: s.problems });
+        // Hard bar per probe: PRODUCTION must survive the step — either a
+        // parseable object or the router's accepted prose fallback.
+        expect(s.parsed || s.fallback, `production-breaking reply for "${probe.id}": ${raw.slice(0, 200)}`).toBe(true);
       }, 320_000);
     }
   }
@@ -360,16 +409,18 @@ afterAll(() => {
   report.at = new Date().toISOString();
   const parsed = report.probes.filter(p => p.parsed).length;
   const strict = report.probes.filter(p => p.strict).length;
+  const production = report.probes.filter(p => p.parsed || p.fallback).length;
   const aimedPool = report.probes.filter(p => p.aimed !== null);
   report.summary = {
     probe_count: report.probes.length,
     parse_rate: +(parsed / report.probes.length).toFixed(3),
     strict_rate: +(strict / report.probes.length).toFixed(3),
+    production_rate: +(production / report.probes.length).toFixed(3),
     aim_rate: aimedPool.length ? +(aimedPool.filter(p => p.aimed).length / aimedPool.length).toFixed(3) : -1,
     chains_completed: report.chains.filter(c => c.completed).length,
     chains_total: report.chains.length,
   };
   const path = process.env.HARNESS_REPORT || 'harness-report.json';
   writeFileSync(path, JSON.stringify(report, null, 2));
-  console.log(`\n[harness] ${report.model} — parse ${report.summary.parse_rate}, strict ${report.summary.strict_rate}, aim ${report.summary.aim_rate}, chains ${report.summary.chains_completed}/${report.summary.chains_total} → ${path}\n`);
+  console.log(`\n[harness] ${report.model} — production ${report.summary.production_rate}, parse ${report.summary.parse_rate}, strict ${report.summary.strict_rate}, aim ${report.summary.aim_rate}, chains ${report.summary.chains_completed}/${report.summary.chains_total} → ${path}\n`);
 });
