@@ -268,6 +268,30 @@ describe('runRouter — parallel tool execution ({"tools":[...]})', () => {
     expect(result.steps).toBe(1); // one loop iteration produced both calls
   });
 
+  it('advertises the parallel-tools protocol to hospitality scope too, not just full/public', async () => {
+    // HOSPITALITY_TOOLS routinely wants independent lookups run together
+    // (rapid_costs + rapid_pos for one question) — but the hospitality
+    // system prompt used to be a hand-written early-return that never
+    // mentioned {"tools":[...]} at all, so the model had no way to know
+    // batching was even an option. Pin both halves: the prompt sent to the
+    // model advertises it, and dispatch actually honors it end-to-end.
+    const fetchFn = stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ thought: 'need two things', tools: [{ tool: 'calc', args: { expression: '1+1' } }, { tool: 'calc', args: { expression: '2+2' } }] }),
+        geminiResponse({ answer: 'got both' }),
+      ],
+    });
+    const result = await runRouter('q', makeEnv(), makeDeps(), { scope: 'hospitality', sessionId: null });
+    expect(result.answer).toBe('got both');
+    expect(result.trace).toHaveLength(2);
+    expect(result.steps).toBe(1);
+
+    const firstCallBody = JSON.parse(String(fetchFn.mock.calls[0][1].body));
+    const systemText = firstCallBody.system_instruction.parts[0].text as string;
+    expect(systemText).toContain('"tools":[{"tool":"<name>"');
+    expect(systemText).not.toContain('query_rapid2ai'); // stale tool name that never existed in this scope's catalog
+  });
+
   it('caps a step at MAX_PARALLEL_TOOLS even if the model requests more', async () => {
     const requested = Array.from({ length: 6 }, (_, i) => ({ tool: 'calc', args: { expression: `${i}+${i}` } }));
     stubFetchRoutes({
