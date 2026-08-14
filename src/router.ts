@@ -19,7 +19,7 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
-import { callLLM, callAnthropic, sanitizeAnswer, firstJsonObjectFrom, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
+import { callLLM, callAnthropic, sanitizeAnswer, stripObservationScaffolding, firstJsonObjectFrom, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
 import { computeKappa } from './journal';
@@ -1796,7 +1796,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     : (!final.content.trim().startsWith('{') && final.content.trim())
       ? final.content.trim()
       : (lastObs
-          ? `I ran out of reasoning steps before writing a clean synthesis, but here's what ${lastObs.tool} turned up:\n\n${lastObs.result}`
+          ? `I ran out of reasoning steps before writing a clean synthesis, but here's what ${lastObs.tool} turned up:\n\n${stripObservationScaffolding(lastObs.result)}`
           : '(no answer)');
   return finish(synthesized, maxSteps, {
     thought: fj && typeof fj.thought === 'string' ? fj.thought.slice(0, 1200) : undefined,
