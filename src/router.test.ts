@@ -286,7 +286,8 @@ describe('runRouter — parallel tool execution ({"tools":[...]})', () => {
     expect(result.trace).toHaveLength(2);
     expect(result.steps).toBe(1);
 
-    const firstCallBody = JSON.parse(String(fetchFn.mock.calls[0][1].body));
+    const firstCall = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    const firstCallBody = JSON.parse(firstCall[1].body as string);
     const systemText = firstCallBody.system_instruction.parts[0].text as string;
     expect(systemText).toContain('"tools":[{"tool":"<name>"');
     expect(systemText).not.toContain('query_rapid2ai'); // stale tool name that never existed in this scope's catalog
