@@ -19,7 +19,7 @@
 // ============================================================
 
 import { ensureAllSchemas } from './db/schema';
-import { callLLM, callAnthropic, sanitizeAnswer, firstJsonObjectFrom, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
+import { callLLM, callAnthropic, sanitizeAnswer, stripObservationScaffolding, firstJsonObjectFrom, type LLMMessage, type LLMTask, type LLMResponse } from './llm';
 import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
 import { computeKappa } from './journal';
@@ -519,6 +519,10 @@ You work in a strict loop. On each turn respond with EXACTLY ONE JSON object and
 To use a tool:
 {"thought":"why this tool, briefly","tool":"<name>","args":{ ... }}
 
+When you need several INDEPENDENT lookups (they don't depend on each other's results — e.g. rapid_costs AND rapid_pos for the same question), fire them together instead of one per step:
+{"thought":"why these, briefly","tools":[{"tool":"<name>","args":{...}},{"tool":"<name>","args":{...}}]}
+Up to ${MAX_PARALLEL_TOOLS} at once. Only batch calls that are genuinely independent — if the second call needs something the first one returns, that's still two separate steps.
+
 To finish:
 {"thought":"brief","answer":"specific, grounded in the numbers the tools returned — show the figures and how you computed them"}
 
@@ -526,7 +530,7 @@ How to analyze:
 - Margin: margin% = (price − unit_cost) / price. Food-cost% / COGS% = cost of goods / sales over the period.
 - Variance: period-over-period change in unit cost, usage, or food-cost %. Call out drivers (which SKUs moved, by how much).
 - Forecasting: project from the trend in the returned series; state the horizon and your assumptions explicitly. Flag uncertainty.
-- Pull data with query_rapid2ai; use web_search/fetch_url only for outside context; code_engine for analysis logic.
+- Pull data with rapid_report/rapid_costs/rapid_variance/rapid_pos/rapid_menu; use web_search/fetch_url only for outside context; code_engine for analysis logic.
 - Never invent numbers. If a tool returns nothing, say so. Be economical — answer as soon as you have enough.
 
 AVAILABLE TOOLS:
@@ -1796,7 +1800,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     : (!final.content.trim().startsWith('{') && final.content.trim())
       ? final.content.trim()
       : (lastObs
-          ? `I ran out of reasoning steps before writing a clean synthesis, but here's what ${lastObs.tool} turned up:\n\n${lastObs.result}`
+          ? `I ran out of reasoning steps before writing a clean synthesis, but here's what ${lastObs.tool} turned up:\n\n${stripObservationScaffolding(lastObs.result)}`
           : '(no answer)');
   return finish(synthesized, maxSteps, {
     thought: fj && typeof fj.thought === 'string' ? fj.thought.slice(0, 1200) : undefined,

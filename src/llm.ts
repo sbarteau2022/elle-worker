@@ -917,6 +917,25 @@ export function firstJsonObjectFrom(text: unknown): Record<string, unknown> | nu
   return null;
 }
 
+// Tool observations (page_read, find_document, search results, …) are
+// wrapped in citation-style scaffolding meant only for the trace UI:
+// "[page <id> · chars X–Y of Z]" / "[<title> — <series> · id <id>]" headers,
+// "---" fragment separators, and "…[truncated N chars]" / "…[N chars
+// remain — …]" / "[end of page]" markers. If a raw observation ever leaks
+// into the chat-facing answer (e.g. a steps-exhausted fallback), this strips
+// that plumbing back out so the chat bubble renders as prose, not a garbled
+// tool dump.
+export function stripObservationScaffolding(raw: string): string {
+  return String(raw ?? '')
+    .replace(/\[[^\[\]]*·[^\[\]]*\]\n?/g, '')
+    .replace(/…?\[\d+ chars remain[^\]]*\]\n?/g, '')
+    .replace(/…?\[truncated \d+ chars\]\n?/g, '')
+    .replace(/\[end of page\]\n?/g, '')
+    .replace(/\n{0,2}-{3,}\n{0,2}/g, '\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function sanitizeAnswer(raw: unknown): string {
   let s = String(raw ?? '').trim();
   if (!s) return s;
@@ -926,7 +945,7 @@ export function sanitizeAnswer(raw: unknown): string {
     const obj = firstJsonObjectFrom(s);
     if (obj) {
       const inner = obj.answer ?? obj.content ?? obj.response ?? obj.text ?? obj.message;
-      if (typeof inner === 'string' && inner.trim()) return inner.trim();
+      if (typeof inner === 'string' && inner.trim()) return stripObservationScaffolding(inner.trim());
       // Pure scaffolding ({"tool":...} / {"thought":...}) with no textual field:
       // drop it entirely rather than leak the blob to the user.
       if ('tool' in obj || 'thought' in obj || 'action' in obj) return '';
@@ -944,7 +963,7 @@ export function sanitizeAnswer(raw: unknown): string {
     '',
   ).trimStart();
   if (s && s !== before) s = s.charAt(0).toUpperCase() + s.slice(1);
-  return s || before;
+  return stripObservationScaffolding(s) || before;
 }
 
 // ============================================================

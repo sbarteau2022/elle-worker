@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { z } from 'zod';
-import { callLLM, runLLM, jsonLLM, callAnthropic } from './llm';
+import { callLLM, runLLM, jsonLLM, callAnthropic, sanitizeAnswer, stripObservationScaffolding } from './llm';
 import type { LLMEnv } from './llm';
 
 // A fetch stub that routes by URL substring; records every URL it saw so a test
@@ -208,5 +208,49 @@ describe('jsonLLM — schema-validated structured output with one repair retry',
 
     await expect(jsonLLM(env, 'route this ticket', RouteSchema, { prefer: 'local' })).rejects.toThrow(/schema validation failed/);
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+// A raw tool observation (page_read, find_document, joined search results)
+// carries citation-style scaffolding meant for the trace UI only. If it ever
+// leaks into the chat-facing answer, the chat bubble renders as a garbled
+// tool dump instead of prose. stripObservationScaffolding() is the guard
+// that keeps that plumbing out of the answer.
+describe('stripObservationScaffolding', () => {
+  it('strips a page_read header and its continuation marker', () => {
+    const raw = '[page 6d708d6ba5fb92bffb0689e0 · chars 2800–5600 of 5694]\nEmma Strubell et al. (Proceedings of\n…[1200 chars remain — page_read {"page_id":"6d708d6ba5fb92bffb0689e0","seek":5600}]';
+    const out = stripObservationScaffolding(raw);
+    expect(out).toBe('Emma Strubell et al. (Proceedings of');
+  });
+
+  it('strips find_document / search-result headers and --- separators between joined fragments', () => {
+    const raw = '[Title One — research, 400w · id abc123]\nFirst finding.\n\n---\n\n[Title Two — research · id def456]\nSecond finding.';
+    const out = stripObservationScaffolding(raw);
+    expect(out).toBe('First finding.\n\nSecond finding.');
+  });
+
+  it('strips a truncation marker and an end-of-page marker', () => {
+    expect(stripObservationScaffolding('some text\n…[truncated 42 chars]')).toBe('some text');
+    expect(stripObservationScaffolding('some text\n[end of page]')).toBe('some text');
+  });
+
+  it('leaves ordinary prose untouched', () => {
+    const prose = 'Here is a plain answer with no scaffolding at all.';
+    expect(stripObservationScaffolding(prose)).toBe(prose);
+  });
+});
+
+describe('sanitizeAnswer — scaffolding never reaches the chat surface', () => {
+  it('strips citation scaffolding even when the fallback prose text wraps a raw observation', () => {
+    const raw = "I ran out of reasoning steps before writing a clean synthesis, but here's what page_read turned up:\n\n[page 6d708d6ba5fb92bffb0689e0 · chars 2800–5600 of 5694]\nEmma Strubell et al. (Proceedings of\n…[1200 chars remain — page_read {\"page_id\":\"6d708d6ba5fb92bffb0689e0\",\"seek\":5600}]";
+    const out = sanitizeAnswer(raw);
+    expect(out).not.toContain('· chars');
+    expect(out).not.toContain('chars remain');
+    expect(out).toContain('Emma Strubell et al.');
+  });
+
+  it('still unwraps a leaked {"answer": "..."} envelope and strips any scaffolding inside it', () => {
+    const raw = '{"answer": "[Title — research · id abc123]\\nClean finding text."}';
+    expect(sanitizeAnswer(raw)).toBe('Clean finding text.');
   });
 });
