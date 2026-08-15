@@ -119,13 +119,32 @@ Be specific. Cite what you find. Flag what you cannot verify.`;
   // ~700 research papers reading as a handful of ideas repeated for months.
   // Priors feed the overlap gate below (reject/regenerate a near-verbatim
   // repeat) and steer the prompt away from an angle already published.
-  const priorRows = await env.DB.prepare(
-    `SELECT title, full_text FROM corpus_papers WHERE series = 'research' ORDER BY ingested_at DESC LIMIT 50`
-  ).all().catch(() => ({ results: [] as Record<string, unknown>[] }));
-  const priorPapers = (priorRows.results || []) as { title?: string; full_text?: string }[];
+  //
+  // That LIMIT-50 recency window is itself still too short: with 60 topics
+  // rotating hourly, THIS topic comes back around every ~60 hours — outside
+  // a 50-row window — so its own last write-up had already scrolled out of
+  // `priors` by the time it recurred, and the overlap gate silently never
+  // saw it. Union in the topic's own history explicitly (matched on the
+  // topic text embedded in the title) so a recurrence is always checked
+  // against its own prior instances, however long the gap between them —
+  // instead of only whatever happens to still be in the last 50 rows.
+  const topicSlice = topic.topic.slice(0, 80);
+  const [priorRows, sameTopicRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT title, full_text FROM corpus_papers WHERE series = 'research' ORDER BY ingested_at DESC LIMIT 50`
+    ).all().catch(() => ({ results: [] as Record<string, unknown>[] })),
+    env.DB.prepare(
+      `SELECT title, full_text FROM corpus_papers WHERE series = 'research' AND title LIKE ? ORDER BY ingested_at DESC LIMIT 8`
+    ).bind(`%${topicSlice}%`).all().catch(() => ({ results: [] as Record<string, unknown>[] })),
+  ]);
+  const priorPapers = [
+    ...((priorRows.results || []) as { title?: string; full_text?: string }[]),
+    ...((sameTopicRows.results || []) as { title?: string; full_text?: string }[]),
+  ];
   const priors = priorPapers.map(p => String(p.full_text || '')).filter(Boolean);
   // Only the most recent 12 titles go into the prompt itself (keeps it
-  // readable) — the full 50 still back the overlap-gate's similarity check.
+  // readable) — the full merged set still backs the overlap-gate's
+  // similarity check.
   const priorTitles = priorPapers.slice(0, 12).map(p => String(p.title || '')).filter(Boolean);
   const avoidance = priorTitles.length
     ? `\n\nYou have already published these research entries recently — find a genuinely new angle, primary source, or development. Do not restate them:\n${priorTitles.map(t => `- ${t}`).join('\n')}`
