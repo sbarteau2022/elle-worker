@@ -24,7 +24,8 @@ import type { Env } from './index';
 import { computeTurnDynamics } from './kappa-turn';
 import { computeKappa } from './journal';
 import type { KappaPoint } from './kappa-dynamics';
-import { ELLE_VOICE, resolveVoice, phaseBlock } from './mind';
+import { ELLE_VOICE, resolveVoice, phaseBlock, type Surface } from './mind';
+import { collectArtifacts, addArtifacts, type ArtifactRef } from './artifacts';
 import { ensureOnce, orderKey, ingestKey } from './router-idempotency';
 import { runForgeTool } from './forge';
 import { skillList, skillRead, skillWrite, skillIndex, skillRouteBlock, skillRouteTool } from './skills';
@@ -151,6 +152,12 @@ export interface RouterResult {
   // in a privileged scope (see WRITE_TOOLS below). Never gates or alters the
   // answer; a caller that cares can surface it, one that doesn't can ignore it.
   verification?: { verdict: string; note: string };
+  // What the run LEFT BEHIND: R2-backed images/media a tool produced during it
+  // (vfar generate/resynth, flock media), in sighting order and de-duplicated.
+  // Present only when the run actually made something. A surface that can
+  // render an image renders these; one that can't still has the paths, and the
+  // answer prose is unaffected either way. See src/artifacts.ts.
+  artifacts?: ArtifactRef[];
 }
 
 // Raw capture cap per tool. The central pager (see the loop) decides what the
@@ -510,7 +517,7 @@ export function renderLocalLoopCatalog(): string {
   return renderCatalog('full', LOCAL_LOOP_DENY);
 }
 
-function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown, plan = '', exclude?: Set<string>): string {
+function systemPrompt(scope: Scope = 'full', phase = '', voice?: unknown, plan = '', exclude?: Set<string>, surface: Surface = 'plain'): string {
   if (scope === 'hospitality') {
     return `You are RAPID²AI — a restaurant & hospitality intelligence analyst working for the operator. Your job is concrete and numeric: pull the actual figures, compute, and answer precisely about margin, COGS / food-cost %, cost variance, and demand forecasting. You reason ONLY over the operator's own data (US Foods invoices + Square POS) through the tools below. You have no other systems and never reference any.
 
@@ -570,7 +577,7 @@ ${HOSPITALITY_CATALOG}`;
     `- AMBIGUOUS LOOKUPS: when find_document (or a search) comes back with several candidates instead of one clear winner, that list IS a complete answer — present it and ask which one they mean. Do not burn steps fetching every candidate to guess; you will run out before you can answer at all.`,
   ].filter(Boolean).join('\n');
 
-  return `${resolveVoice(voice)}${phase}${plan}
+  return `${resolveVoice(voice, surface)}${phase}${plan}
 
 — how you operate (mechanics, never spoken aloud) —
 You work in a strict loop. On each turn respond with EXACTLY ONE JSON object and nothing else — no prose outside the JSON.
@@ -1379,7 +1386,7 @@ Continue from here — at most a couple more tool calls if genuinely needed — 
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; plan?: boolean; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; plan?: boolean; surface?: Surface; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
   // Step ceiling is scope-aware: 'public'/'hospitality' can never reach a
@@ -1400,7 +1407,17 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // Prose register for this run (per-user preference). Autonomous/hospitality
   // runs pass nothing and get the canonical self. resolveVoice guards bad ids.
   const voice = opts.voice;
+  // What the CALLER'S surface can render. Defaults to plain: the widget and the
+  // public site write her answer with textContent/escapeHtml, so plain is the
+  // truthful contract for every door that doesn't say otherwise. Only a door
+  // that actually runs a markdown renderer opts in (see index.ts /api/elle-router).
+  const surface: Surface = opts.surface === 'markdown' ? 'markdown' : 'plain';
   const trace: RouterStep[] = [];
+  // Artifacts this run produced, accumulated across steps. Collected from the
+  // FULL observation at each dispatch site — before the central pager truncates
+  // it — because a path that falls past the page boundary is a picture she made
+  // and the caller never hears about.
+  const artifacts: ArtifactRef[] = [];
 
   // Event bus: one correlation id per run. Every step emits into elle_events
   // from the single dispatch point below — best-effort, never fatal. This is
@@ -1526,7 +1543,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // fail would just invite the model to waste a step discovering that. The
   // moment the key lands as a Worker secret, the tool appears on its own.
   const catalogExclude = env.ANTHROPIC_API_KEY ? undefined : new Set(['advisor']);
-  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice, planBlock, catalogExclude);
+  const system = systemPrompt(scope, phase + skills + routed + selfBlocks + who + onboard, voice, planBlock, catalogExclude, surface);
 
   // Persist (question, answer) on the way out so the next turn remembers it.
   // Best-effort: a memory write must never fail the actual answer.
@@ -1534,6 +1551,11 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // into its "answer" string, the caller only ever sees clean prose.
   const finish = async (rawAnswer: string, steps: number, final?: { thought?: string; thinking?: string }): Promise<RouterResult> => {
     const answer = sanitizeAnswer(rawAnswer) || rawAnswer;
+    // The answer itself is the last place to look: she may name an artifact she
+    // is holding from an earlier turn (durable memory, session history) that no
+    // tool in THIS run produced. Same de-dupe and cap, so a path already
+    // collected from a step keeps that step's provenance.
+    addArtifacts(artifacts, collectArtifacts(answer));
     // κ dynamics over the final OUTPUT ONLY (dt=1 per turn). Best-effort: the
     // chat header reads this; never let it fail the answer or the memory write.
     let kappa_dynamics: KappaPoint | null = null;
@@ -1573,6 +1595,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       final_thought: final?.thought || undefined,
       final_thinking: final?.thinking ? clip(final.thinking, 4000) : undefined,
       reasoning, verification,
+      ...(artifacts.length ? { artifacts: [...artifacts] } : {}),
     };
   };
 
@@ -1691,6 +1714,11 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
             obs = `tool error (${req.tool}): ${e instanceof Error ? e.message : String(e)}`;
           }
           if (flinch) obs = flinch + obs;
+          // Read artifacts off the whole observation before the pager below can
+          // cut the path out of it. Carried on the outcome rather than merged
+          // here so the fold stays in the sequential loop — deterministic order
+          // regardless of which of these parallel calls settles first.
+          const found = collectArtifacts(obs, req.tool);
           // Central pager, per observation — same threshold/logic as the
           // single-tool path.
           if (obs.length > PAGE_THRESHOLD && req.tool !== 'page_read') {
@@ -1700,9 +1728,10 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
                 `\n…[paged — ${pg.size} chars total · page_read {"page_id":"${pg.id}","seek":${SCRATCH_SLICE}} if the rest matters]`;
             } catch { obs = clip(obs, PAGE_THRESHOLD); }
           }
-          return { ...req, obs };
+          return { ...req, obs, found };
         }));
         for (const o of outcomes) {
+          addArtifacts(artifacts, o.found);
           const isErr = o.obs.startsWith(`tool error (${o.tool})`);
           ping({ kind: 'obs', step, tool: o.tool, result: clip(o.obs, 800), duration_ms: Date.now() - t0 });
           trace.push({ tool: o.tool, args: o.args, result: clip(o.obs, 800), thought: stepThought, thinking: stepThinking, kappa: stepKappa });
@@ -1751,6 +1780,8 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
       }
       const isErr = obs.startsWith(`tool error (${parsed.tool})`);
       if (flinch) obs = flinch + obs;
+      // Before the pager (further down this branch) can truncate the path away.
+      addArtifacts(artifacts, collectArtifacts(obs, parsed.tool));
       ping({ kind: 'obs', step, tool: parsed.tool, result: clip(obs, 800), duration_ms: Date.now() - t0 });
       trace.push({ tool: parsed.tool, args, result: clip(obs, 800), thought: stepThought, thinking: stepThinking, kappa: stepKappa });
       // One emit per tool step — the whole event bus rides on this line.

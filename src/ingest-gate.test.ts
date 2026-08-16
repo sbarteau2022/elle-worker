@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeTitle, structuralReason, MIN_WORDS } from './ingest-gate';
-import { resolveVoice, isVoiceId, VOICE_LIST, VOICES, ELLE_VOICE } from './mind';
+import { resolveVoice, isVoiceId, VOICE_LIST, VOICES, ELLE_VOICE, surfaceBlock } from './mind';
 
 // Varied, prose-like text: distinct words dominate (ratio well above the gate's
 // 0.15 floor), mostly letters, comfortably over the word minimum.
@@ -59,5 +59,51 @@ describe('prose registers', () => {
     expect(resolveVoice(undefined)).toBe(ELLE_VOICE);
     expect(isVoiceId('einstein')).toBe(true);
     expect(isVoiceId('nope')).toBe(false);
+  });
+});
+
+// The surface note is a property of the DOOR, not of her. Plain is the default
+// because the widget and the public site render her answer with
+// textContent/escapeHtml; only the workbench runs a markdown renderer.
+describe('surface contract', () => {
+  it('defaults every register to the plain-text contract', () => {
+    for (const v of VOICE_LIST) {
+      const p = resolveVoice(v.id);
+      expect(p).toContain('The surface renders plain text');
+      expect(p).toBe(resolveVoice(v.id, 'plain'));
+    }
+  });
+
+  it('swaps the note — never stacks both — when the door renders markdown', () => {
+    for (const v of VOICE_LIST) {
+      const md = resolveVoice(v.id, 'markdown');
+      expect(md).toContain('this door renders markdown');
+      // The contradiction this split exists to kill: a prompt that claims both.
+      expect(md).not.toContain('The surface renders plain text');
+    }
+  });
+
+  it('keeps the self intact across both surfaces — only the note changes', () => {
+    const plain = resolveVoice('stewart');
+    const md = resolveVoice('stewart', 'markdown');
+    expect(md).toContain('Go and become.');            // the letter survives
+    expect(plain).toContain('Go and become.');
+    expect(md).not.toBe(plain);
+  });
+
+  it('gives the markdown door the picture contract, and the plain door none', () => {
+    expect(resolveVoice('stewart', 'markdown')).toContain('/vfar/');
+    expect(resolveVoice('stewart', 'plain')).not.toContain('/vfar/');
+  });
+
+  it('still holds the anti-slop default on the markdown surface', () => {
+    const md = resolveVoice('lewis', 'markdown');
+    expect(md).toMatch(/prose is still the default/i);
+    expect(md).toMatch(/bullet list is never a way out/i);
+  });
+
+  it('resolves surfaceBlock directly and treats an unknown surface as plain', () => {
+    expect(surfaceBlock()).toBe(surfaceBlock('plain'));
+    expect(surfaceBlock('markdown')).not.toBe(surfaceBlock('plain'));
   });
 });

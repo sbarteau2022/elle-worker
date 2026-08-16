@@ -2655,6 +2655,11 @@ export default {
         sessionId: rb.session_id || null,
         source: 'elle-router',
         voice: rb.voice,
+        // The workbench chat renders her answer through src/lib/md.tsx —
+        // headings, tables, fenced code, and now images — so this door tells her
+        // the truth about its surface. Every other door leaves this unset and
+        // keeps the plain-text contract the widget and public site actually have.
+        surface: 'markdown' as const,
         // prefer:'local' pins the loop to the sovereign lane — same tools,
         // generation on the laptop's own model over the sandbox socket, free.
         // Demotes to hosted transparently when the laptop is away.

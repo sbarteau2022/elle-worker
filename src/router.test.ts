@@ -476,3 +476,69 @@ describe('runRouter — verification pass (devilTool second opinion on consequen
     expect(result.verification).toBeUndefined();
   });
 });
+
+// ============================================================
+// Artifacts — what a run LEAVES BEHIND. When a tool stores an image in R2 it
+// hands back a path; before this, that path lived only inside an observation
+// and the caller never learned a picture had been made. See src/artifacts.ts.
+// ============================================================
+const IMG = '/vfar/0123456789abcdef0123456789abcdef.jpg';
+const IMG2 = '/vfar/ffffffffffffffffffffffffffffffff.png';
+
+describe('runRouter — artifacts', () => {
+  it('carries an artifact out of a tool observation onto the result', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ tool: 'search_corpus', args: { query: 'the heron plate' } }),
+        geminiResponse({ answer: 'Here it is.' }),
+      ],
+    });
+    const deps = makeDeps({ ragSearch: vi.fn(async () => JSON.stringify({ stored: IMG })) });
+    const result = await runRouter('show me', makeEnv(), deps, { scope: 'full', sessionId: null });
+    expect(result.artifacts).toEqual([{ path: IMG, kind: 'image', tool: 'search_corpus' }]);
+  });
+
+  it('picks up a path she names in the answer with no tool involved', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [geminiResponse({ answer: `The one from yesterday:\n${IMG2}` })],
+    });
+    const result = await runRouter('the one from yesterday', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    expect(result.artifacts).toEqual([{ path: IMG2, kind: 'image' }]);
+  });
+
+  it('de-duplicates when the same picture appears in both the observation and the answer', async () => {
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ tool: 'search_corpus', args: { query: 'x' } }),
+        geminiResponse({ answer: `Made it: ${IMG}` }),
+      ],
+    });
+    const deps = makeDeps({ ragSearch: vi.fn(async () => JSON.stringify({ stored: IMG })) });
+    const result = await runRouter('q', makeEnv(), deps, { scope: 'full', sessionId: null });
+    // One entry, and it keeps the TOOL's provenance rather than the answer's.
+    expect(result.artifacts).toEqual([{ path: IMG, kind: 'image', tool: 'search_corpus' }]);
+  });
+
+  it('omits the field entirely on a run that made nothing', async () => {
+    stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'Just words.' })] });
+    const result = await runRouter('hi', makeEnv(), makeDeps(), { scope: 'public', sessionId: null });
+    expect(result.artifacts).toBeUndefined();
+  });
+
+  it('survives the pager — a path past the page boundary still reaches the caller', async () => {
+    // The reason collection happens before the central pager: an observation
+    // over PAGE_THRESHOLD is truncated to its head, and a path sitting in the
+    // tail would otherwise be cut out of the run's record entirely.
+    stubFetchRoutes({
+      'generativelanguage.googleapis.com': [
+        geminiResponse({ tool: 'search_corpus', args: { query: 'x' } }),
+        geminiResponse({ answer: 'found it' }),
+      ],
+    });
+    const huge = 'x'.repeat(60_000) + ` ${IMG}`;
+    const deps = makeDeps({ ragSearch: vi.fn(async () => huge) });
+    const result = await runRouter('q', makeEnv(), deps, { scope: 'full', sessionId: null });
+    expect(result.trace[0].result).not.toContain(IMG);   // paged away from the trace
+    expect(result.artifacts).toEqual([{ path: IMG, kind: 'image', tool: 'search_corpus' }]);
+  });
+});
