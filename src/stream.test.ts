@@ -34,6 +34,20 @@ describe('memberDonePayload', () => {
   it('nulls absent kappa dynamics exactly like the JSON endpoint', () => {
     expect(memberDonePayload({ answer: 'a' }, 's').kappa_dynamics).toBeNull();
   });
+
+  // Artifacts (src/artifacts.ts) reach the phone through this payload. The key
+  // is present ONLY when the run made something, so the shape above — which a
+  // client may be matching on — is untouched on every ordinary turn.
+  it('carries artifacts through when the run made something', () => {
+    const art = [{ path: '/vfar/0123456789abcdef0123456789abcdef.jpg', kind: 'image', tool: 'vfar' }];
+    const p = memberDonePayload({ answer: 'made it', artifacts: art }, 's1');
+    expect(p.artifacts).toEqual(art);
+  });
+
+  it('omits the artifacts key entirely on a run that made nothing', () => {
+    expect(memberDonePayload({ answer: 'a' }, 's')).not.toHaveProperty('artifacts');
+    expect(memberDonePayload({ answer: 'a', artifacts: [] }, 's')).not.toHaveProperty('artifacts');
+  });
 });
 
 describe('sseDoor', () => {

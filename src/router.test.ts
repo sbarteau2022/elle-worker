@@ -542,3 +542,32 @@ describe('runRouter — artifacts', () => {
     expect(result.artifacts).toEqual([{ path: IMG, kind: 'image', tool: 'search_corpus' }]);
   });
 });
+
+// ============================================================
+// The surface contract, end to end through the loop: opts.surface must reach
+// the system prompt the model actually receives. mind.ts owns the two texts
+// (ingest-gate.test.ts pins those); this pins the WIRING, which is the part a
+// refactor can quietly drop.
+// ============================================================
+describe('runRouter — surface', () => {
+  const sentSystemPrompt = (fn: ReturnType<typeof stubFetchRoutes>): string => {
+    const call = fn.mock.calls[0] as unknown as [string, RequestInit];
+    return JSON.stringify(JSON.parse(String(call[1].body)));
+  };
+
+  it('defaults to the plain-text contract when the caller says nothing', async () => {
+    const fn = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'ok' })] });
+    await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null });
+    const sent = sentSystemPrompt(fn);
+    expect(sent).toContain('The surface renders plain text');
+    expect(sent).not.toContain('this door renders markdown');
+  });
+
+  it('sends the markdown contract when the caller declares that surface', async () => {
+    const fn = stubFetchRoutes({ 'generativelanguage.googleapis.com': [geminiResponse({ answer: 'ok' })] });
+    await runRouter('q', makeEnv(), makeDeps(), { scope: 'full', sessionId: null, surface: 'markdown' });
+    const sent = sentSystemPrompt(fn);
+    expect(sent).toContain('this door renders markdown');
+    expect(sent).not.toContain('The surface renders plain text');
+  });
+});
