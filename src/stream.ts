@@ -30,7 +30,7 @@ export function sseFrame(event: string, data: unknown): string {
 // non-streaming client parse one shape. (content/response duplication is the
 // endpoint's long-standing contract; both stay.)
 export function memberDonePayload(
-  out: { answer: string; steps?: unknown; kappa_dynamics?: unknown },
+  out: { answer: string; steps?: unknown; kappa_dynamics?: unknown; artifacts?: unknown[] },
   sessionId: string,
 ): Record<string, unknown> {
   return {
@@ -39,6 +39,10 @@ export function memberDonePayload(
     session_id:     sessionId,
     steps:          out.steps,
     kappa_dynamics: out.kappa_dynamics ?? null,
+    // What the run made (src/artifacts.ts). Omitted entirely when the run made
+    // nothing, so the shape only grows when there is genuinely something to
+    // show — and a client that ignores the key is unaffected either way.
+    ...(out.artifacts?.length ? { artifacts: out.artifacts } : {}),
   };
 }
 

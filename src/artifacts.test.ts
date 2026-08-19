@@ -119,3 +119,43 @@ describe('isArtifactPath', () => {
     expect(isArtifactPath(42)).toBe(false);
   });
 });
+
+// ============================================================
+// CROSS-BUNDLE CONFORMANCE.
+//
+// This grammar lives in three separately-deployed bundles: here, the
+// workbench (Elle/src/lib/artifacts.ts) and the phone
+// (Elle/mobile/src/lib/artifacts.ts). They cannot share code — the clients
+// bundle separately and Metro is rooted at mobile/ — and they cannot even be
+// byte-identical, because this copy needs CAPTURING groups to tell an image
+// from a video while the clients use non-capturing ones.
+//
+// So the contract is pinned by BEHAVIOR instead, over one fixture table that
+// is duplicated verbatim into the other two test files. If a route is added
+// or a shape changes in one bundle and not the others, whichever bundle was
+// left behind fails here — instead of silently rendering a broken image, or
+// silently declining to render a real one.
+// ============================================================
+const CONFORMANCE: Array<[string, boolean]> = [
+  ['/vfar/0123456789abcdef0123456789abcdef.jpg', true],
+  ['/vfar/ffffffffffffffffffffffffffffffff.png', true],
+  ['/flock/asset/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4', true],
+  ['/flock/asset/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpeg', true],
+  ['/vfar/tooshort.jpg', false],
+  ['/vfar/0123456789ABCDEF0123456789ABCDEF.jpg', false],   // route is lowercase
+  ['/vfar/0123456789abcdef0123456789abcdef.gif', false],
+  ['/vfar/0123456789abcdef0123456789abcdef.pngx', false],
+  ['/hyper/0123456789abcdef0123456789abcdef.json', false],
+  ['/flock/0123456789abcdef0123456789abcdef.png', false],  // missing /asset/
+  ['/vfar/0123456789abcdef0123456789abcdef.jpg?x=1', false],
+  [' /vfar/0123456789abcdef0123456789abcdef.jpg', false],
+  ['https://evil.example/vfar/0123456789abcdef0123456789abcdef.jpg', false],
+  ['/etc/passwd', false],
+  ['', false],
+];
+
+describe('cross-bundle conformance', () => {
+  it.each(CONFORMANCE)('isArtifactPath(%j) === %s in every bundle', (path, expected) => {
+    expect(isArtifactPath(path)).toBe(expected);
+  });
+});

@@ -1036,7 +1036,7 @@ function routerDeps() {
 async function handleMindConversation(
   body: Record<string, unknown>, env: Env, userId: string, scope: Scope, ctx?: ExecutionContext,
 ): Promise<Response> {
-  const b = body as { query?: string; messages?: Array<{ role: string; content: string }>; session_id?: string; system?: string; source?: string; paper_id?: string; tools?: boolean; max_steps?: number; voice?: string; stream?: boolean };
+  const b = body as { query?: string; messages?: Array<{ role: string; content: string }>; session_id?: string; system?: string; source?: string; paper_id?: string; tools?: boolean; max_steps?: number; voice?: string; stream?: boolean; surface?: string };
   // Caller-controlled system prompt or explicit opt-out → the legacy path is
   // the honest one (the loop's mechanics assume HER prompt). paper_id too: an
   // exact-document pull is a stuffing pattern, not a retrieval decision.
@@ -1050,9 +1050,16 @@ async function handleMindConversation(
   // her context. Any other session id keeps today's semantics.
   if (sessionId.startsWith('door:') && sessionId !== `door:${userId}`) return err('Forbidden session', 403);
   const src = b.source || 'elle-conversation';
+  // THE SURFACE, DECLARED BY THE CLIENT. This door is shared: the phone renders
+  // her through a real markdown renderer (Elle/mobile/src/lib/md.tsx — headings,
+  // tables, code, images), while the public site's signed-in chat (elle.astro
+  // fmt()) escapes everything and supports only **bold** and `code`. One
+  // hardcoded answer would be a lie to one of them, so the caller names what it
+  // can render and anything that doesn't ask gets the plain-text contract.
   const opts = {
     maxSteps: Math.min(Number(b.max_steps) || (scope === 'public' ? 4 : 6), 8),
     scope, userId, sessionId, source: src, voice: b.voice,
+    surface: b.surface === 'markdown' ? ('markdown' as const) : ('plain' as const),
   };
 
   // LIVE MODE (stream:true) — same wire the admin router speaks: run_start,
