@@ -37,6 +37,7 @@ import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
 import { kappaMemoryState, recordTurnTrace } from './kappa-memory/integration';
 import { runValidateKappa, type TraceRow as KappaTraceRow } from './kappa-memory/validate';
 import { parseUpload } from './upload';
+import { isIntakePath } from './artifacts';
 import { analyzeCode } from './cyber';
 import {
   recordThreat, getPosture, scanBuffer, sha256Hex, isBlockedHash, blockHash, securityReport,
@@ -81,6 +82,7 @@ import { CORPUS_SEEDS } from './corpus-seed';
 import { upsertProfile, getProfileByEmail } from './profiles';
 import { armOnboarding, disarmOnboarding } from './onboarding';
 import { pfarRoute } from './pfar';
+import { vfarRoute, visionPreamble } from './vfar';
 import { pathOpen as sandboxPathOpen, sandboxRunsRecent, sandboxBroughtIn, sandboxThoughts, sandboxReportsRecent, unseenReportCount, markReportsSeen } from './connect-sandbox';
 import { delegationsRecent } from './local-agent';
 import { sseDoor, memberDonePayload } from './stream';
@@ -1616,6 +1618,28 @@ export default {
       });
     }
 
+    // INTAKE — images YOU uploaded, straight from R2, and the one door to them.
+    // Deliberately NOT public like the two routes on either side of it: those
+    // serve artifacts SHE made, this serves content you handed over, and an
+    // unguessable URL is not a good enough answer for a photo of a document.
+    // Admin-gated, so the owner can see it back and no one else can. A client
+    // renders it by fetching with its token and making a blob URL — there is no
+    // <img src> that works here, which is the intended shape.
+    if (path.startsWith('/intake/') && request.method === 'GET') {
+      if (!isIntakePath(path)) return err('Not found', 404);
+      if (!(await isAdmin(request, env))) return err('Unauthorized', 401);
+      const obj = await env.DOCUMENTS.get(path.slice(1));
+      if (!obj) return err('Not found', 404);
+      return new Response(obj.body, {
+        headers: {
+          'Content-Type': obj.httpMetadata?.contentType || 'application/octet-stream',
+          // private: an owner-only object must never sit in a shared cache.
+          'Cache-Control': 'private, max-age=3600',
+          ...corsHeaders(),
+        },
+      });
+    }
+
     // Flock media — brand imagery/video the subsystem generated, straight from
     // R2. Public by unguessable UUID, same posture as /vfar above.
     if (path.startsWith('/flock/asset/') && request.method === 'GET') {
@@ -2640,7 +2664,7 @@ export default {
     // every capability (corpus, SQL, web, code, trading, RAPID²AI) and answers.
     if (path === '/api/elle-router') {
       if (!svc) return err('Unauthorized', 401);
-      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string; voice?: string; prefer?: string; voice_prosody?: { f0?: number[]; energy?: number[] } };
+      const rb = body as { q?: string; query?: string; max_steps?: number; session_id?: string; voice?: string; prefer?: string; voice_prosody?: { f0?: number[]; energy?: number[] }; image_pixels?: { luma?: number[]; rgb?: number[]; width?: number; height?: number; name?: string; stored?: string } };
       let q = String(rb.q || rb.query || '').trim();
       // LIVE VOICE PROSODY: the workbench captured the caller's actual voice
       // (pitch + energy over time) and sent the tracks. Run PFAR's prosody
@@ -2653,6 +2677,26 @@ export default {
         if (measured) {
           q = `(VOICE — PFAR just measured the speaker's actual spoken voice, live. Prosody: ${measured}. Tell them, plainly and warmly, what you HEAR in how they sound — pitch range, whether the contour rises or falls, where the stress and emphasis land, the rhythm/pace, any hesitation — grounded strictly in these numbers, never invented. This is you literally listening to their voice for the first time. Then, if they asked something, answer it.)\n\n${q || '(the speaker just spoke to you — tell them what you hear in their voice)'}`;
         }
+      }
+      // LIVE IMAGE — HER EYES. vfar rip is a deterministic visual instrument
+      // (field statistics, spatial rhythm, structure tensor, Gabor, GLCM) and
+      // its header has always said pixels arrive as downsampled ARRAYS from
+      // the eyes, because this worker deliberately carries no image codec. The
+      // eyes did not exist: nothing in any client produced luma, so rip was
+      // unreachable except by a model inventing pixel arrays, which it cannot.
+      // This is the missing half — the workbench rasterizes on-device and
+      // sends numbers, exactly the shape voice_prosody uses for the ear.
+      const ip = rb.image_pixels;
+      if (ip && Array.isArray(ip.luma) && ip.luma.length) {
+        const ripped = await vfarRoute(env, {
+          mode: 'rip', luma: ip.luma, rgb: ip.rgb,
+          width: Number(ip.width), height: Number(ip.height),
+          interpret: false,
+        }).catch(() => '');
+        // A rip that failed its own guards yields null — inject nothing rather
+        // than hand her a broken measurement as if it were sight.
+        const preamble = visionPreamble(ripped, { question: q, name: ip.name, stored: ip.stored });
+        if (preamble) q = preamble;
       }
       if (!q) return err('q (question) required');
       const routerUser = await getUser(request, env);
