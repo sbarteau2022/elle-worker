@@ -222,3 +222,102 @@ function concat(parts: Uint8Array[]): Uint8Array {
   for (const c of parts) { out.set(c, o); o += c.length; }
   return out;
 }
+
+// ============================================================
+// describe's consent gate. The rule has always been that she can only look at
+// images she ALREADY HOLDS — never fetch an arbitrary outside one. Uploads
+// (/intake/…) join that set because you handed them over deliberately; the
+// gate itself is unchanged in spirit and must stay exact in letter.
+// ============================================================
+import { vfarRoute } from './vfar';
+import { isIntakePath } from './artifacts';
+
+const VFAR_OK = '/vfar/0123456789abcdef0123456789abcdef.jpg';
+const INTAKE_OK = '/intake/0123456789abcdef0123456789abcdef.png';
+
+// No R2 object exists for these, so an ACCEPTED path fails at the fetch and a
+// REJECTED one fails at the gate. The two errors are distinguishable, which is
+// exactly what lets this test tell "allowed" from "refused" with no bucket.
+const env = { DOCUMENTS: { get: async () => null } } as unknown as Parameters<typeof vfarRoute>[0];
+
+describe('vfar describe — what she is allowed to look at', () => {
+  it('accepts a stored artifact she made', async () => {
+    const out = JSON.parse(await vfarRoute(env, { mode: 'describe', image_path: VFAR_OK }));
+    expect(out.error).toMatch(/no artifact at/);          // past the gate
+  });
+
+  it('accepts an image you uploaded', async () => {
+    const out = JSON.parse(await vfarRoute(env, { mode: 'describe', image_path: INTAKE_OK }));
+    expect(out.error).toMatch(/no artifact at/);          // past the gate
+    expect(isIntakePath(INTAKE_OK)).toBe(true);
+  });
+
+  it('refuses anything else — the boundary is the point', async () => {
+    for (const bad of [
+      'https://evil.example/cat.png',
+      '/etc/passwd',
+      '/intake/short.png',
+      '/intake/0123456789abcdef0123456789abcdef.svg',
+      '/papers/0123456789abcdef0123456789abcdef.png',
+      '/vfar/0123456789abcdef0123456789abcdef.gif',
+      '',
+    ]) {
+      const out = JSON.parse(await vfarRoute(env, { mode: 'describe', image_path: bad }));
+      expect(out.error, bad).toMatch(/must be a stored/);  // stopped at the gate
+    }
+  });
+});
+
+// ============================================================
+// The eyes' preamble. vfar rip has always documented pixels arriving as arrays
+// "from the eyes (workbench/phone)" — but nothing produced them, so rip was
+// unreachable from any UI. This is the text that turns a rip into her seeing,
+// and its guards are what keep it honest.
+// ============================================================
+import { visionPreamble } from './vfar';
+
+const RIP = JSON.stringify({ field: { contrast: 0.42 }, rhythm: { horizontal: {} } });
+
+describe('visionPreamble', () => {
+  it('frames the numbers as her own measurement and keeps the question', () => {
+    const out = visionPreamble(RIP, { question: 'what is this?' })!;
+    expect(out).toContain('VISION');
+    expect(out).toContain(RIP);
+    expect(out.endsWith('what is this?')).toBe(true);
+  });
+
+  // The load-bearing honesty line: a rip is structure, not content. Without
+  // this she will happily narrate objects she cannot possibly see.
+  it('says plainly that structure is not content', () => {
+    expect(visionPreamble(RIP)).toMatch(/structure, not content/);
+  });
+
+  it('stands alone when they sent a picture and no words', () => {
+    expect(visionPreamble(RIP, { question: '   ' })).toMatch(/tell them what you see/);
+  });
+
+  it('injects NOTHING when the rip failed its own guards', () => {
+    expect(visionPreamble(JSON.stringify({ mode: 'rip', error: 'need luma[]' }))).toBeNull();
+    expect(visionPreamble('')).toBeNull();
+  });
+
+  it('points at the stored upload so she can also read what is depicted', () => {
+    const stored = '/intake/0123456789abcdef0123456789abcdef.png';
+    const out = visionPreamble(RIP, { stored })!;
+    expect(out).toContain(stored);
+    expect(out).toContain('describe');
+  });
+
+  // A path that is not a real intake path must never be echoed into the prompt
+  // as something she can open — that would be teaching her to try arbitrary paths.
+  it('ignores a stored path that is not a real intake path', () => {
+    for (const bad of ['/etc/passwd', 'https://evil.example/x.png', '/intake/short.png']) {
+      expect(visionPreamble(RIP, { stored: bad }), bad).not.toContain(bad);
+    }
+  });
+
+  it('caps a long filename rather than letting it pad the prompt', () => {
+    const out = visionPreamble(RIP, { name: 'x'.repeat(500) })!;
+    expect(out).not.toContain('x'.repeat(200));
+  });
+});

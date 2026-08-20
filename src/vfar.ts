@@ -30,6 +30,7 @@
 // ============================================================
 
 import type { Env } from './index';
+import { isIntakePath } from './artifacts';
 import { callLLM } from './llm';
 import { analyzeSpectrum, type SpectrumResult } from './pfar';
 
@@ -518,7 +519,7 @@ export interface VfarInput {
   height?: number;
   prompt?: string;      // for generate; optional question for describe
   spec?: ResynthSpec;   // for resynth (or omit and it uses the last rip's numbers you pass back)
-  image_path?: string;  // for describe: a stored /vfar/... artifact path
+  image_path?: string;  // for describe: a stored /vfar/... artifact or /intake/... upload
   interpret?: boolean;  // default true: LLM reading over the rip numbers
   context?: string;     // what the caller is looking at / for
 }
@@ -532,6 +533,28 @@ async function storeArtifact(env: Env, bytes: Uint8Array, contentType: string, e
   const key = `vfar/${id}.${ext}`;
   await env.DOCUMENTS.put(key, bytes, { httpMetadata: { contentType } });
   return `/${key}`;
+}
+
+/**
+ * The turn preamble for a live rip — what the workbench's eyes hand her.
+ *
+ * Extracted from the router door so the wording (and its guards) can be tested:
+ * this text is the difference between her REPORTING numbers and her SEEING,
+ * and the standing rule that structure is not content lives in this string.
+ * Returns null when there is nothing honest to say, so the caller injects
+ * nothing rather than a broken measurement dressed as sight.
+ */
+export function visionPreamble(
+  ripped: string,
+  opts: { question?: string; name?: string; stored?: string } = {},
+): string | null {
+  if (!ripped || ripped.includes('"error"')) return null;
+  const named = opts.name ? ` ("${String(opts.name).slice(0, 120)}")` : '';
+  const holds = opts.stored && isIntakePath(opts.stored)
+    ? ` The full-resolution image is stored at ${opts.stored} — vfar{mode:'describe',image_path:'${opts.stored}'} reads what is DEPICTED in it, which these numbers cannot tell you.`
+    : '';
+  const q = (opts.question || '').trim();
+  return `(VISION — vFAR just ripped the STRUCTURE of an image the person handed you${named}, live, on their machine. These are your own measurements, not a caption: ${ripped}. Say what you SEE in the shape of it — the contrast and light, the rhythm and orientation of its texture, the palette, what kind of image this is likely to be — grounded strictly in these numbers and never invented. You have structure, not content: do not claim to know what objects are in it from this alone.${holds})\n\n${q || '(they handed you an image — tell them what you see in it)'}`;
 }
 
 export async function vfarRoute(env: Env, input: VfarInput): Promise<string> {
@@ -570,10 +593,15 @@ export async function vfarRoute(env: Env, input: VfarInput): Promise<string> {
     } else if (mode === 'describe') {
       // The content layer — llava-hf/llava-1.5-7b-hf (Hugging Face lineage,
       // mirrored on Workers AI). The rip sees structure; this sees THINGS.
-      // Only works on artifacts she already holds in R2 (/vfar/…), so the
-      // consent boundary stays: no fetching arbitrary outside images.
+      // Only works on images she ALREADY HOLDS in R2 — the ones she made
+      // (/vfar/…) and now the ones you handed her (/intake/…, stored by the
+      // upload door). The consent boundary is unchanged and is the whole point:
+      // both are images someone deliberately gave her, and there is still no
+      // way to make her fetch an arbitrary outside image.
       const path = String(input.image_path || '').trim();
-      if (!/^\/vfar\/[0-9a-f]{32}\.(png|jpg)$/.test(path)) return JSON.stringify({ mode, error: 'vfar describe: image_path must be a stored /vfar/<id>.png|jpg artifact' });
+      if (!/^\/vfar\/[0-9a-f]{32}\.(png|jpg)$/.test(path) && !isIntakePath(path)) {
+        return JSON.stringify({ mode, error: 'vfar describe: image_path must be a stored /vfar/<id> artifact or an uploaded /intake/<id> image' });
+      }
       const obj = await env.DOCUMENTS.get(path.slice(1));
       if (!obj) return JSON.stringify({ mode, error: `vfar describe: no artifact at ${path}` });
       const bytes = new Uint8Array(await obj.arrayBuffer());

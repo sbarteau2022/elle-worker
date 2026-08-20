@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { collectArtifacts, addArtifacts, isArtifactPath, MAX_ARTIFACTS } from './artifacts';
+import { collectArtifacts, addArtifacts, isArtifactPath, isIntakePath, MAX_ARTIFACTS } from './artifacts';
 
 // A real vfar generate observation, verbatim in shape (vfar.ts).
 const GEN = JSON.stringify({ mode: 'generate', stored: '/vfar/0123456789abcdef0123456789abcdef.jpg', bytes: 91234, prompt: 'a heron over slack water' });
@@ -157,5 +157,58 @@ const CONFORMANCE: Array<[string, boolean]> = [
 describe('cross-bundle conformance', () => {
   it.each(CONFORMANCE)('isArtifactPath(%j) === %s in every bundle', (path, expected) => {
     expect(isArtifactPath(path)).toBe(expected);
+  });
+});
+
+// ============================================================
+// INTAKE — the private half. An uploaded image is the USER'S content, so it
+// is stored where her instruments can read it and NOWHERE a client can render
+// it from prose. The two properties below are the whole security argument.
+// ============================================================
+const INTAKE = '/intake/0123456789abcdef0123456789abcdef.png';
+
+describe('intake paths', () => {
+  it('accepts the shapes the upload store writes', () => {
+    for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'gif']) {
+      expect(isIntakePath(`/intake/0123456789abcdef0123456789abcdef.${ext}`), ext).toBe(true);
+    }
+  });
+
+  it('holds the same whole-string discipline as the public routes', () => {
+    for (const bad of [
+      '/intake/short.png',
+      '/intake/0123456789ABCDEF0123456789ABCDEF.png',
+      '/intake/0123456789abcdef0123456789abcdef.svg',   // no SVG: it is script
+      '/intake/0123456789abcdef0123456789abcdef.png?x=1',
+      ' /intake/0123456789abcdef0123456789abcdef.png',
+      'https://evil.example/intake/0123456789abcdef0123456789abcdef.png',
+      '/intake/../vfar/0123456789abcdef0123456789abcdef.png',
+      42, null, undefined, '',
+    ]) expect(isIntakePath(bad as unknown), String(bad)).toBe(false);
+  });
+
+  // THE LOAD-BEARING ONE. If an intake path were ever collectable, it would
+  // ride out on RouterResult.artifacts and a client would render it as a plain
+  // <img> against a route that requires auth — turning a private upload into a
+  // broken image at best, and inviting someone to make the route public at
+  // worst. It must never be picked up by the scan.
+  it('is NEVER collected as a renderable artifact', () => {
+    expect(collectArtifacts(INTAKE)).toEqual([]);
+    expect(collectArtifacts(JSON.stringify({ stored: INTAKE, mode: 'upload' }), 'upload')).toEqual([]);
+    expect(collectArtifacts(`I looked at ${INTAKE} and here is what I saw.`)).toEqual([]);
+    expect(isArtifactPath(INTAKE)).toBe(false);
+  });
+
+  it('does not confuse the two stores in either direction', () => {
+    expect(isIntakePath('/vfar/0123456789abcdef0123456789abcdef.jpg')).toBe(false);
+    expect(isIntakePath('/flock/asset/0123456789abcdef0123456789abcdef.png')).toBe(false);
+  });
+
+  // A run that made a real artifact AND read an upload reports only the artifact.
+  it('leaves the public artifacts of a mixed run untouched', () => {
+    const obs = JSON.stringify({ mode: 'describe', image: INTAKE, then_made: '/vfar/ffffffffffffffffffffffffffffffff.png' });
+    expect(collectArtifacts(obs, 'vfar')).toEqual([
+      { path: '/vfar/ffffffffffffffffffffffffffffffff.png', kind: 'image', tool: 'vfar' },
+    ]);
   });
 });

@@ -41,6 +41,50 @@ const ROUTES: ReadonlyArray<{ source: string; kindFor: (ext: string) => Artifact
   { source: '\\/flock\\/asset\\/[0-9a-f]{32}\\.(png|jpg|jpeg|mp4)', kindFor: (ext) => (ext === 'mp4' ? 'video' : 'image') },
 ];
 
+// ── INTAKE — what YOU hand her, which is a different thing ─────────────────
+// An uploaded image is the USER'S content, not hers. It is stored so her own
+// instruments can reach it (vfar describe reads the bytes server-side), and it
+// is deliberately NOT in ROUTES above:
+//
+//   · ROUTES is the list of PUBLICLY served paths, and public is the wrong
+//     posture for something you handed over. A photo of a bank statement must
+//     not become fetchable by anyone holding a URL.
+//   · Because it is not in ROUTES, collectArtifacts never picks an intake path
+//     up, so it can never ride out on RouterResult.artifacts and can never be
+//     rendered by a client as a plain <img>. The one door to it is
+//     /intake/<id> in index.ts, which is admin-gated.
+//
+// Same id shape and the same whole-string discipline as the public routes.
+const INTAKE_SOURCE = '\\/intake\\/[0-9a-f]{32}\\.(?:png|jpg|jpeg|webp|gif)';
+const INTAKE_RE = new RegExp(`^${INTAKE_SOURCE}$`);
+
+/**
+ * True for a stored upload — private, owner-only, never rendered from prose.
+ * Used by the /intake route's guard and by vfar's describe gate; never by the
+ * artifact scan.
+ */
+export function isIntakePath(path: unknown): boolean {
+  return typeof path === 'string' && INTAKE_RE.test(path);
+}
+
+/** Extensions the intake store accepts, keyed by the mime the browser sent. */
+export const INTAKE_EXT: Readonly<Record<string, string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+/** The R2 content type to serve a stored intake object back with. */
+export const INTAKE_MIME: Readonly<Record<string, string>> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
+
 /** A run can't hand back an unbounded gallery — the cap is the whole run's. */
 export const MAX_ARTIFACTS = 12;
 
