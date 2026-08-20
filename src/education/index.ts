@@ -64,13 +64,24 @@ async function fetchCourse(env: EduEnv, courseId: string): Promise<Course | null
   return course;
 }
 
-async function fetchCourseIds(env: EduEnv): Promise<string[]> {
+export interface CourseSummary { id: string; title: string; version: string; durationMonths: number; unitCount: number }
+
+async function fetchCourseSummaries(env: EduEnv): Promise<CourseSummary[]> {
   if (!env.CUSTOMCOURSEBUILDER) throw new Error('education: CUSTOMCOURSEBUILDER service binding not configured');
   const res = await env.CUSTOMCOURSEBUILDER.fetch('https://customcoursebuilder.internal/courses');
   if (!res.ok) throw new Error(`education: customcoursebuilder returned ${res.status} listing courses`);
-  const summaries = await res.json() as { id: string }[];
-  return summaries.map((s) => s.id);
+  return await res.json() as CourseSummary[];
 }
+
+async function fetchCourseIds(env: EduEnv): Promise<string[]> {
+  return (await fetchCourseSummaries(env)).map((s) => s.id);
+}
+
+// Course-picker surface for a real enrollment UI (GET /api/education/courses)
+// — the edu_* tool handlers below return conversational strings, but a
+// signup flow needs structured data to render a list, so this is exported
+// directly rather than routed through the router's tool contract.
+export const listCourses = fetchCourseSummaries;
 
 // ── D1-backed learner state ─────────────────────────────────
 // One row per learner; the engine operates on the whole state, so the

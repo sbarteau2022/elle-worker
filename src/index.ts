@@ -30,6 +30,7 @@ import { runResearchCycle } from './research';
 import { WIDGET_JS } from './widget';
 import { handleDiagnose } from './diagnose';
 import { runRouter, runTool, ensureNotebook, LOCAL_LOOP_DENY, type Scope } from './router';
+import { listCourses, eduEnroll, eduStatus } from './education/index';
 import { ELLE_VOICE, resolveVoice, VOICE_LIST } from './mind';
 import { handleOptimusJournal, journalWrite, journalRead, journalThread, journalAnnotate, runOptimusJournal, backfillPhaseState, KAPPA_DEF } from './journal';
 import { computeTurnDynamics, ensureConvKappaColumn } from './kappa-turn';
@@ -2856,6 +2857,30 @@ export default {
       if (count >= 60) return err('Rate limit reached — try again in an hour', 429);
       await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
       return handleMindConversation(body, env, user.id, 'member', ctx);
+    }
+    // The enrollment pipeline: a first-class signup surface, distinct from
+    // edu_enroll (the conversational tool the router calls mid-chat). A
+    // member-facing client needs structured data to render a course picker
+    // and a definite enroll/already-enrolled/error outcome, not a string
+    // aimed at the model's observation loop — these routes wrap the same
+    // engine calls in that shape rather than duplicating enrollment logic.
+    if (path === '/api/education/courses' && request.method === 'GET') {
+      return json({ courses: await listCourses(env) });
+    }
+    if (path === '/api/education/enroll' && request.method === 'POST') {
+      // Same per-user valve pattern as /api/elle-conversation, scoped to
+      // education actions so a runaway client can't also burn the chat quota.
+      const rlKey = `edu-rl:${user.id}`;
+      const count = parseInt((await env.SESSIONS.get(rlKey)) || '0', 10);
+      if (count >= 20) return err('Rate limit reached — try again in an hour', 429);
+      await env.SESSIONS.put(rlKey, String(count + 1), { expirationTtl: 3600 });
+      const message = await eduEnroll(env, user.id, body);
+      const alreadyEnrolled = message.startsWith('already enrolled');
+      const unknownCourse = message.startsWith('edu_enroll: unknown course');
+      return json({ message, enrolled: !unknownCourse, alreadyEnrolled }, unknownCourse ? 404 : 200);
+    }
+    if (path === '/api/education/status' && request.method === 'GET') {
+      return json({ message: await eduStatus(env, user.id, {}) });
     }
     // The mobile door's opening surface: her "since you were gone" lines +
     // heartbeat + phase state, one call. GET or POST, member-gated above.
