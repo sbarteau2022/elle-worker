@@ -163,6 +163,23 @@ ENVIRONMENT = "production"
 #   wrangler d1 execute rapid2ai-db --remote --command "SELECT DISTINCT venue_id FROM vendor_document_payload LIMIT 5"
 VENUE_ID = "ven_tin_mill"
 
+# ── Atlas Google BUSINESS sign-in (src/atlas-business-auth.ts) ───────────
+# These three are NOT secrets — the client ID is public, and the URLs are
+# just addresses. They live here rather than as dashboard variables because
+# `wrangler deploy` treats this file as authoritative for [vars]: a value set
+# only in the dashboard is wiped by the next deploy, and the OAuth routes
+# would start reporting "not configured" with nothing in the diff to explain
+# it. The two real secrets — GOOGLE_CLIENT_SECRET and INGEST_API_TOKEN — are
+# set with `wrangler secret put` and never appear in this file.
+#
+# GOOGLE_OAUTH_REDIRECT must match an Authorized redirect URI on the Google
+# Cloud OAuth client EXACTLY, character for character, or Google refuses the
+# exchange with redirect_uri_mismatch. Swap both URLs when the custom domain
+# goes live (and add the new redirect URI in Google Cloud BEFORE deploying).
+GOOGLE_OAUTH_REDIRECT = "https://elle-worker.sbarteau2022.workers.dev/api/atlas/oauth/callback"
+ATLAS_APP_URL = "https://rapidai.pages.dev"
+INGEST_URL = "https://rapid2ai-ingestion.sbarteau2022.workers.dev"
+
 # OBSERVER AUTO-DRAIN (src/observer.ts + the observer_drain cron). Naming an
 # owner user id here ARMS the history corpus to run itself: every 5 minutes the
 # scheduled handler ensures the closed-case docket is staged for this user
