@@ -104,6 +104,10 @@ import {
 } from './tax';
 import { ingestAtlasCsv } from './atlas-ingest';
 import { readAtlasEvents } from './atlas-events';
+import {
+  businessAuthConfigured, startBusinessAuth, consumeState, exchangeCode, decodeIdentity,
+  fetchBusinessProfile, buildIntakePayload, postIntake, storeCredentials, lookupMembership,
+} from './atlas-business-auth';
 import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from './retrieval/reembed';
 import { runJudgeBatch, kappaCorrelationReport } from './judge';
 
@@ -229,6 +233,17 @@ export interface Env extends LLMEnv {
   // One client ID, or a comma-separated allowlist (web + iOS client IDs from
   // the same Google Cloud project) — see src/google-auth.ts.
   GOOGLE_CLIENT_ID?: string;
+  // Atlas Google BUSINESS sign-in (src/atlas-business-auth.ts). The
+  // authorization-code flow needs a secret and a registered redirect URI,
+  // which the older ID-token flow did not. Unset ⇒ /api/atlas/oauth/* reports
+  // unconfigured and the funnel says so, rather than half-working.
+  //   wrangler secret put GOOGLE_CLIENT_SECRET
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_OAUTH_REDIRECT?: string;   // https://<worker>/api/atlas/oauth/callback
+  ATLAS_APP_URL?: string;           // funnel origin to return the browser to
+  // The RAPID²AI ingestion worker — the only writer of the CRM tables.
+  INGEST_URL?: string;
+  INGEST_API_TOKEN?: string;
   // Resend API key for the contact-form email notification (notifyContact,
   // above handleContact). Unset ⇒ the form still logs to elle_outreach_log,
   // just without the email courtesy. Set with: wrangler secret put RESEND_API_KEY
@@ -1314,6 +1329,46 @@ async function oauthAuthenticate(
   return { token, user: { id: user.id, email: user.email, tier } };
 }
 
+/**
+ * Mint an Atlas session JWT carrying the CRM's role and permission scope.
+ *
+ * Both doors end here so there is ONE session shape: whether the operator
+ * came through the business flow or a gated single-user sign-in, downstream
+ * checks read `role` and `scope` off the same claim rather than re-querying
+ * the CRM on every request. The user row is upserted so an operator who has
+ * only ever used the business door still has an identity in this worker.
+ */
+async function mintAtlasSession(
+  env: Env,
+  identity: { sub: string; email: string; name?: string },
+  crm: { org_id: string; role: string; permissions: string[] },
+  existingUserId?: string,
+): Promise<{ token: string; user_id: string }> {
+  const emailL = identity.email.toLowerCase();
+  let userId = existingUserId;
+  if (!userId) {
+    const row = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(emailL)
+      .first() as { id: string } | null;
+    if (row) {
+      userId = row.id;
+    } else {
+      userId = generateId();
+      await env.DB.prepare('INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)')
+        .bind(userId, emailL, `google:${identity.sub}`).run();
+    }
+  }
+  await env.DB.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").bind(userId).run();
+
+  const jti = generateId();
+  const exp = Math.floor(Date.now() / 1000) + 2592000;
+  const token = await signJWT({
+    sub: userId, email: emailL, tier: 'standard', jti, exp,
+    org: crm.org_id, role: crm.role, scope: crm.permissions,
+  } as Record<string, unknown>, env.JWT_SECRET);
+  await env.AUTH_TOKENS.put(`token:${jti}`, userId, { expirationTtl: 2592000 });
+  return { token, user_id: userId };
+}
+
 async function handleOAuth(body: Record<string, unknown>, env: Env): Promise<Response> {
   const r = await oauthAuthenticate(body, env);
   if ('error' in r) return r.error;
@@ -1876,12 +1931,124 @@ export default {
     // Atlas client signup — Google sign-in only (same verification and JWT
     // as /api/elle-oauth), plus the caller's client row so the surface knows
     // whether to route to the company-profile step or straight in.
+    // ── Atlas Google BUSINESS sign-in (src/atlas-business-auth.ts) ──
+    // The PRIMARY door. GET /api/atlas/oauth/start sends the operator to
+    // Google's consent screen for the Business Profile scope; the callback
+    // exchanges the code, reads their business, and lands the whole thing in
+    // the CRM in one sweep. Whoever completes this first owns the business.
+    if (path === '/api/atlas/oauth/start' && request.method === 'GET') {
+      if (!businessAuthConfigured(env)) {
+        return err('Google business sign-in is not configured on this deploy ' +
+          '(needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_OAUTH_REDIRECT)', 503);
+      }
+      const { url: consent } = await startBusinessAuth(env, {
+        returnTo: url.searchParams.get('return_to') || undefined,
+      });
+      // A browser hitting this directly should just go; an XHR caller gets the
+      // URL to navigate itself.
+      if ((url.searchParams.get('mode') || '') === 'json') return json({ url: consent });
+      return Response.redirect(consent, 302);
+    }
+
+    // The consent screen returns here. Always ends in a redirect back to the
+    // funnel — with a token on success, or an error code on failure — because
+    // the operator is sitting in a browser, not reading JSON.
+    if (path === '/api/atlas/oauth/callback' && request.method === 'GET') {
+      const backTo = (target: string, params: Record<string, string>) => {
+        const u = new URL(target);
+        for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+        return Response.redirect(u.toString(), 302);
+      };
+      const fallback = `${env.ATLAS_APP_URL || 'https://rapidai.pages.dev'}/start`;
+      if (!businessAuthConfigured(env)) return err('Google business sign-in is not configured', 503);
+
+      const stateParam = url.searchParams.get('state') || '';
+      const stored = await consumeState(env, stateParam);
+      // No matching state ⇒ forged or replayed callback. Refuse before we
+      // spend a code exchange on it.
+      if (!stored) return backTo(fallback, { atlas_error: 'expired_state' });
+      const returnTo = stored.returnTo || fallback;
+
+      const denied = url.searchParams.get('error');
+      if (denied) return backTo(returnTo, { atlas_error: denied });
+      const code = url.searchParams.get('code') || '';
+      if (!code) return backTo(returnTo, { atlas_error: 'no_code' });
+
+      try {
+        const tokens = await exchangeCode(env, code);
+        const clientId = (env.GOOGLE_CLIENT_ID || '').split(',')[0].trim();
+        const identity = tokens.id_token ? decodeIdentity(tokens.id_token, clientId) : null;
+        if (!identity) return backTo(returnTo, { atlas_error: 'bad_identity' });
+        if (!identity.email_verified) return backTo(returnTo, { atlas_error: 'email_unverified' });
+
+        // Business Profile read is best-effort: a brand-new account may have
+        // none, and that must not block the signup.
+        let profile: Awaited<ReturnType<typeof fetchBusinessProfile>> = { locations: [] };
+        try { profile = await fetchBusinessProfile(tokens.access_token); }
+        catch (e) { console.error('[atlas-oauth] profile read failed:', (e as Error).message); }
+
+        const tokenRef = await storeCredentials(env, identity.sub, tokens);
+        const intake = await postIntake(env, buildIntakePayload({
+          identity, profile, tokens, tokenRef,
+          betaCohort: url.searchParams.get('cohort') || undefined,
+        }));
+
+        // Mint the same session JWT the rest of the app already understands,
+        // carrying the CRM role and scope so downstream checks read one claim.
+        const session = await mintAtlasSession(env, identity, {
+          org_id: intake.org_id, role: intake.role || 'owner', permissions: intake.permissions,
+        });
+        return backTo(returnTo, {
+          atlas_token: session.token,
+          atlas_org: intake.org_id,
+          atlas_role: intake.role || 'owner',
+          atlas_new: intake.created ? '1' : '0',
+        });
+      } catch (e) {
+        console.error('[atlas-oauth] callback failed:', (e as Error).stack || (e as Error).message);
+        return backTo(returnTo, { atlas_error: 'exchange_failed' });
+      }
+    }
+
+    // ── Single-user sign-in — SECONDARY, and gated ──────────────────────
+    // A plain Google identity token establishes nothing. It is accepted only
+    // when the CRM says this email holds an active role on a business that
+    // someone already established through the business door above. The role
+    // and permission scope ride in the session JWT.
     if (path === '/api/atlas/signup' && request.method === 'POST') {
       const r = await oauthAuthenticate(body, env);
       if ('error' in r) return r.error;
+
+      let membership = null;
+      try { membership = await lookupMembership(env, r.user.email); }
+      catch (e) {
+        // The gate must fail CLOSED: if we cannot confirm a membership we do
+        // not hand out a session on the assumption that one exists.
+        console.error('[atlas-signup] membership lookup failed:', (e as Error).message);
+        return err('Could not verify your access right now — try again shortly.', 503);
+      }
+
+      if (!membership) {
+        return json({
+          error: 'no_business_access',
+          message:
+            'This Google account is not on an Atlas business yet. Ask your operator to invite you, ' +
+            'or set the business up with "Continue with Google Business".',
+          next: 'business_oauth',
+        }, 403);
+      }
+
       const client = await getClientByUser(env, r.user.id).catch(() => null);
+      const scoped = await mintAtlasSession(env,
+        { sub: r.user.id, email: r.user.email } as any,
+        { org_id: membership.org_id, role: membership.role, permissions: membership.permissions },
+        r.user.id,
+      );
       return json({
-        access_token: r.token, user: r.user, client,
+        access_token: scoped.token,
+        user: { ...r.user, role: membership.role, permissions: membership.permissions },
+        org: { id: membership.org_id, name: membership.org_name, onboarding_status: membership.onboarding_status },
+        client,
         next: client ? 'atlas' : 'profile',
       });
     }
