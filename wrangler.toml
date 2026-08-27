@@ -216,3 +216,72 @@ ELLE_CONVICTION_ENFORCE = "on"
 # Until that block is added (with a real certificate_id), ADP's connect/sync
 # report "not configured" — the same fail-closed default as every other
 # unset integration in this file.
+
+# ── Settable config vars, with their in-code defaults ────────────────────────
+# Per CLAUDE.md ("Configuration: where values actually go"): these are CONFIG
+# VARS, not secrets. They belong here, in the committed file — a plain var set
+# in the Cloudflare dashboard is WIPED by the next `wrangler deploy`, which
+# treats this file as authoritative for [vars].
+#
+# Every one is read as `env.X || <default>`: unset degrades to the default
+# shown, setting it turns that behavior on. Nothing below is dead code or
+# "not in play" — they are live switches with no value assigned yet.
+#
+# Uncomment a line to override its default. Values shown ARE the current
+# defaults, so uncommenting one as-written changes nothing; edit the value to
+# make it take effect. Secrets (API keys, client secrets, JWT_SECRET, etc.)
+# never go here — Cloudflare only. See docs/SERVICE_KEYS.md for the full split.
+
+# Model selection (src/llm.ts). Overrides the per-lane default model id.
+# LLM_MODEL_PRIMARY   = "meta-llama/llama-3.3-70b-instruct:free"
+# LLM_MODEL_FAST      = "meta-llama/llama-3.3-70b-instruct:free"
+# LLM_MODEL_CODE      = "qwen/qwen3-coder:free"
+# LLM_MODEL_REASONING = "gemini-2.5-flash"
+# LLM_MODEL_ADVISOR   = "claude-opus-5"
+# LLM_MODEL_GROQ      = "llama-3.3-70b-versatile"
+# LLM_MODEL_GITHUB    = "gpt-4o-mini"
+# LLM_MODEL_OLLAMA    = "llama3.3:70b"
+
+# Endpoint overrides. LLM_OLLAMA_URL has NO default — the Ollama lane stays
+# off until it is set (its paired LLM_OLLAMA_KEY is a secret, set in Cloudflare).
+# LLM_BASE_URL          = "https://openrouter.ai/api/v1"
+# LLM_OLLAMA_URL        = "https://<your-ollama-host>"
+# LLM_GITHUB_MODELS_URL = "https://models.inference.ai.azure.com/chat/completions"
+
+# Trading position sizing (src/order-guards.ts) — fraction of equity.
+# ELLE_MAX_ORDER_FRAC  = "0.10"
+# ELLE_MAX_SYMBOL_FRAC = "0.15"
+
+# Alpaca endpoint. Defaults to PAPER. Pointing this at the live endpoint is
+# refused unless the ELLE_LIVE_TRADING secret is exactly 'on' (src/live-guard.ts).
+# ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
+
+# Connect-back sandbox: per-call LLM timeout, ms. Clamped to 1_000–600_000.
+# SANDBOX_LLM_TIMEOUT_MS = "180000"
+
+# Lane protocol v2 live-routing cutover — opt-in; any other value keeps v1.
+# ELLE_LANE_PROTOCOL = "v2"
+
+# Optimus journal: also condition on the most recent entry's prose for voice
+# continuity. Unset = true. Set "false" to condition on extracted threads alone.
+# JOURNAL_INCLUDE_PRIOR_PROSE = "false"
+
+# Flock media (src/flock.ts). Image generation runs on Workers AI (env.AI) with
+# no config. Flip provider to 'sovereign' and set the URL to move to your own
+# endpoint; the paired FLOCK_IMAGE_KEY / FLOCK_VIDEO_KEY are SECRETS.
+# FLOCK_IMAGE_PROVIDER   = "workers-ai"   # 'workers-ai' | 'sovereign' | 'auto'
+# FLOCK_IMAGE_URL        = "https://<your-image-endpoint>"
+# FLOCK_IMAGE_MODEL      = "<txt2img model id on your endpoint>"
+# FLOCK_IMAGE_MODEL_EDIT = "<img2img model id on your endpoint>"
+# FLOCK_VIDEO_PROVIDER   = "sovereign"
+# FLOCK_VIDEO_URL        = "https://<your-text-to-video-endpoint>"
+# FLOCK_VIDEO_MODEL      = "<model id>"
+
+# Payroll OAuth (src/payroll/*.ts). REQUIRED for QuickBooks/Gusto to complete a
+# connection — the client id/secret pairs alone are not enough, the redirect URI
+# must match what is registered with the provider. PAYROLL_TOKEN_ENC_KEY (a
+# secret) gates all payroll regardless.
+# QUICKBOOKS_REDIRECT_URI = "https://elle-worker.sbarteau2022.workers.dev/api/payroll/callback"
+# QUICKBOOKS_ENVIRONMENT  = "sandbox"   # 'sandbox' (default) | 'production'
+# GUSTO_REDIRECT_URI      = "https://elle-worker.sbarteau2022.workers.dev/api/payroll/callback"
+# GUSTO_ENVIRONMENT       = "demo"      # 'demo' (default) | 'production'
