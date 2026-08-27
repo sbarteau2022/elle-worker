@@ -221,8 +221,18 @@ Three Workers plus a Pages UI (`rapidai`). The UI needs no keys.
 ## CustomCourseBuilder
 
 **Worker `customcoursebuilder`** — course DB ingester/server.
-**No secrets.** Only a binding: `DB` (🔗 D1 `customcoursebuilder-courses`).
-`/ingest` is currently open (no service-key guard).
+
+| Tag | Kind | Required | Purpose |
+|---|---|---|---|
+| `INGEST_TOKEN` | 🔐 | for `/ingest` | Bearer guarding `POST /ingest`, the only write route. Unset ⇒ that route fails closed (401); reads are unaffected. |
+| `DB` | 🔗 | ✅ | D1 `customcoursebuilder-courses`. |
+
+Unrelated to `INGEST_API_TOKEN` (rapid2ai-ingestion's bearer, below) despite the
+similar name — different worker, different system.
+
+🚀 **CI:** `CLOUDFLARE_API_TOKEN`, plus `INGEST_TOKEN` as a repo secret — that
+repo's `deploy.yml` has a step that forwards it to Cloudflare via `wrangler
+secret put`, so it can be set without local wrangler or dashboard access.
 
 ---
 
