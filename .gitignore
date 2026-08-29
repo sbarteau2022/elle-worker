@@ -7,3 +7,12 @@ dist/
 
 # local protocol harness output (machine-specific measurements, never committed)
 harness-report.json
+
+# Rust build artifacts
+target/
+crates/**/target/
+# Agent runtime scratch & handoff traces
+.agents/
+
+
+

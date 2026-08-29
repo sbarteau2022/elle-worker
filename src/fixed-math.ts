@@ -95,13 +95,13 @@ export function fixedSqrt(xQ: number): number {
 // atan(2^-i) for i=0..27, and the CORDIC gain 1/K, in Q0.30 — computed ONCE
 // offline (see docs/FIXED_POINT_CORDIC.md for the generating script) and
 // pasted here as literal constants. Never recomputed at import time.
-const CIRC_ITERS = 28;
-const ATAN_TABLE: readonly number[] = [
+export const CIRC_ITERS = 28;
+export const ATAN_TABLE: readonly number[] = [
   843314857, 497837829, 263043837, 133525159, 67021687, 33543516, 16775851,
   8388437, 4194283, 2097149, 1048576, 524288, 262144, 131072, 65536, 32768,
   16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8,
 ];
-const CIRC_GAIN_INV = 652032874;
+export const CIRC_GAIN_INV = 652032874;
 
 // sin/cos of an angle given in Q0.30 RADIANS (bounded to [-pi/2, pi/2] by the
 // caller; CORDIC circular mode converges there without a range reduction).
@@ -115,10 +115,11 @@ export function fixedSinCos(angleQ: number): { sin: number; cos: number } {
   return { cos: x, sin: y };
 }
 
+
 // π/2 in Q0.30 — a literal (Math.PI is itself a fixed spec-defined constant,
 // not a computed transcendental call, but this is baked in at build time
 // exactly like every other table here, for the same discipline).
-const HALF_PI = 1686629713;
+export const HALF_PI = 1686629713;
 
 // Full-circle sin/cos from a TURN FRACTION in [0, 1) — i.e. angle/2π, not
 // radians. Two reasons this is the right interface, not an arbitrary choice:
@@ -149,16 +150,16 @@ export function fixedSinCosTurn(turnQ: number): { sin: number; cos: number } {
 // 40, … are each repeated once, a known convergence requirement of the
 // hyperbolic variant (Volder/Walther). atanh(2^-i) and the inverse gain,
 // again literal, precomputed offline.
-const HYP_ITERS = 24;
-const HYP_SEQ: readonly number[] = [
+export const HYP_ITERS = 24;
+export const HYP_SEQ: readonly number[] = [
   1, 2, 3, 4, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
 ];
-const ATANH_TABLE: readonly number[] = [
+export const ATANH_TABLE: readonly number[] = [
   589812981, 274247419, 134923406, 67196451, 67196451, 33565361, 16778582,
   8388779, 4194325, 2097155, 1048576, 524288, 262144, 131072, 131072, 65536,
   32768, 16384, 8192, 4096, 2048, 1024, 512, 256,
 ];
-const HYP_GAIN_INV = 1296540104;
+export const HYP_GAIN_INV = 1296540104;
 
 // tanh(s) via hyperbolic CORDIC rotation mode, s in Q0.30. Returns {sinh,cosh};
 // tanh = sinh/cosh (fixedDiv) when the caller needs it.

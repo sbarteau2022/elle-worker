@@ -82,6 +82,17 @@ export function targetFraction(kappa: number): number {
   return Math.min(1, kappa / KAPPA_NEUTRAL);
 }
 
+// Gate 2 Relative Volatility Normalization: Λ = min(1, 1 / V_rel),
+// where V_rel = (ATR_now / Price_now) / (ATR_entry / Price_entry).
+// Sizing de-levers strictly when relative percentage volatility expands.
+export function relativeVolMultiplier(
+  atrNow: number, priceNow: number, atrEntry: number, priceEntry: number,
+): number {
+  if (atrEntry <= 0 || priceEntry <= 0 || priceNow <= 0 || atrNow <= 0) return 1;
+  const vRel = (atrNow / priceNow) / (atrEntry / priceEntry);
+  return Math.min(1, 1 / vRel);
+}
+
 export function reading(state: ConvictionState): ConvictionReading {
   const kappa = asymmetricKappa(state.z);
   return { state, kappa, status: statusOf(state.z), targetFraction: targetFraction(kappa) };

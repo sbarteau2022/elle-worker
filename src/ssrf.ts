@@ -87,9 +87,22 @@ export function isPrivateOrReservedHost(host: string): boolean {
     if (host === '::1' || host === '::') return true;         // loopback / unspecified
     if (host.startsWith('fe80')) return true;                 // link-local
     if (host.startsWith('fc') || host.startsWith('fd')) return true; // unique-local fc00::/7
-    // IPv4-mapped (::ffff:169.254.169.254 etc.) — recurse on the tail
+    // IPv4-mapped (::ffff:169.254.169.254 or ::ffff:a9fe:a9fe etc.) — recurse or decode
     const mapped = host.match(/:((?:\d{1,3}\.){3}\d{1,3})$/);
     if (mapped) return isPrivateOrReservedHost(mapped[1]);
+    const hexMapped = host.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+    if (hexMapped) {
+      const high = parseInt(hexMapped[1], 16);
+      const a = (high >>> 8) & 255;
+      const b = high & 255;
+      if (a === 0 || a === 10 || a === 127) return true;
+      if (a === 169 && b === 254) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 100 && b >= 64 && b <= 127) return true;
+      if (a >= 224) return true;
+      return false;
+    }
     return false;
   }
   return false;

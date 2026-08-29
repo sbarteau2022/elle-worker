@@ -56,9 +56,9 @@ export function fMobiusAdd(x: FPoint, y: FPoint): FPoint {
   return [outX, outY];
 }
 
-function fNorm2(p: FPoint): number { return mulQ(p[0], p[0]) + mulQ(p[1], p[1]); }
-function fNorm(p: FPoint): number { return fixedSqrt(fNorm2(p)); }
-function fNeg(p: FPoint): FPoint { return [-p[0], -p[1]]; }
+export function fNorm2(p: FPoint): number { return mulQ(p[0], p[0]) + mulQ(p[1], p[1]); }
+export function fNorm(p: FPoint): number { return fixedSqrt(fNorm2(p)); }
+export function fNeg(p: FPoint): FPoint { return [-p[0], -p[1]]; }
 
 // Hyperbolic distance d(x,y) = 2·atanh|(−x) ⊕ y|. HONEST RANGE NOTE: the
 // hyperbolic-CORDIC vectoring step (fixedAtanh) only converges cleanly for
@@ -81,9 +81,9 @@ export function fGeodesicStep(p: FPoint, u: FPoint, sQ: number): FPoint {
 
 // Isometric inward retraction once the walk nears the boundary — identical
 // policy to hyperbolic-sync.ts (R_MAX / RETRACT), so the two walks match.
-const R_MAX = toFixed(0.9);
-const RETRACT = toFixed(0.5);
-function fBound(p: FPoint): FPoint {
+export const R_MAX = toFixed(0.9);
+export const RETRACT = toFixed(0.5);
+export function fBound(p: FPoint): FPoint {
   const r = fNorm(p);
   if (r <= R_MAX) return p;
   const uhat: FPoint = [fixedDiv(p[0], r), fixedDiv(p[1], r)];
@@ -94,12 +94,12 @@ function fBound(p: FPoint): FPoint {
 // (never recomputed via Math.sqrt at import time — see fixed-math.ts's
 // discipline note on why that would reintroduce the exact risk this exists
 // to remove).
-const PHI_INV_Q = 663608942;
-const STEP_Q = toFixed(0.5); // hyperbolic arc-length per tick, matches hyperbolic-sync.ts
+export const PHI_INV_Q = 663608942;
+export const STEP_Q = toFixed(0.5); // hyperbolic arc-length per tick, matches hyperbolic-sync.ts
 
 export function fAdvancePoint(p: FPoint, tick: number, phi0Q: number): FPoint {
-  const turnQ = (phi0Q + tick * PHI_INV_Q) % ONE; // tick*PHI_INV_Q stays well under 2^53 for realistic tick counts
-  const { sin, cos } = fixedSinCosTurn(((turnQ % ONE) + ONE) % ONE);
+  const turnQ = Number(((BigInt(phi0Q) + BigInt(tick) * BigInt(PHI_INV_Q)) % ONE_BIG + ONE_BIG) % ONE_BIG);
+  const { sin, cos } = fixedSinCosTurn(turnQ);
   return fBound(fGeodesicStep(p, [cos, sin], STEP_Q));
 }
 

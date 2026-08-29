@@ -44,8 +44,8 @@ import { CONDUCTANCE, type EdgeKind, type MemEdge } from './graph';
 // B = { x ∈ ℝⁿ : ‖x‖ < 1 }. All points live strictly inside; project() is
 // the only door back in when an update lands on or past the boundary.
 
-const BOUNDARY_EPS = 1e-5;   // points live at norm ≤ 1 − BOUNDARY_EPS
-const EPS = 1e-12;
+export const BOUNDARY_EPS = 1e-5;   // points live at norm ≤ 1 − BOUNDARY_EPS
+export const EPS = 1e-12;
 
 export function dot(u: number[], v: number[]): number {
   let s = 0;
@@ -54,9 +54,11 @@ export function dot(u: number[], v: number[]): number {
 }
 export function norm(u: number[]): number { return Math.sqrt(dot(u, u)); }
 
-// Pull a point that drifted onto/over the boundary back inside the ball.
+// Pull a point that drifted onto/over the boundary back inside the ball:
+// Pi(x) = x * min(1, (1 - 10^-5) / ||x||)
 export function project(x: number[]): number[] {
   const n = norm(x);
+  if (!Number.isFinite(n)) return x.map(() => 0);
   const max = 1 - BOUNDARY_EPS;
   if (n <= max) return x;
   const s = max / n;

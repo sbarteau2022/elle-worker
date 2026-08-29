@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { PHI, ASYM_Z_MAX, stepAsymmetricZ, createAsymmetricRegulator } from './recovery';
 import {
   freshState, observeCycle, reading, targetFraction, trimQty, isEquitySymbol,
-  replayBars, KAPPA_NEUTRAL, TRIM_MIN_FRACTION, CONVICTION_ATR_N,
+  replayBars, KAPPA_NEUTRAL, TRIM_MIN_FRACTION, CONVICTION_ATR_N, relativeVolMultiplier,
 } from './conviction';
 
 const logistic = (z: number) => 1 / (1 + Math.exp(-z));
@@ -215,3 +215,27 @@ describe('scope guards', () => {
     expect(down / up).toBeCloseTo(PHI * PHI, 12);
   });
 });
+
+describe('relativeVolMultiplier — Gate 2 Relative Percentage Volatility Normalization', () => {
+  it('when relative volatility does not expand (V_rel <= 1), sizing is not penalized (multiplier = 1)', () => {
+    // Constant % volatility: ATR scales exactly with price (e.g. 5 on $100 -> 50 on $1000)
+    expect(relativeVolMultiplier(50, 1000, 5, 100)).toBe(1);
+    // Contracted % volatility: (e.g. 20 on $1000 -> 2% vs 5%)
+    expect(relativeVolMultiplier(20, 1000, 5, 100)).toBe(1);
+  });
+
+  it('when relative volatility expands (V_rel > 1), sizing de-levers proportionally', () => {
+    // Volatility doubled as a % of price: 10 on $100 -> 10% vs 5% entry
+    expect(relativeVolMultiplier(10, 100, 5, 100)).toBeCloseTo(0.5, 6);
+    // Volatility tripled
+    expect(relativeVolMultiplier(15, 100, 5, 100)).toBeCloseTo(1 / 3, 6);
+  });
+
+  it('handles degenerate / non-positive inputs safely by returning 1', () => {
+    expect(relativeVolMultiplier(0, 100, 5, 100)).toBe(1);
+    expect(relativeVolMultiplier(5, 0, 5, 100)).toBe(1);
+    expect(relativeVolMultiplier(5, 100, 0, 100)).toBe(1);
+    expect(relativeVolMultiplier(5, 100, 5, -10)).toBe(1);
+  });
+});
+

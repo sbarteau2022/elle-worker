@@ -47,6 +47,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAsymmetricRegulator } from './recovery';
+import { relativeVolMultiplier } from './conviction';
 
 interface Bar { date: string; o: number; h: number; l: number; c: number }
 const PHI = (1 + Math.sqrt(5)) / 2;
@@ -97,7 +98,7 @@ const mean = (xs: number[]) => xs.reduce((s, x) => s + x, 0) / Math.max(1, xs.le
 interface GateTrade { pnlR: number; grossR: number; costR: number; turnover: number; exposure: number; minCumR: number }
 function runGate(
   bars: Bar[], i0: number, exitBar: number,
-  mode: 'unit' | 'asym' | 'asym-lev',
+  mode: 'unit' | 'asym' | 'asym-lev' | 'asym-rel-vol',
   spreadFracATR: number, // cost per unit size traded, as a fraction of current ATR
 ): GateTrade {
   const entry = bars[i0].c, R = STOP_MULT * trueATR(bars, i0), atrEntry = trueATR(bars, i0);
@@ -111,6 +112,9 @@ function runGate(
       // GATE 2: Λ = min(1, 1/(φ·V)), V = ATR_now/ATR_entry — de-lever only.
       const V = atr / atrEntry;
       size *= Math.min(1, 1 / (PHI * V));
+    } else if (mode === 'asym-rel-vol') {
+      // GATE 2 REPAIR: Λ = min(1, 1/V_rel), V_rel = (ATR_now/P_now) / (ATR_entry/P_entry)
+      size *= relativeVolMultiplier(atr, bars[i].c, atrEntry, entry);
     }
     const dSize = Math.abs(size - prevSize);
     costR += dSize * (spreadFracATR * atr) / R;   // GATE 1: pay friction on every size change
@@ -163,6 +167,8 @@ describe('the three final gates — real data, pre-registered', () => {
   const Y0: GateTrade[] = [], Y1: GateTrade[] = [], Y10: GateTrade[] = [];
   const L1: GateTrade[] = [];
   const nvdaLev: GateTrade[] = [];
+  const L1Rel: GateTrade[] = [];
+  const nvdaRel: GateTrade[] = [];
   for (const [name, bars] of data) {
     for (const i0 of breakoutSignals(bars)) {
       const ex = chandelierExitBar(bars, i0);
@@ -175,6 +181,9 @@ describe('the three final gates — real data, pre-registered', () => {
       const lev = runGate(bars, i0, ex, 'asym-lev', SPREAD_BASE);
       L1.push(lev);
       if (name === 'NVDA') nvdaLev.push(lev);
+      const relVol = runGate(bars, i0, ex, 'asym-rel-vol', SPREAD_BASE);
+      L1Rel.push(relVol);
+      if (name === 'NVDA') nvdaRel.push(relVol);
     }
   }
 
@@ -217,6 +226,14 @@ describe('the three final gates — real data, pre-registered', () => {
     expect(mean(nvdaLev.map(t => t.pnlR))).toBeGreaterThan(0);   // participation not zero
     expect(Math.min(...L1.map(t => t.pnlR))).toBeGreaterThan(-0.6);      // best worst-trade of the series
     expect(mean(L1.map(t => t.minCumR))).toBeGreaterThan(-0.2);          // best in-trade DD of the series
+  });
+
+  it('G2c — GATE 2 REPAIR: percentage-of-price relative volatility normalization restores NVDA tail participation > +1.0R while retaining defensive profile', () => {
+    // With V_rel = (ATR_now/P_now) / (ATR_entry/P_entry), price appreciation
+    // does not falsely trigger de-levering. NVDA tail expectancy recovers > 1.0R.
+    expect(mean(nvdaRel.map(t => t.pnlR))).toBeGreaterThan(1.0);
+    expect(Math.min(...L1Rel.map(t => t.pnlR))).toBeGreaterThan(-0.95);
+    expect(mean(L1Rel.map(t => t.pnlR))).toBeGreaterThan(0.20);
   });
 
   // ---- Gate 3: the mean-reversion niche ----
@@ -280,11 +297,13 @@ describe('the three final gates — real data, pre-registered', () => {
     console.log('--- trend entries (591), Gate 1 (costs) + Gate 2 (leverage) ---');
     row('A base-cost', A1); row('A 10x-stress', A10);
     row('C_asym base-cost', Y1); row('C_asym 10x-stress', Y10);
-    row('C_asym vol-normed', L1);
+    row('C_asym vol-normed (dollar)', L1);
+    row('C_asym rel-vol (repaired)', L1Rel);
     console.log(`--- mean-reversion niche (Gate 3): ${mrFullAll.length} in-band entries, ${knifeFullAll.length} knife-excluded ---`);
     row('MR full-size', mrFullAll); row('MR asym overlay', mrAsymAll); row('MR knife (excluded)', knifeFullAll);
     console.log(`MR per-unit: full ${perUnit(mrFullAll).toFixed(4)} · asym ${perUnit(mrAsymAll).toFixed(4)}`);
-    console.log(`NVDA vol-normed expectancy: ${mean(nvdaLev.map(t => t.pnlR)).toFixed(3)}`);
+    console.log(`NVDA dollar-vol expectancy: ${mean(nvdaLev.map(t => t.pnlR)).toFixed(3)}`);
+    console.log(`NVDA rel-vol expectancy: ${mean(nvdaRel.map(t => t.pnlR)).toFixed(3)}`);
     expect(true).toBe(true);
   });
 });

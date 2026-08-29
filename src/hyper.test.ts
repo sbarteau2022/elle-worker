@@ -11,12 +11,35 @@ import type { MemEdge } from './graph';
 
 // ── geometry ──────────────────────────────────────────────────────────────
 
-describe('poincare geometry', () => {
-  it('projects a boundary-crossing point back inside the ball', () => {
-    const p = project([3, 4]); // norm 5
-    expect(norm(p)).toBeLessThan(1);
-    // direction preserved
-    expect(p[1] / p[0]).toBeCloseTo(4 / 3, 6);
+describe('poincare geometry & boundary retraction Pi(x)', () => {
+  it('projects points according to exact formula Pi(x) = x * min(1, (1 - 10^-5) / ||x||)', () => {
+    const inside = [0.3, 0.4]; // norm 0.5 < 1 - 1e-5
+    expect(project(inside)).toEqual(inside);
+
+    const onBoundary = [0.6, 0.8]; // norm 1.0 > 1 - 1e-5
+    const projOn = project(onBoundary);
+    const expectedScale = (1 - 1e-5) / 1.0;
+    expect(norm(projOn)).toBeCloseTo(1 - 1e-5, 9);
+    expect(projOn[0]).toBeCloseTo(0.6 * expectedScale, 9);
+    expect(projOn[1]).toBeCloseTo(0.8 * expectedScale, 9);
+
+    const farOutside = [30, 40]; // norm 50
+    const projFar = project(farOutside);
+    expect(norm(projFar)).toBeCloseTo(1 - 1e-5, 9);
+    expect(projFar[1] / projFar[0]).toBeCloseTo(40 / 30, 9);
+  });
+
+  it('safely handles non-finite inputs without NaN propagation', () => {
+    const junk = [NaN, Infinity];
+    const projJunk = project(junk);
+    expect(projJunk).toEqual([0, 0]);
+  });
+
+  it('depth prevents singularity overflow for points near or beyond the boundary', () => {
+    const edgePoint = [1.0, 0.0];
+    const d = depth(edgePoint);
+    expect(Number.isFinite(d)).toBe(true);
+    expect(d).toBeCloseTo(2 * Math.atanh(1 - 1e-5), 5);
   });
 
   it('mobiusAdd: 0 ⊕ v = v and (−u) ⊕ u = 0', () => {

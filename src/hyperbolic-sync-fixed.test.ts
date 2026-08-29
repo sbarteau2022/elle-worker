@@ -58,6 +58,38 @@ describe('fGeodesicStep — matches the floating version', () => {
   });
 });
 
+describe('constants & isometric boundary retraction', () => {
+  it('PHI_INV_Q matches exact 1/phi in Q0.30', async () => {
+    const { PHI_INV_Q } = await import('./hyperbolic-sync-fixed');
+    const expectedPhiInv = Math.round(((Math.sqrt(5) - 1) / 2) * (1 << 30));
+    expect(PHI_INV_Q).toBe(663608942);
+    expect(PHI_INV_Q).toBe(expectedPhiInv);
+  });
+
+  it('fBound preserves points with norm <= R_MAX (0.9)', async () => {
+    const { fBound, R_MAX, fNorm } = await import('./hyperbolic-sync-fixed');
+    const pInside = fp(0.5, 0.5); // norm ~ 0.707 <= 0.9
+    const bounded = fBound(pInside);
+    expect(bounded).toEqual(pInside);
+  });
+
+  it('fBound performs isometric inward retraction p <- (-RETRACT * u_hat) (+) p when norm > R_MAX', async () => {
+    const { fBound, fNorm, R_MAX, RETRACT } = await import('./hyperbolic-sync-fixed');
+    const pNearEdge = fp(0.65, 0.65); // norm ~ 0.919 > 0.9
+    const origNorm = toFloat(fNorm(pNearEdge));
+    expect(origNorm).toBeGreaterThan(0.9);
+
+    const retracted = fBound(pNearEdge);
+    const newNorm = toFloat(fNorm(retracted));
+
+    // Retraction strictly reduces norm and stays well within the disk
+    expect(newNorm).toBeLessThan(origNorm);
+    expect(newNorm).toBeLessThan(0.9);
+    // Radial collinearity preserved (y / x ratio identical)
+    expect(retracted[1] / retracted[0]).toBeCloseTo(pNearEdge[1] / pNearEdge[0], 4);
+  });
+});
+
 describe('fAdvancePoint — the deterministic bounded walk', () => {
   it('is bit-for-bit repeatable', () => {
     const p = fp(0.1, 0.05);
@@ -65,6 +97,16 @@ describe('fAdvancePoint — the deterministic bounded walk', () => {
     const b = fAdvancePoint(p, 1, toFixed(0.3));
     expect(a).toEqual(b);
   });
+
+  it('handles ultra-large tick values without numeric overflow', () => {
+    const p = fp(0.1, 0.05);
+    const a = fAdvancePoint(p, 1000000000, toFixed(0.3));
+    const b = fAdvancePoint(p, 1000000000, toFixed(0.3));
+    expect(a).toEqual(b);
+    expect(toFloat(a[0])).toBeLessThan(1.0);
+    expect(toFloat(a[1])).toBeLessThan(1.0);
+  });
+
   it('stays bounded away from the boundary over a long run', () => {
     let p: FPoint = fp(0.1, 0.05);
     let maxR = 0;
