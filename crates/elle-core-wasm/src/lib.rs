@@ -117,6 +117,100 @@ pub fn mul_q_wasm(a: i32, b: i32) -> i32 { mul_q(a, b) }
 #[wasm_bindgen]
 pub fn div_q_wasm(num: i32, den: i32) -> i32 { div_q(num, den) }
 
+/// Compute a radix‑2 Cooley‑Tukey FFT on Q30 fixed‑point data.
+/// `input` length must be a power of two. Returns interleaved real/imag Q30 values.
+#[wasm_bindgen]
+pub fn real_fft(input: &[i32]) -> Vec<i32> {
+    let n = input.len();
+    assert!(n.is_power_of_two(), "FFT length must be power of two");
+    let mut real: Vec<i32> = input.to_vec();
+    let mut imag: Vec<i32> = vec![0; n];
+
+    // Bit‑reversal permutation
+    let mut j: usize = 0;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j ^= bit;
+        if i < j {
+            real.swap(i, j);
+            imag.swap(i, j);
+        }
+    }
+
+    // Cooley‑Tukey stages
+    let mut len = 2;
+    while len <= n {
+        let half = len / 2;
+        // Twiddle factors for this stage (angle = -2π/len)
+        let angle = -std::f64::consts::PI * 2.0 / (len as f64);
+        let cos_f = angle.cos();
+        let sin_f = angle.sin();
+        let cos_q = (cos_f * (ONE as f64)).round() as i32;
+        let sin_q = (sin_f * (ONE as f64)).round() as i32;
+
+        for i in (0..n).step_by(len) {
+            let mut w_real = ONE;
+            let mut w_imag = 0;
+            for j in 0..half {
+                let idx = i + j;
+                let idx_pair = idx + half;
+                // t = w * a[idx_pair]
+                let tr = mul_q(w_real, real[idx_pair]) - mul_q(w_imag, imag[idx_pair]);
+                let ti = mul_q(w_real, imag[idx_pair]) + mul_q(w_imag, real[idx_pair]);
+
+                let ur = real[idx];
+                let ui = imag[idx];
+                real[idx] = ur + tr;
+                imag[idx] = ui + ti;
+                real[idx_pair] = ur - tr;
+                imag[idx_pair] = ui - ti;
+
+                // w = w * twiddle
+                let w_r = mul_q(w_real, cos_q) - mul_q(w_imag, sin_q);
+                let w_i = mul_q(w_real, sin_q) + mul_q(w_imag, cos_q);
+                w_real = w_r;
+                w_imag = w_i;
+            }
+        }
+        len <<= 1;
+    }
+
+    // Interleave real and imag for JS
+    let mut out = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        out.push(real[i]);
+        out.push(imag[i]);
+    }
+    out
+}
+
+/// Simple separable 2‑D Gabor filter on an 8‑bit grayscale image.
+/// Returns a new image buffer of the same size.
+#[wasm_bindgen]
+pub fn gabor_filter_2d(input: &[u8], width: usize, height: usize, sigma: f32, freq: f32) -> Vec<u8> {
+    let mut output = vec![0u8; width * height];
+    let two_pi_f = 2.0 * std::f32::consts::PI * freq;
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            let pixel = input[idx] as f32 / 255.0;
+            let gx = x as f32 - (width as f32 / 2.0);
+            let gy = y as f32 - (height as f32 / 2.0);
+            let gauss = (-(gx * gx + gy * gy) / (2.0 * sigma * sigma)).exp();
+            let sinusoid = (two_pi_f * gx).cos();
+            let val = (pixel * gauss * sinusoid).clamp(0.0, 1.0);
+            output[idx] = (val * 255.0) as u8;
+        }
+    }
+    output
+}
+
+#[cfg(test)]
+
 #[cfg(test)]
 mod tests {
     use super::*;
