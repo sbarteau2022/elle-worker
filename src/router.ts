@@ -49,7 +49,7 @@ import {
 import { payrollConnectionStatus, payrollSync, payrollWageSummary } from './payroll/tools';
 import { resolveAlpacaBase, type LiveGuardEnv } from './live-guard';
 import { githubReadFile, githubListFiles, githubSearchCode } from './github-tools';
-import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM } from './connect-sandbox';
+import { sandboxRunCode, sandboxRunShell, sandboxClone, sandboxStatus, sandboxReport, sandboxLLM, sandboxConfigured } from './connect-sandbox';
 import { laneCreate, laneList, laneRemove, laneDispatch, laneStability, registryReport } from './sandbox-registry';
 import { eduEnroll, eduLog, eduSeal, eduBrief, eduComplete, eduStatus } from './education/index';
 import { runLocalAgent } from './local-agent';
@@ -277,6 +277,145 @@ export function toolAllowed(scope: Scope, name: string): boolean {
 // whole loop.
 export type Engine = LLMTask | 'local';
 export const ENGINES = new Set<Engine>(['reasoning', 'code', 'fast', 'research', 'conversation', 'local']);
+
+// Helper to evaluate whether the sovereign local sandbox lane is configured and available.
+export function isLocalLaneAvailable(env?: Env): boolean {
+  if (!env) return false;
+  try {
+    if (!sandboxConfigured(env)) return false;
+    const anyEnv = env as unknown as Record<string, unknown>;
+    if (
+      anyEnv.SANDBOX_PATH_OPEN === false ||
+      anyEnv.path_open === false ||
+      anyEnv.LOCAL_LANE_OPEN === false ||
+      anyEnv.SANDBOX_PATH_CLOSED === true
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Dual-Router Classifier & Engine Selection (Section 4.2 of DUAL_ROUTER_ARCHITECTURE_SPEC.md)
+ *
+ * Classifies an inbound question/intent into the optimal execution engine tier:
+ * - Search & Real-Time Facts -> 'reasoning' (or 'research' where search is primary)
+ * - Multi-Tenant Relational Data (D1) -> 'reasoning'
+ * - Dense Vector Embeddings (Vectorize) -> 'reasoning'
+ * - Iterative Code Authoring -> 'local' (if local sovereign lane is available, else demotes to 'reasoning')
+ * - AST Tree-sitter Refactoring -> 'local' (if local sovereign lane is available, else demotes to 'reasoning')
+ * - Continuous Duplex Dialogue -> 'local' (if local sovereign lane is available, else demotes to 'reasoning')
+ *
+ * Pre-flight checks local sandbox availability (sandboxConfigured & path status) and transparently
+ * demotes to 'reasoning' if the local lane is offline. NEVER throws.
+ */
+export function classifyEngineSelection(
+  question: string,
+  scope?: Scope,
+  opts?: { prefer?: 'local'; surface?: Surface },
+  env?: Env
+): Engine {
+  try {
+    const q = String(question ?? '').trim();
+    const localAvailable = isLocalLaneAvailable(env);
+
+    // 1. Explicit caller preference for local sovereign lane
+    if (opts?.prefer === 'local') {
+      if (localAvailable) {
+        return 'local';
+      }
+      console.warn('[ROUTER-CLASSIFIER] Local sovereign lane preferred but unavailable, demoting to hosted reasoning');
+      return 'reasoning';
+    }
+
+    if (!q) {
+      return 'reasoning';
+    }
+
+    // 2. Cloud Frontier Domains (Search, D1 Relational, Vectorize Embeddings)
+    // Domain: Search & Real-Time Facts
+    const isSearchDomain = (
+      /\b(search\s+(the\s+)?web|web\s+search|google\s+search|search\s+online|browse\s+the\s+web|live\s+search|find\s+online)\b/i.test(q) ||
+      /\b(real-?time\s+facts?|latest\s+news|breaking\s+news|stock\s+price\s+today|current\s+price|weather\s+today|who\s+won\b)/i.test(q) ||
+      /\b(search\s+arxiv|recent\s+(research\s+)?papers?|literature\s+search)\b/i.test(q)
+    );
+
+    if (isSearchDomain) {
+      if (/\b(web_search|search\s+(the\s+)?web|google\s+search|search\s+online|find\s+online|search\s+arxiv|research\s+papers?)\b/i.test(q)) {
+        return 'research';
+      }
+      return 'reasoning';
+    }
+
+    // Domain: Multi-Tenant Relational Data (D1)
+    const isD1RelationalDomain = (
+      /\b(d1\b|sqlite|read_sql|sql\s+query|execute\s+sql|database\s+query|database\s+schema|table\s+schema|relational\s+(data|table)|multi-tenant\s+relational|rapid_db|grant_db)\b/i.test(q) ||
+      /\b(select\s+.+\s+from\b|insert\s+into\b|update\s+.+\s+set\b|delete\s+from\b)/i.test(q) ||
+      /\b(corpus_papers|corpus_chunks|elle_trades|elle_trading_|grant_organizations|grant_fit_|elle_events|transactions\s+table)\b/i.test(q)
+    );
+
+    if (isD1RelationalDomain) {
+      return 'reasoning';
+    }
+
+    // Domain: Dense Vector Embeddings (Vectorize)
+    const isVectorizeDomain = (
+      /\b(vectorize|vector\s+search|vector\s+embeddings?|dense\s+vectors?|semantic\s+search|embedding\s+similarity|search_corpus|1024-dim|bge-large|vector\s+index|cosine\s+distance)\b/i.test(q)
+    );
+
+    if (isVectorizeDomain) {
+      return 'reasoning';
+    }
+
+    // 3. Local Sovereign Domains (AST Refactoring, Duplex Dialogue, Code Authoring)
+    // Domain: AST Tree-sitter Refactoring
+    const isAstDomain = (
+      /\b(tree-?sitter|abstract\s+syntax\s+tree|ast\b|parse\s+tree|syntax\s+tree)\b/i.test(q) ||
+      /\b(structural\s+refactor\w*|ast\s+transform\w*|refactor\s+ast|node\s+mutation)\b/i.test(q) ||
+      /\b(rename\s+symbol\s+across\s+codebase)\b/i.test(q)
+    );
+
+    if (isAstDomain) {
+      if (localAvailable) return 'local';
+      console.warn('[ROUTER-CLASSIFIER] AST refactoring classified for local lane, but lane unavailable — demoting to hosted reasoning');
+      return 'reasoning';
+    }
+
+    // Domain: Continuous Duplex Dialogue
+    const isDuplexDomain = (
+      /\b(duplex|continuous\s+duplex|duplex\s+dialogue|duplex\s+voice|duplex\s+audio|voice\s+stream(ing)?|audio\s+stream(ing)?|duplex\s+socket|speech\s+stream|voice\s+dialogue|continuous\s+dialogue|live\s+voice|voice\s+session|realtime\s+socket|duplex\s+channel)\b/i.test(q)
+    );
+
+    if (isDuplexDomain) {
+      if (localAvailable) return 'local';
+      console.warn('[ROUTER-CLASSIFIER] Continuous duplex dialogue classified for local lane, but lane unavailable — demoting to hosted reasoning');
+      return 'reasoning';
+    }
+
+    // Domain: Iterative Code Authoring
+    const isCodeAuthoringDomain = (
+      /\b(write\s+code|implement\s+function|author\s+tests?|unit\s+tests?|test\s+suite|vitest|jest|pytest|cargo\s+test|npm\s+test)\b/i.test(q) ||
+      /\b(bash\s+commands?|exec\s+shell|run\s+shell|shell\s+command|terminal\s+command|docker\s+sandbox|docker\s+container|dockerfile|docker\s+build)\b/i.test(q) ||
+      /\b(code\s+authoring|iterative\s+code|code\s+iteration|compile\s+typescript|typescript\s+function|python\s+script|authoring\s+code)\b/i.test(q) ||
+      /\b(write|author|implement|scaffold|debug|fix)\b.*\b(code|function|class|test|tests|unit\s*tests?|script|component|module|service|endpoint|algorithm)\b/i.test(q)
+    );
+
+    if (isCodeAuthoringDomain) {
+      if (localAvailable) return 'local';
+      console.warn('[ROUTER-CLASSIFIER] Iterative code authoring classified for local lane, but lane unavailable — demoting to hosted reasoning');
+      return 'reasoning';
+    }
+
+    // Default: Hosted Frontier Reasoning
+    return 'reasoning';
+  } catch (err) {
+    console.error('[ROUTER-CLASSIFIER] Classification encountered error, falling back to reasoning:', err);
+    return 'reasoning';
+  }
+}
 
 // These tools are REAL — ported directly from the deployed rapid2ai-ai-worker
 // (src/rapid.ts), running native queries against rapid2ai-db via the RAPID_DB
@@ -1599,15 +1738,19 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     };
   };
 
-  // Which engine runs the next step. Default 'reasoning' (best JSON discipline);
-  // the model may redirect it per step via the "engine" field — she chooses the
-  // llm the way she chooses the tool. 'local' is the SOVEREIGN lane: the same
-  // loop and the same tools, but generation runs on the laptop's own model over
-  // the sandbox socket — free, no provider quota. A caller (the conductor's
-  // exploration tick, the workbench) opts in with prefer:'local'; if the laptop
-  // path is closed or errors, the step demotes to hosted engines transparently
-  // and stays demoted, so a closed lid never strands a run.
-  let engine: Engine = opts.prefer === 'local' ? 'local' : 'reasoning';
+  // Which engine runs the initial step. Evaluated by classifyEngineSelection
+  // according to Section 4.2 of DUAL_ROUTER_ARCHITECTURE_SPEC.md.
+  // When local sovereign lane is chosen or requested via opts.prefer === 'local',
+  // it checks local availability and transparently demotes to hosted reasoning
+  // if unavailable. The model may subsequently redirect per step via parsed.engine.
+  let engine: Engine = classifyEngineSelection(question, scope, opts, env);
+  // §4.7: once the sovereign lane has failed, the run "keeps running on hosted
+  // models for the remainder of the run to avoid paying repeated socket timeout
+  // penalties." Demotion below sets this; the per-step hand-off honors it. The
+  // model is told local is "free and quota-less" (see the engine menu in the
+  // system prompt), so without this it re-picks 'local' on the very next step
+  // and every attempt pays another pathOpen -> laneHeartbeat -> D1 round-trip.
+  let localDemoted = false;
   // Shared across every step this run — the advisor tool checks-and-
   // increments this synchronously (see runTool's 'advisor' case), so it's
   // safe even under the parallel-tools path's Promise.all.
@@ -1638,6 +1781,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
         recordLLMCall(env, { task: 'local', provider: 'sovereign-local', model: 'local', ms: Date.now() - t0, ok: false, at: t0 });
         void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: step, kind: 'note', result_preview: `local lane unavailable, demoted to hosted: ${reason}`.slice(0, 500) });
         engine = 'reasoning';
+        localDemoted = true;
       }
     }
     if (!result) {
@@ -1672,7 +1816,10 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     // Honor a per-step engine hand-off ({"engine":"code"} etc.) for the NEXT call.
     if (typeof parsed.engine === 'string' && ENGINES.has(parsed.engine as Engine)) {
-      engine = parsed.engine as Engine;
+      const requested = parsed.engine as Engine;
+      // A run that already lost the lane stays hosted (§4.7), whatever the
+      // model asks for next.
+      engine = requested === 'local' && localDemoted ? 'reasoning' : requested;
     }
     // The chain of thought, kept: the protocol's per-step "thought" and the
     // provider's native reasoning tokens both ride the trace instead of being
