@@ -5,14 +5,33 @@
 //   - holding.ts (workbench) integrates |velocity| into a bounded loss (HOLD strain).
 //   - the earlier grounded-loss.ts / superposition-stop.ts re-integrated the SAME
 //     κ stream with DIFFERENT math — two integrators that drift apart.
-// This is the single source of truth. Its valve math is IDENTICAL to holding.ts
-// (Stewart's λ=ρ bounded-loss valve), so the two agree BY CONSTRUCTION instead of
-// competing. It ADDS only what the collapse-half needs — a net-direction integral
-// and the RULE-0 decision — DERIVED from the same valve, never a second integrator.
+// This was the single source of truth. Its CORE valve math is Stewart's λ=ρ
+// bounded-loss valve — the same T/D/L recurrences, the same ρ = 0.02, the same
+// e−1 bound — and it ADDS only what the collapse-half needs: a net-direction
+// integral and the RULE-0 decision, DERIVED from the valve, never a second
+// integrator.
 //
-// holding.ts (workbench) is left untouched (it feeds KappaHeader). Because the
-// formulas here are its formulas, there is no fight. Full de-duplication (holding.ts
-// importing a shared module) is a later refactor; identical math holds the line now.
+// ⚠ THE "IDENTICAL BY CONSTRUCTION" CLAIM NO LONGER HOLDS. holding.ts has since
+// taken three amendments this module does not carry, each from a pressure test:
+//   1. √steps normalization of the drift increment (PT-II #3) — a deep-work turn
+//      that took 9 tool steps is not 9 turns' worth of drift. Input here has no
+//      `steps` field at all.
+//   2. wall-clock decay, (1−ρ)^(Δt/τ) with the exponent floored at 1 per
+//      observation (PT-II #2, flipped by explicit ruling) — silence itself
+//      drains the reservoir. Input here has no timestamp; it decays per-call.
+//   3. the precision term (PT-V) — each observation weighted by
+//      w = min(1, 2π/(π+π̄)) against the decayed mean channel fidelity, so a
+//      badly-measured turn moves both accumulators less and π̄ is reported as a
+//      third axis. Input here has no `precision` field.
+// All three are strictly inside the e−1 bound (each multiplier is ≤ 1), so the
+// two do not CONTRADICT — but they no longer agree numerically on the same
+// stream, and this file must not be cited as if they did. It is the pre-PT-II
+// valve plus the collapse half.
+//
+// holding.ts (workbench) is the live one (it feeds KappaHeader). Reconciliation
+// — extracting the shared valve so both import it, and porting 1–3 here — is the
+// real fix and is NOT done. Until it is, treat any number this module produces as
+// a DIFFERENT reading from the workbench's, not a confirmation of it.
 //
 // STATUS: SHADOW. Nothing imports this. NOT VALIDATED. Requires anchored κ
 // (substrate-to-constraint-network, post-G2), not the lexical stub. `driftSigned`

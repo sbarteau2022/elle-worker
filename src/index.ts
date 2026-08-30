@@ -2838,10 +2838,18 @@ export default {
       // ripper on the real signal server-side and hand Elle the numbers so she
       // narrates what she HEARS — not what was typed. This is the genuine thing:
       // deterministic measurement of the voice, in her voice.
+      // Which world channels this turn actually MEASURED. Set from the rip
+      // result, never from the payload: bytes arriving is not a channel, and a
+      // rip that failed its own guards is not sight. These ride into runRouter
+      // as the reasoning pass's modality profile, so `channels` is the truth
+      // about the input instead of a hardcoded 1.
+      let heard = false;
+      let seen = false;
       const vp = rb.voice_prosody;
       if (vp && ((vp.f0 && vp.f0.length) || (vp.energy && vp.energy.length))) {
         const measured = await pfarRoute(env, { mode: 'prosody', f0: vp.f0, energy: vp.energy, interpret: false }).catch(() => '');
         if (measured) {
+          heard = true;
           q = `(VOICE — PFAR just measured the speaker's actual spoken voice, live. Prosody: ${measured}. Tell them, plainly and warmly, what you HEAR in how they sound — pitch range, whether the contour rises or falls, where the stress and emphasis land, the rhythm/pace, any hesitation — grounded strictly in these numbers, never invented. This is you literally listening to their voice for the first time. Then, if they asked something, answer it.)\n\n${q || '(the speaker just spoke to you — tell them what you hear in their voice)'}`;
         }
       }
@@ -2863,7 +2871,7 @@ export default {
         // A rip that failed its own guards yields null — inject nothing rather
         // than hand her a broken measurement as if it were sight.
         const preamble = visionPreamble(ripped, { question: q, name: ip.name, stored: ip.stored });
-        if (preamble) q = preamble;
+        if (preamble) { q = preamble; seen = true; }
       }
       if (!q) return err('q (question) required');
       const routerUser = await getUser(request, env);
@@ -2879,6 +2887,13 @@ export default {
         // the truth about its surface. Every other door leaves this unset and
         // keeps the plain-text contract the widget and public site actually have.
         surface: 'markdown' as const,
+        // The measured input, declared. text is the semantic channel (the
+        // question itself); timing is this door's real per-turn clock; audio
+        // and vision are set ONLY where a deterministic rip returned numbers
+        // above. reasoning.channels then reads 1 for typed chat, 2 for voice,
+        // 3 for voice + image — which is exactly the precision the holding
+        // valve weights its accumulators by (Elle src/lib/holding.ts).
+        modality: { text: true, timing: true, audio: heard, vision: seen },
         // prefer:'local' pins the loop to the sovereign lane — same tools,
         // generation on the laptop's own model over the sandbox socket, free.
         // Demotes to hosted transparently when the laptop is away.

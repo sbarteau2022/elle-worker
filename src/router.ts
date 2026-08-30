@@ -36,7 +36,7 @@ import { duplexTool } from './duplex';
 import { analyzeConstraint } from './constraint';
 import { pfarRoute } from './pfar';
 import { emitEvent, provenanceTool } from './events';
-import { reasonText, type ReasoningSummary } from './reasoning';
+import { reasonText, type ReasoningSummary, type ModalityProfile } from './reasoning';
 import { getProfileByUser, profileBlock } from './profiles';
 import { onboardingBrief } from './onboarding';
 import { rapidCosts, rapidVariance, rapidPOS, rapidMenu, rapidReport, flattenRapidReport } from './rapid';
@@ -1525,7 +1525,7 @@ Continue from here — at most a couple more tool calls if genuinely needed — 
 }
 
 // ── the loop ─────────────────────────────────────────────────
-export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; plan?: boolean; surface?: Surface; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
+export async function runRouter(question: string, env: Env, deps: RouterDeps, opts: { maxSteps?: number; userId?: string; scope?: Scope; sessionId?: string | null; source?: string; depth?: number; voice?: string; prefer?: 'local'; plan?: boolean; surface?: Surface; modality?: ModalityProfile; onEvent?: (ev: RouterLiveEvent) => void } = {}): Promise<RouterResult> {
   const ctxUserId = opts.userId || 'router';
   const scope: Scope = opts.scope || 'full';
   // Step ceiling is scope-aware: 'public'/'hospitality' can never reach a
@@ -1582,9 +1582,17 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // (coherence, not correspondence); a multimodal input would rise. Purely
   // additive: it tags the run and emits an event, and NEVER gates the answer or
   // takes the loop down (fail-open). This is the reasoning function, in action.
+  // The caller declares which channels it MEASURED this turn (index.ts sets
+  // audio/vision only when PFAR's prosody rip and VFAR's field rip actually
+  // returned numbers — bytes arriving is not a channel; a rip that failed its
+  // own guards is not sight). Without this the pass hardcoded { text: true },
+  // so a turn carrying the speaker's real voice and a real image still reported
+  // channels = 1 and ceilinged at consistent_only. That is the identity-
+  // precision defect at its source: world channels measured, then declared
+  // absent. Default stays text-only for every door that measures nothing.
   let reasoning: ReasoningSummary | undefined;
   try {
-    reasoning = reasonText(question, { text: true });
+    reasoning = reasonText(question, opts.modality ?? { text: true });
     void emitEvent(env, {
       run_id: runId, session_id: sessionId, source, scope, step_index: -1,
       kind: 'tool_call', tool: 'reasoning_pass',
