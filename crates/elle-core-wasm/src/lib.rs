@@ -14,7 +14,14 @@ fn mul_q(a: i32, b: i32) -> i32 {
 #[inline]
 fn div_q(num: i32, den: i32) -> i32 {
     if den == 0 {
-        if num >= 0 { i32::MAX } else { i32::MIN }
+        // Symmetric sentinel, matching src/fixed-math.ts `fixedDiv`, which
+        // returns +/-0x7fffffff and is pinned by src/fixed-math.test.ts.
+        // This used to return i32::MIN (-0x80000000) on the negative branch —
+        // one LSB apart from the TypeScript twin. Both implementations feed the
+        // Q0.30 keystream walk that each end of the session bus derives
+        // independently, so a single divergent step yields a different key and
+        // the lane goes silently deaf with no failing test to attribute it.
+        if num >= 0 { i32::MAX } else { -i32::MAX }
     } else {
         ((num as i128 * ONE_BIG) / den as i128) as i32
     }
@@ -93,21 +100,70 @@ pub fn cordic_sinh_cosh(s_q: i32) -> JsValue {
 // ----- Poincaré distance (hyperbolic metric) -----
 #[wasm_bindgen]
 pub fn poincare_distance_q30(px: i32, py: i32, qx: i32, qy: i32) -> i32 {
-    let dx = px.wrapping_sub(qx);
-    let dy = py.wrapping_sub(qy);
-    let dist_sq = mul_q(dx, dx) + mul_q(dy, dy);
-    let p_norm_sq = mul_q(px, px) + mul_q(py, py);
-    let q_norm_sq = mul_q(qx, qx) + mul_q(qy, qy);
-    let one_q = ONE;
-    let one_minus_p = one_q - p_norm_sq;
-    let one_minus_q = one_q - q_norm_sq;
-    let denom = mul_q(one_minus_p, one_minus_q);
-    let numer = mul_q(dist_sq, 2);
-    let term = one_q + div_q(numer, denom);
-    // Approximate arcosh(term) using f64 conversion (fallback)
-    let term_f = term as f64 / (ONE as f64);
-    let acosh_f = (term_f + (term_f * term_f - 1.0).sqrt()).ln();
-    (acosh_f * (ONE as f64)).round() as i32
+    // Q0.30 in, Q0.30 out — but the ratio is computed in f64 on purpose.
+    //
+    // Two defects made the fixed-point form unusable. First, `mul_q(dist_sq, 2)`
+    // ran the constant 2 through a Q0.30 * Q0.30 -> Q0.30 multiply, scaling the
+    // numerator by 2/2^30 rather than by 2; every distance collapsed to ~0
+    // (d((0.3,0),(-0.3,0)) returned 0.000000 against a true 1.238078), so all
+    // recall ranking over the ball tied at zero. Second, and not fixable by
+    // correcting that constant: Q0.30 carries ONE integer bit, so it tops out
+    // just below 2.0, while gamma = 1 + 2||u-v||^2 / ((1-||u||^2)(1-||v||^2))
+    // reaches 90.7 for a pair as ordinary as (0.9,0) and (0,0.9). The numerator
+    // saturates, div_q's `as i32` wraps it negative, and acosh of a sub-1 term
+    // silently returns 0 for the two most distant points in the ball.
+    //
+    // Computing gamma in f64 is not a concession: this function already used
+    // f64 `.sqrt()` and `.ln()` for the arcosh, so the cross-runtime bit-
+    // determinism that motivated fixed point was never actually delivered here.
+    // Keeping the Q0.30 ABI preserves every caller.
+    let scale = ONE as f64;
+    let (pxf, pyf) = (px as f64 / scale, py as f64 / scale);
+    let (qxf, qyf) = (qx as f64 / scale, qy as f64 / scale);
+
+    let dist_sq = (pxf - qxf).powi(2) + (pyf - qyf).powi(2);
+    let one_minus_p = 1.0 - (pxf * pxf + pyf * pyf);
+    let one_minus_q = 1.0 - (qxf * qxf + qyf * qyf);
+
+    // Outside or on the boundary the metric is undefined; report saturation
+    // rather than a wrapped value a caller cannot distinguish from a real one.
+    if one_minus_p <= 0.0 || one_minus_q <= 0.0 {
+        return i32::MAX;
+    }
+
+    let term = 1.0 + 2.0 * dist_sq / (one_minus_p * one_minus_q);
+    let d = (term + (term * term - 1.0).sqrt()).ln();
+
+    // Q0.30 holds |x| < 2, so any distance past ~1.9999999991 nats cannot be
+    // returned through this ABI at all — and real pairs blow through that
+    // routinely: d((0.9,0),(0,0.9)) is 5.201, and the plan's own eps=1e-5
+    // boundary projection admits radial depth 2*atanh(1-1e-5) = 12.21. Saturate
+    // at i32::MAX so a caller can SEE the ceiling, rather than wrapping to a
+    // small number that ranks as "very close". New callers should prefer
+    // `poincare_distance` (f64), which has the range this metric needs.
+    let raw = d * scale;
+    if raw >= i32::MAX as f64 {
+        i32::MAX
+    } else {
+        raw.round() as i32
+    }
+}
+
+/// Poincare-ball geodesic distance in 2-D, f64 in and out.
+///
+/// The Q0.30 variant above cannot represent this metric's range: one integer
+/// bit tops out below 2.0 nats while ordinary in-ball pairs exceed 5. This is
+/// the export new code should use.
+#[wasm_bindgen]
+pub fn poincare_distance(px: f64, py: f64, qx: f64, qy: f64) -> f64 {
+    let dist_sq = (px - qx).powi(2) + (py - qy).powi(2);
+    let one_minus_p = 1.0 - (px * px + py * py);
+    let one_minus_q = 1.0 - (qx * qx + qy * qy);
+    if one_minus_p <= 0.0 || one_minus_q <= 0.0 {
+        return f64::INFINITY;
+    }
+    let term = 1.0 + 2.0 * dist_sq / (one_minus_p * one_minus_q);
+    (term + (term * term - 1.0).sqrt()).ln()
 }
 
 // Utility exports for testing
@@ -259,3 +315,63 @@ mod tests {
 }
 
 
+
+#[cfg(test)]
+mod poincare_tests {
+    use super::*;
+    fn q(x: f64) -> i32 { (x * ONE as f64).round() as i32 }
+    fn truth(px: f64, py: f64, qx: f64, qy: f64) -> f64 {
+        let d = (px - qx).powi(2) + (py - qy).powi(2);
+        let a = 1.0 - (px * px + py * py);
+        let b = 1.0 - (qx * qx + qy * qy);
+        (1.0 + 2.0 * d / (a * b)).acosh()
+    }
+
+    /// Regression: `mul_q(dist_sq, 2)` scaled the numerator by 2/2^30 rather
+    /// than 2, collapsing every distance to ~0.
+    #[test]
+    fn distance_matches_f64_reference() {
+        for &(px, py, qx, qy) in &[
+            (0.3, 0.0, -0.3, 0.0),
+            (0.1, 0.1, 0.5, -0.4),
+            (0.2, 0.0, 0.4, 0.0),
+            (0.9, 0.0, 0.0, 0.9),
+            (0.0, 0.0, 0.99, 0.0),
+        ] {
+            let want = truth(px, py, qx, qy);
+            let got = poincare_distance(px, py, qx, qy);
+            assert!(
+                (got - want).abs() < 1e-9,
+                "d(({px},{py}),({qx},{qy})) = {got}, want {want}"
+            );
+            // The Q0.30 export must either agree or saturate visibly — never
+            // wrap to a small value that would rank as "close".
+            let q30 = poincare_distance_q30(q(px), q(py), q(qx), q(qy));
+            if want < 1.999 {
+                assert!(
+                    ((q30 as f64 / ONE as f64) - want).abs() < 1e-6,
+                    "q30 d = {}, want {want}", q30 as f64 / ONE as f64
+                );
+            } else {
+                assert_eq!(q30, i32::MAX, "out-of-range pair must saturate, not wrap");
+            }
+        }
+    }
+
+    /// Distance along a radial ray must be strictly increasing — the property
+    /// that made the collapse visible as "every recall ties at zero".
+    #[test]
+    fn distance_is_monotone_along_a_ray() {
+        let mut last = -1.0f64;
+        for &r in &[0.1f64, 0.3, 0.5, 0.7, 0.9, 0.99] {
+            let d = poincare_distance(0.0, 0.0, r, 0.0);
+            assert!(d > last, "d(0,{r}) = {d} did not exceed previous {last}");
+            last = d;
+        }
+    }
+
+    #[test]
+    fn identical_points_are_zero_distance() {
+        assert_eq!(poincare_distance_q30(q(0.4), q(0.2), q(0.4), q(0.2)), 0);
+    }
+}

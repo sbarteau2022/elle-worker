@@ -142,7 +142,9 @@ describe('Requirement R3: INGEST_QUEUE Batching (src/ingest-queue.ts)', () => {
       }
 
       expect(mockDb._executed.length).toBe(10);
-      expect(mockDb._executed[0].sql).toContain('INSERT INTO elle_session_bus');
+      // elle_ingest_queue, not elle_session_bus: the lane bus has no `payload`
+      // column, so the old target threw on every batch and persisted nothing.
+      expect(mockDb._executed[0].sql).toContain('INTO elle_ingest_queue');
       expect(mockDb._executed[0].params[1]).toBe('alpha_lane');
       expect(JSON.parse(mockDb._executed[0].params[2])).toEqual({ action: 'exec_1' });
     });
