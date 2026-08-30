@@ -57,6 +57,15 @@ export const KAPPA_CEILING = {
 
 export type KappaCeiling = keyof typeof KAPPA_CEILING;
 
+/**
+ * Leak rate for every κ ledger, matching Elle's src/lib/holding.ts.
+ * SUPERPOSITION_HOLDING.md §3 derives it as the steady-state Kalman gain of the
+ * local-level model — the classical RLS forgetting factor — giving a ~34-turn
+ * forgiveness half-life. Kept here so the worker and the workbench cannot drift
+ * apart on the one constant both instruments are calibrated against.
+ */
+export const RHO_DEFAULT = 0.02;
+
 // Conventional reference ranges for sustained/connected speech. `good` is the
 // value at or past which the measure stops indicating strain; `poor` is where
 // it clearly does.
