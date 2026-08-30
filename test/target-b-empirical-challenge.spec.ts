@@ -199,7 +199,7 @@ function createControllableMockEnv(options: {
       for (const s of stmts) {
         recordedBatch.push({ sql: s.sql, args: s.args });
         // Track rows across both elle_session_bus schema formats
-        if (s.sql.includes('elle_session_bus')) {
+        if (s.sql.includes('elle_session_bus') || s.sql.includes('elle_ingest_queue')) {
           if (s.args.length >= 9) {
             const [id, lane, direction, kind, reply_to, wire, plaintext, status, created_at] = s.args;
             d1Rows.push({

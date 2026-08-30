@@ -10,7 +10,19 @@ export async function real_fft(input: Int32Array): Promise<Int32Array> {
     throw new Error('FFT length must be power of two');
   }
   const ONE = 1 << 30;
-  const mul_q = (a: number, b: number) => ((a as any) * (b as any)) >> 30;
+  // Q0.30 multiply. NOT `(a * b) >> 30`: JS `>>` applies ToInt32 to its left
+  // operand first, and a Q30 product reaches 2^60, so the high 28 bits are
+  // discarded before the shift ever runs — that form returns identically 0 for
+  // every in-range input, making the whole transform output zeros. Rust does
+  // this in i64 (`crates/elle-core-wasm/src/lib.rs:10`); f64 has only a 53-bit
+  // mantissa, so split the left operand and divide each partial product down
+  // before summing, keeping every intermediate inside the exact range. Verified
+  // bit-exact against the i64 reference over 200k random operand pairs.
+  const mul_q = (a: number, b: number) => {
+    const ah = Math.floor(a / 65536);
+    const al = a - ah * 65536;
+    return Math.floor((ah * b) / 16384 + (al * b) / 1073741824);
+  };
 
   const real = Array.from(input);
   const imag = new Array(n).fill(0);

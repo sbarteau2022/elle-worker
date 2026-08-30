@@ -355,7 +355,14 @@ export class InMemoryIngestQueue {
     let totalFlushed = 0;
     let batches = 0;
     const errorDetails: string[] = [];
-    const targetTable = opts.targetTable || 'elle_session_bus';
+    // NOT elle_session_bus. That table is the cloud<->laptop lane bus: its
+    // columns are (id, lane, direction, kind, reply_to, wire, plaintext,
+    // status, created_at), it has no `payload`, and direction/kind/wire are
+    // NOT NULL with no defaults. Every drain against it threw "no such column:
+    // payload", the loop broke to preserve items, the queue filled to
+    // maxDepth and then rejected everything after — zero rows ever persisted.
+    // Generic ingest payloads get their own table.
+    const targetTable = opts.targetTable || 'elle_ingest_queue';
 
     try {
       while (this.queue.length > 0) {
@@ -364,7 +371,10 @@ export class InMemoryIngestQueue {
           const stmts = batchItems.map((item) => {
             const payloadStr = typeof item.payload === 'string' ? item.payload : JSON.stringify(item.payload);
             return db.prepare(
-              `INSERT INTO ${targetTable} (id, lane, payload, created_at) VALUES (?1, ?2, ?3, ?4)`
+              // OR IGNORE: drain is at-least-once keyed by a stable id, and
+              // D1 batch() is one transaction — a plain INSERT lets a single
+              // replayed id fail all 50 statements alongside it.
+              `INSERT OR IGNORE INTO ${targetTable} (id, lane, payload, created_at) VALUES (?1, ?2, ?3, ?4)`
             ).bind(
               item.id,
               item.lane ?? 'default',

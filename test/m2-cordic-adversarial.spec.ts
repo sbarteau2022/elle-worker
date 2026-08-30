@@ -471,7 +471,10 @@ describe('Milestone 2 Challenger 1: Adversarial CORDIC & Poincaré Determinism S
 
       expect(maxNorm).toBeLessThan(0.95);
       expect(minNorm).toBeGreaterThanOrEqual(0);
-    });
+    // 100k CORDIC steps: ~1.5s on an M-series Mac, ~5.5s on a slower CI
+    // runner. The 5000ms vitest default made this fail by hardware, not by
+    // regression. Explicit budget, generous enough to be a real signal.
+    }, 30000);
 
     it('fAdvancePoint with ultra-large ticks (10^9, 10^12) produces bit-exact deterministic results', () => {
       const p: FPoint = [toFixed(0.2), toFixed(0.3)];

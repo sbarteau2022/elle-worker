@@ -9,6 +9,9 @@ import type { Env } from './index';
 
 export const DEFAULT_STAGING_TTL_SECONDS = 300; // 5 minutes (300 seconds)
 export const DEFAULT_STAGING_PREFIX = 'staging:';
+
+/** Identifiers permitted in an interpolated INSERT target. */
+const STAGING_TABLE_ALLOWLIST = new Set(['elle_session_bus', 'elle_ingest_queue']);
 export const D1_BATCH_MAX_STATEMENTS = 50; // Cloudflare D1 batch headroom
 
 export interface StagedPayload<T = unknown> {
@@ -187,7 +190,6 @@ export async function stageEntry<T = unknown>(
         staged_at: typeof obj.staged_at === 'number' ? obj.staged_at : now,
         expires_at: now + ttlSeconds * 1000,
         nonce: rawNonce,
-        ...obj,
       };
     } else {
       stagedItem = {
@@ -312,12 +314,16 @@ function buildD1Statement(
   item: StagedPayload,
   targetTable?: string
 ): D1PreparedStatement {
-  if (item.sql && typeof item.sql === 'string') {
-    const args = Array.isArray(item.args) ? item.args : [];
-    return db.prepare(item.sql).bind(...args);
-  }
+  // No caller-supplied SQL branch. This used to be
+  //   if (item.sql) return db.prepare(item.sql).bind(...(item.args ?? []));
+  // with no allowlist and no read-only check, executed with full D1
+  // privileges over whatever a staged payload happened to carry — a stored
+  // injection gadget that bypassed both the scope model and guardSelect().
+  // Every statement below is parameterized against a fixed schema.
 
-  const table = targetTable || item.table || 'elle_session_bus';
+  // Interpolated into the statement text, so it can never come from a payload.
+  const requested = targetTable || item.table || 'elle_session_bus';
+  const table = STAGING_TABLE_ALLOWLIST.has(requested) ? requested : 'elle_session_bus';
 
   if (table === 'elle_session_bus') {
     const id = item.id || item.nonce || `stg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

@@ -36,6 +36,14 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
   // ── CREATE TABLE (idempotent). Batched: one transaction, fail-loud like the
   //    originals. Order is free — none of these carry FOREIGN KEY constraints. ──
   const creates: string[] = [
+    // ingest-queue.ts — drain target for the batched ingest tier. Distinct
+    // from elle_session_bus, which is the cloud<->laptop lane bus and carries
+    // no `payload` column; drain used to INSERT into it and threw on every
+    // batch, so nothing the queue accepted was ever persisted.
+    `CREATE TABLE IF NOT EXISTS elle_ingest_queue (
+      id TEXT PRIMARY KEY, lane TEXT NOT NULL,
+      payload TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS idx_ingest_queue_created ON elle_ingest_queue (created_at)`,
     // journal.ts
     `CREATE TABLE IF NOT EXISTS optimus_threads (
       id TEXT PRIMARY KEY, user_id TEXT, session_id TEXT, title TEXT,

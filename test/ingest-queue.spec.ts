@@ -170,7 +170,7 @@ export class InMemoryIngestQueue {
         try {
           const stmts = batchItems.map((item) => {
             return db.prepare(
-              'INSERT INTO elle_session_bus (id, lane, payload, created_at) VALUES (?1, ?2, ?3, ?4)'
+              'INSERT OR IGNORE INTO elle_ingest_queue (id, lane, payload, created_at) VALUES (?1, ?2, ?3, ?4)'
             ).bind(
               item.id,
               item.lane,
