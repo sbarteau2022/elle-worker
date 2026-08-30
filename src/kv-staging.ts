@@ -337,7 +337,13 @@ function buildD1Statement(
     const createdAt = typeof item.staged_at === 'number' ? item.staged_at : Date.now();
 
     return db.prepare(
-      `INSERT INTO elle_session_bus (id, lane, direction, kind, reply_to, wire, plaintext, status, created_at)
+      // OR IGNORE, not plain INSERT: staging is at-least-once. A purge that
+      // does not complete after a committed batch (isolate evicted, CPU limit)
+      // leaves the key staged, and the next flush replays the same id. Against
+      // `id TEXT PRIMARY KEY` a plain INSERT raises UNIQUE — and because D1
+      // batch() is one transaction, that failure takes the whole chunk of up
+      // to 50 with it and no key is purged, so the queue wedges permanently.
+      `INSERT OR IGNORE INTO elle_session_bus (id, lane, direction, kind, reply_to, wire, plaintext, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(id, lane, direction, kind, replyTo, wire, plaintext, status, createdAt);
   }
@@ -350,7 +356,7 @@ function buildD1Statement(
   const createdAt = typeof item.staged_at === 'number' ? item.staged_at : Date.now();
 
   return db.prepare(
-    `INSERT INTO ${table} (id, payload, created_at) VALUES (?, ?, ?)`
+    `INSERT OR IGNORE INTO ${table} (id, payload, created_at) VALUES (?, ?, ?)`
   ).bind(id, payloadStr, createdAt);
 }
 
@@ -432,6 +438,11 @@ export async function flushStaged(
           if (raw) {
             const item = JSON.parse(raw) as StagedPayload;
             entries.push({ key: k.name, item });
+          } else {
+            // Listed but gone by the time we read it: the TTL expired inside
+            // the list->get window (§6.2). Count it — dropping it silently
+            // makes a lossy flush indistinguishable from a clean one.
+            parseErrors.push(`Staged key "${k.name}" expired between list and get (TTL eviction)`);
           }
         } catch (err) {
           parseErrors.push(`Failed to read/parse key "${k.name}": ${err instanceof Error ? err.message : String(err)}`);
@@ -481,8 +492,13 @@ export async function flushStaged(
           // Delete committed keys from KV upon successful D1 batch write
           await Promise.all(
             chunkKeys.map(async (k) => {
-              await kv.delete(k).catch(() => {});
-              totalPurged++;
+              // Only count a key we actually removed; a swallowed failure that
+              // still increments makes stagedKeysPurged report a purge that
+              // did not happen, hiding exactly the replay case above.
+              try {
+                await kv.delete(k);
+                totalPurged++;
+              } catch { /* key survives; the OR IGNORE replay handles it */ }
             })
           );
         } catch (batchErr) {

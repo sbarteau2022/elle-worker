@@ -1744,6 +1744,13 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
   // it checks local availability and transparently demotes to hosted reasoning
   // if unavailable. The model may subsequently redirect per step via parsed.engine.
   let engine: Engine = classifyEngineSelection(question, scope, opts, env);
+  // §4.7: once the sovereign lane has failed, the run "keeps running on hosted
+  // models for the remainder of the run to avoid paying repeated socket timeout
+  // penalties." Demotion below sets this; the per-step hand-off honors it. The
+  // model is told local is "free and quota-less" (see the engine menu in the
+  // system prompt), so without this it re-picks 'local' on the very next step
+  // and every attempt pays another pathOpen -> laneHeartbeat -> D1 round-trip.
+  let localDemoted = false;
   // Shared across every step this run — the advisor tool checks-and-
   // increments this synchronously (see runTool's 'advisor' case), so it's
   // safe even under the parallel-tools path's Promise.all.
@@ -1774,6 +1781,7 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
         recordLLMCall(env, { task: 'local', provider: 'sovereign-local', model: 'local', ms: Date.now() - t0, ok: false, at: t0 });
         void emitEvent(env, { run_id: runId, session_id: sessionId, source, scope, step_index: step, kind: 'note', result_preview: `local lane unavailable, demoted to hosted: ${reason}`.slice(0, 500) });
         engine = 'reasoning';
+        localDemoted = true;
       }
     }
     if (!result) {
@@ -1808,7 +1816,10 @@ export async function runRouter(question: string, env: Env, deps: RouterDeps, op
     }
     // Honor a per-step engine hand-off ({"engine":"code"} etc.) for the NEXT call.
     if (typeof parsed.engine === 'string' && ENGINES.has(parsed.engine as Engine)) {
-      engine = parsed.engine as Engine;
+      const requested = parsed.engine as Engine;
+      // A run that already lost the lane stays hosted (§4.7), whatever the
+      // model asks for next.
+      engine = requested === 'local' && localDemoted ? 'reasoning' : requested;
     }
     // The chain of thought, kept: the protocol's per-step "thought" and the
     // provider's native reasoning tokens both ride the trace instead of being

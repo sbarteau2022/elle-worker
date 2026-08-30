@@ -117,7 +117,10 @@ function createMockStagingEnv(overrides: {
       const recordedBatch: Array<{ sql: string; args: unknown[] }> = [];
       for (const s of stmts) {
         recordedBatch.push({ sql: s.sql, args: s.args });
-        if (s.sql.includes('INSERT INTO elle_session_bus')) {
+        // Match the intent (an insert into this table), not the literal verb
+        // phrasing — the statement carries an OR IGNORE conflict clause so a
+        // replayed staging key is a no-op instead of a UNIQUE violation.
+        if (/INSERT(\s+OR\s+\w+)?\s+INTO\s+elle_session_bus/i.test(s.sql)) {
           const [id, lane, direction, kind, reply_to, wire, plaintext, status, created_at] = s.args;
           d1Rows.push({
             id: String(id),
