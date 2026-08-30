@@ -223,9 +223,16 @@ export function placeFeatures(features: number[], dim: number): number[] {
 // scaling + retraction of Nickel & Kiela.
 
 const HIERARCHY: ReadonlySet<EdgeKind> = new Set<EdgeKind>(['causal', 'derived', 'refines', 'supersedes']);
-const MAX_NODES = 256;
-const MAX_EDGES = 2048;
+// Target C places a H^128 x T^8 atlas over a user's whole memory graph, and its
+// own acceptance fixture is 500 nodes / 1,200 edges — both past the old 256/2048
+// caps, which silently TRUNCATED rather than erroring, so an oversized graph
+// produced a partial atlas indistinguishable from a complete one. Raised to a
+// working ceiling; `hyperMapCapacity()` below reports what was dropped so a
+// caller can tell a full atlas from a clipped one.
+const MAX_NODES = 20000;
+const MAX_EDGES = 200000;
 const MAX_EPOCHS = 1000;
+export const MAX_DIM = 512;   // H^128 is the plan's target; leave headroom above it
 const DELTA_NEAR = 0.3, DELTA_FAR = 1.6;  // edge target-distance range
 const NEG_MARGIN = 2.4;                    // non-edges pushed at least this far
 const HIER_MARGIN = 0.08;                  // consequent at least this much farther out (Euclidean radius)
@@ -235,7 +242,7 @@ const INIT_RADIUS = 0.1;                   // id-hash init: near the origin, let
 export interface HyperNode { id: string; features?: number[] }
 
 export interface HyperMapOpts {
-  dim?: number;        // 2..16, default 2
+  dim?: number;        // 2..MAX_DIM, default 128 (see the note in hyperMap)
   epochs?: number;     // default 300
   lr?: number;         // default 0.05
   seed?: number;       // default 42
@@ -253,7 +260,16 @@ export interface HyperAtlas {
 }
 
 export function hyperMap(nodesIn: HyperNode[], edgesIn: MemEdge[], opts: HyperMapOpts = {}): HyperAtlas {
-  const dim = Math.max(2, Math.min(16, Math.round(opts.dim ?? 2)));
+  // Was clamped to 16, which silently refused the H^128 the plan specifies —
+  // a caller asking for 128 got 16 back with no signal, and every downstream
+  // consumer read it as a 128-dim point.
+  // Default 128, not 2. Measured on a 1,093-node derivation tree against a
+  // cosine + 2-hop spreading-activation baseline (docs/experiments/dhng_bench):
+  //   dim   2 -> -71.3%    dim  16 -> -38.1%
+  //   dim  32 -> -16.5%    dim 128 -> +10.9%
+  // Every dimension below 128 is worse than the retriever already in place, so
+  // the old default of 2 shipped the manifold in the regime where it loses.
+  const dim = Math.max(2, Math.min(MAX_DIM, Math.round(opts.dim ?? 128)));
   const epochs = Math.max(1, Math.min(MAX_EPOCHS, Math.round(opts.epochs ?? 300)));
   const lr = Math.max(1e-4, Math.min(0.5, opts.lr ?? 0.05));
   const seed = (opts.seed ?? 42) >>> 0;
@@ -264,8 +280,17 @@ export function hyperMap(nodesIn: HyperNode[], edgesIn: MemEdge[], opts: HyperMa
   for (const n of nodesIn) {
     if (n && n.id && !byId.has(n.id) && byId.size < MAX_NODES) byId.set(n.id, n);
   }
+  // Reject malformed edges instead of training on them. An edge missing
+  // `weight` propagates NaN through the gradient, and the run completes with
+  // loss = NaN and every point at the origin — a degenerate atlas that reads
+  // as a successful one. Coerce what we can, drop what we cannot.
   const edges = edgesIn
     .filter((e) => e && e.src && e.dst && e.src !== e.dst)
+    .map((e) => ({
+      ...e,
+      weight: Number.isFinite(e.weight) ? e.weight : 1,
+      kind: e.kind ?? ('association' as MemEdge['kind']),
+    }))
     .slice(0, MAX_EDGES);
   for (const e of edges) {
     for (const id of [e.src, e.dst]) {

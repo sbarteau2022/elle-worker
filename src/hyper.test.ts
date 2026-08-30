@@ -208,9 +208,12 @@ describe('hyperMap', () => {
   it('ignores self-loops and honors the node cap', () => {
     const atlas = hyperMap([], [edge('a', 'a'), edge('a', 'b')]);
     expect(atlas.stats.edges).toBe(1);
+    // The node cap was 256, which silently TRUNCATED a graph rather than
+    // erroring — and Target C's own acceptance fixture is 500 nodes, so the
+    // old ceiling produced a partial atlas that read as a complete one.
     const many: MemEdge[] = [];
     for (let i = 0; i < 400; i++) many.push(edge(`n${i}`, `n${i + 1}`));
-    expect(hyperMap([], many).stats.nodes).toBeLessThanOrEqual(256);
+    expect(hyperMap([], many, { epochs: 5 }).stats.nodes).toBe(401);
   });
 
   it('reports coherent stats', () => {
