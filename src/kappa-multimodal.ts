@@ -11,11 +11,15 @@
 //     0.737 | TRUE and confident
 //     0.290 | "I was wrong about that"
 //
-// It ranks confident-false above confident-true. Wired into
-// kappa-memory/retrieval.ts as `- 0.2 * dip(kappa_traj)`, that means a memory
-// formed while reasoning carefully is ranked BELOW one formed while
-// overclaiming — the system preferentially forgets the moments it was right to
-// doubt itself.
+// It ranks confident-false above confident-true.
+//
+// CORRECTION to an earlier version of this comment: I claimed this was already
+// acting as a control signal, via `- 0.2 * dip(kappa_traj)` in
+// kappa-memory/retrieval.ts. It is not. `retrieveAtOpen` has zero callers
+// outside its own test, and kappa is computed outside Elle rather than ranked
+// inside it. The inversion is a real property of the measure; it is NOT
+// currently steering recall. Fixing it here is prophylactic — the point is that
+// kappa should not carry this defect if anything ever does read it.
 //
 // Two changes fix it, and both follow the discipline the codebase already has.
 //
@@ -36,6 +40,7 @@
 
 import { computeKappaDetail, type KappaDetail } from './journal';
 import type { VoiceFeatures } from './pfar';
+import type { FieldResult, GlcmResult } from './vfar';
 
 /** Ceiling on κ by how many independent world channels back it. */
 export const KAPPA_CEILING = {
@@ -103,9 +108,56 @@ export function acousticKappa(v: VoiceFeatures | null | undefined): AcousticKapp
   return { kappa, steadiness, clarity, fluency, expressivity, voiced_fraction: v.voiced_fraction };
 }
 
+/**
+ * κ from the visual field.
+ *
+ * Deliberately modest about what a camera can attest. vFAR reports scene
+ * structure, not faces or gaze, so this does NOT read confidence off a person.
+ * What it establishes is that an independent world channel is genuinely
+ * PRESENT and carrying structure rather than noise or a blank frame — which is
+ * what earns the ceiling lift. A capped lens and a dark room should not buy the
+ * grounded tier.
+ */
+export interface VisualKappa {
+  kappa: number;
+  presence: number;    // is there a structured field at all
+  structure: number;   // organized vs. noise (GLCM homogeneity/energy)
+  stability: number;   // anisotropy + symmetry: a composed frame, not a smear
+}
+
+const FIELD_DEAD_CONTRAST = 4,  FIELD_LIVE_CONTRAST = 35;   // std of luma
+const ENTROPY_NOISE = 0.92;                                  // above this it is closer to noise than scene
+
+export function visualKappa(
+  field: FieldResult | null | undefined,
+  glcm?: GlcmResult | null,
+): VisualKappa | null {
+  if (!field) return null;
+
+  // A blank or near-blank frame is not a world channel.
+  const presence = ramp(field.contrast, FIELD_DEAD_CONTRAST, FIELD_LIVE_CONTRAST);
+  if (presence <= 0.05) return null;
+
+  // High entropy with low homogeneity reads as sensor noise, not a scene.
+  const notNoise = 1 - ramp(field.entropy, 0.70, ENTROPY_NOISE);
+  const structure = glcm
+    ? 0.5 * glcm.homogeneity + 0.3 * Math.min(1, glcm.energy * 4) + 0.2 * notNoise
+    : notNoise;
+
+  const stability = 0.5 * field.anisotropy
+    + 0.5 * Math.max(field.symmetry.horizontal, field.symmetry.vertical);
+
+  const kappa = 0.45 * presence + 0.35 * structure + 0.20 * stability;
+  return { kappa, presence, structure, stability };
+}
+
 export interface KappaChannels {
   voice?: VoiceFeatures | null;
-  /** Any additional independent world channel already verified upstream. */
+  /** Visual field from vFAR — camera or screen. */
+  field?: FieldResult | null;
+  /** Optional GLCM texture for the same frame, sharpening structure vs. noise. */
+  glcm?: GlcmResult | null;
+  /** Any further independent world channel already verified upstream. */
   extraWorldChannels?: number;
 }
 
@@ -118,6 +170,7 @@ export interface KappaMultimodal {
   world_channels: number;
   lexical: KappaDetail;
   acoustic: AcousticKappa | null;
+  visual: VisualKappa | null;
 }
 
 /**
@@ -130,15 +183,27 @@ export interface KappaMultimodal {
 export function computeKappaMultimodal(text: string, channels: KappaChannels = {}): KappaMultimodal {
   const lexical = computeKappaDetail(text);
   const acoustic = acousticKappa(channels.voice);
+  const visual = visualKappa(channels.field, channels.glcm);
 
-  const world = (acoustic ? 1 : 0) + Math.max(0, Math.floor(channels.extraWorldChannels ?? 0));
+  const world = (acoustic ? 1 : 0) + (visual ? 1 : 0)
+    + Math.max(0, Math.floor(channels.extraWorldChannels ?? 0));
   const ceiling: KappaCeiling =
     world >= 2 ? 'grounded' : world === 1 ? 'ungrounded_consistent' : 'consistent_only';
   const cap = KAPPA_CEILING[ceiling];
 
   // The voice is weighted heavily when present: it is the harder signal to
   // produce on demand, and it is what lets a shaky "definitely" score low.
-  const uncapped = acoustic ? 0.45 * lexical.kappa + 0.55 * acoustic.kappa : lexical.kappa;
+  // Weight by how hard the channel is to fabricate on demand: words are free,
+  // a steady larynx is not, a structured visual field is evidence of a scene.
+  // Text never exceeds half the weight once any world channel is present.
+  // 0.40 / 0.40 / 0.20: with the voice alone text is exactly half, and every
+  // further channel pushes it below half. That is the rule, and these numbers
+  // are chosen to satisfy it rather than the reverse.
+  const parts: Array<[number, number]> = [[0.40, lexical.kappa]];
+  if (acoustic) parts.push([0.40, acoustic.kappa]);
+  if (visual) parts.push([0.20, visual.kappa]);
+  const wsum = parts.reduce((s2, [w]) => s2 + w, 0);
+  const uncapped = parts.reduce((s2, [w, v]) => s2 + w * v, 0) / wsum;
 
   return {
     kappa: Math.min(uncapped, cap),
@@ -149,5 +214,6 @@ export function computeKappaMultimodal(text: string, channels: KappaChannels = {
     world_channels: world,
     lexical,
     acoustic,
+    visual,
   };
 }

@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { computeKappaMultimodal, acousticKappa, KAPPA_CEILING } from './kappa-multimodal';
 import type { VoiceFeatures } from './pfar';
+import type { FieldResult, GlcmResult } from './vfar';
+
+const FIELD = (o: Partial<FieldResult> = {}): FieldResult => ({
+  w: 320, h: 240, mean: 118, contrast: 30, entropy: 0.74, edge_density: 0.22,
+  dominant_orientation: 'horizontal', anisotropy: 0.55,
+  symmetry: { horizontal: 0.62, vertical: 0.41 }, balance: { x: 0.05, y: -0.02 }, ...o,
+});
+const GLCM = (o: Partial<GlcmResult> = {}): GlcmResult =>
+  ({ contrast: 40, correlation: 0.6, energy: 0.18, homogeneity: 0.7, entropy: 4.2, ...o });
 
 const FALSE_CONFIDENT =
   'The fix is definitely correct. The ablation clearly proves content drives the score, therefore the manifold must always outperform the baseline. This precisely follows, and it never fails on real corpora.';
@@ -57,6 +66,30 @@ describe('kappa is no longer purely lexical', () => {
   it('returns no acoustic axis when the audio is effectively unvoiced', () => {
     expect(acousticKappa(voice({ voiced_fraction: 0.01 }))).toBeNull();
     expect(acousticKappa(null)).toBeNull();
+  });
+
+  it('reaches the grounded tier on voice + camera together', () => {
+    const r = computeKappaMultimodal(TRUE_HEDGED, { voice: voice(), field: FIELD(), glcm: GLCM() });
+    expect(r.world_channels).toBe(2);
+    expect(r.ceiling).toBe('grounded');
+    expect(r.cap).toBe(1.0);
+    expect(r.visual).not.toBeNull();
+  });
+
+  it('refuses to count a blank frame as a world channel', () => {
+    const dark = computeKappaMultimodal(TRUE_HEDGED, { field: FIELD({ contrast: 1.5 }) });
+    expect(dark.visual).toBeNull();
+    expect(dark.world_channels).toBe(0);
+    expect(dark.ceiling).toBe('consistent_only');
+  });
+
+  it('scores a noisy field below a structured one', () => {
+    const scene = computeKappaMultimodal(TRUE_HEDGED, { field: FIELD(), glcm: GLCM() });
+    const noise = computeKappaMultimodal(TRUE_HEDGED, {
+      field: FIELD({ entropy: 0.97, anisotropy: 0.05, symmetry: { horizontal: 0.08, vertical: 0.06 } }),
+      glcm: GLCM({ homogeneity: 0.12, energy: 0.02 }),
+    });
+    expect(noise.visual!.kappa).toBeLessThan(scene.visual!.kappa);
   });
 
   it('never emits a kappa outside [0,1]', () => {
