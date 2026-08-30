@@ -161,6 +161,15 @@ export async function handleMyErasure(env: Env, userId: string): Promise<Record<
     env.DB.prepare('DELETE FROM user_prefs WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM push_devices WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM reach_outs WHERE user_id = ?').bind(userId),
+    // Pre-armed for the tables Target C introduces. They do not exist yet, and
+    // "no such table" is handled below as nothing-to-erase — so these are inert
+    // today and correct the moment the tables land. Without them an erasure
+    // request would leave behind manifold coordinates that are a keyless
+    // invertible encoding of the source prosody and screen-texture features,
+    // i.e. exactly the data the request is asking to remove.
+    env.DB.prepare('DELETE FROM elle_memory_atlas WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM elle_cognitive_disagreements WHERE user_id = ?').bind(userId),
+    env.DB.prepare('DELETE FROM elle_active_inference_log WHERE user_id = ?').bind(userId),
   ]).catch((e) => {
     // A table that does not exist yet is not a failure to erase; anything else is.
     const msg = e instanceof Error ? e.message : String(e);
