@@ -1,0 +1,8 @@
+{
+  "//": "Chief architect side — Google Antigravity (Gemini). Merge this mcpServers entry into ~/.gemini/config/mcp_config.json (global) or <workspace>/.agents/mcp_config.json (per-project). In the Antigravity IDE: agent panel → '...' → Manage MCP Servers → View raw config. Antigravity requires 'serverUrl' for remote HTTP MCP (legacy 'url'/'httpUrl' are not supported).",
+  "mcpServers": {
+    "agent-bridge": {
+      "serverUrl": "http://127.0.0.1:8787/mcp"
+    }
+  }
+}
