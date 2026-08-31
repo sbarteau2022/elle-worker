@@ -194,8 +194,27 @@ export function ripVector(rip: unknown, dim = RIP_DIM): number[] {
     const s = Math.tanh(symlog(value));
     for (let i = 0; i < dim; i++) f[i] += s * dir[i];
   }
+  // Radial squash, NOT a clamp. The old line here was `if (n > 1) f /= n`,
+  // which projected every over-unit vector onto EXACTLY norm 1 — on real PAMI
+  // indices that fired 100% of the time, so ‖f‖ was the constant 1, placeFeatures
+  // produced ‖t‖ = TANGENT_SCALE for every input, and depth() returned the
+  // constant 2·atanh(tanh 0.9) = 1.8000 for every point in the store. The radial
+  // coordinate carried zero bits; magnitude was not absent upstream, it was
+  // discarded here.
+  //
+  // f ← f · tanh(‖f‖)/‖f‖ instead:
+  //   • strictly monotone in ‖f‖ (tanh is), so magnitude ordering survives;
+  //   • ‖f‖ = tanh(n) < 1 STRICTLY for every finite n, so placeFeatures/expMap0
+  //     still land strictly inside the ball and the ≤ 1 contract is unbroken;
+  //   • direction exactly preserved (a positive scalar multiple);
+  //   • tanh(n)/n → 1 as n → 0, so small vectors barely move;
+  //   • n = 0 is guarded, and a non-finite n falls through leaving f untouched
+  //     (it is already all-zero in that case — numericLeaves drops non-finites).
   const n = norm(f);
-  if (n > 1) for (let i = 0; i < dim; i++) f[i] /= n;
+  if (n > 0 && Number.isFinite(n)) {
+    const s = Math.tanh(n) / n;
+    for (let i = 0; i < dim; i++) f[i] *= s;
+  }
   return f;
 }
 

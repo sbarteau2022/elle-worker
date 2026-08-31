@@ -144,29 +144,70 @@ rule();
   // earn one. Counting them as claims would be unfair to the codebase.
   const fwdPat   = /permutation null|POWER_FLOOR|UNDERPOWERED|power_floor|post-cutoff|HINDSIGHT-FREE|hindsight-free/;
   // What a stored validation set would look like: scores beside outcomes.
-  const dataPat  = /completeness\s*[,:|]\s*fidelity|fidelity\s*[,:|]\s*completeness|blanket_fidelity|VALIDATION_SET|hand_extractions?/i;
+  // 5th-pass WIDENING. The 2nd pass MEASURED this pattern against seven
+  // realistic encodings of a ten-row scored table and found it blind to four:
+  // pretty-printed JSON (key and value on separate lines), a TSV header (tab,
+  // not comma), an inline JSON one-liner, and renamed columns (score_c /
+  // score_f). A0's finding is a NEGATIVE claim -- "this data is in no file" --
+  // and a negative claim is worth exactly what the search that failed to find
+  // it is worth. So the SEARCH is rebuilt here; the verdict is not softened.
+  // v1 is kept, not deleted, so the before/after is MEASURED in this harness's
+  // own output below rather than asserted in a comment.
+  const dataPatV1 = /completeness\s*[,:|]\s*fidelity|fidelity\s*[,:|]\s*completeness|blanket_fidelity|VALIDATION_SET|hand_extractions?/i;
+  // The two column names, each with the aliases a real scored table would use.
+  const COMP = String.raw`(?:(?:structural|struct|schema)?[_\- ]?completeness(?:[_\- ]?score)?|score[_\-]c\b|c[_\-]score\b|comp[_\-]score\b)`;
+  const FIDL = String.raw`(?:(?:blanket|outcome|prediction)?[_\- ]?fidelity(?:[_\- ]?score)?|score[_\-]f\b|f[_\-]score\b|fid[_\-]score\b)`;
+  // What may legitimately sit BETWEEN the two names in a stored table: a
+  // closing quote, one separator (comma / colon / pipe / tab / newline), an
+  // optional numeric value, and bracket punctuation. Bounded on purpose --
+  // prose cannot bridge the pair, so a sentence that merely mentions both
+  // words is still not data. \s spans newlines, which is what makes the
+  // pretty-printed-JSON and YAML cases reachable at all.
+  const GAPX = String.raw`["'\]]?\s*[,:|\t]?\s*(?:[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)?[\s,;:|}\]\[{]*["'\[]?`;
+  const dataSrc  = `${COMP}${GAPX}${FIDL}|${FIDL}${GAPX}${COMP}|blanket_fidelity|VALIDATION_SET|hand_extractions?`;
+  const dataPat  = new RegExp(dataSrc, 'i');
+  const dataPatG = new RegExp(dataSrc, 'gi');   // whole-FILE pass, for multi-line encodings
 
   const restatements = [];   // lines that ASSERT the retrospective result
   const forward     = [];    // lines that build the FORWARD test instead
   const candidates   = [];   // lines that could HOLD the data
+  const candSeen     = new Set();  // 5th pass: dedupe per-line vs whole-file hits
   const cofile       = new Set();  // 2nd pass: same-FILE co-occurrence, not same-line
   const numrows      = [];   // 2nd pass: bare numeric pairs — a scored table with no header
   for (const f of files) {
     if (selfSites.has(f)) continue;
     let txt; try { txt = fs.readFileSync(f, 'utf8'); } catch { continue; }
     const rel = path.relative(root, f);
-    txt.split('\n').forEach((l, i) => {
+    const lines = txt.split('\n');
+    lines.forEach((l, i) => {
       // 2nd pass: these were `if / else if`, so a line that both restated the
       // number AND built the forward test counted only as a restatement — an
       // unfairness pointing at the codebase. Now a line can land in both.
       if (claimPat.test(l)) restatements.push([rel, i + 1, l.trim().slice(0, 92)]);
       if (fwdPat.test(l))   forward.push([rel, i + 1, l.trim().slice(0, 92)]);
-      if (dataPat.test(l))  candidates.push([rel, i + 1, l.trim().slice(0, 92)]);
+      if (dataPat.test(l) && !candSeen.has(rel + ':' + (i + 1))) {
+        candSeen.add(rel + ':' + (i + 1));
+        candidates.push([rel, i + 1, l.trim().slice(0, 92)]);
+      }
       if (/\bcompleteness\b/i.test(l)) cofile.add(rel + '\u0000c');
       if (/\bfidelity\b/i.test(l))     cofile.add(rel + '\u0000f');
       if (/^\s*[-|"'\[]?\s*(?:0?\.\d+|[01](?:\.\d+)?)\s*[,\t|]\s*(?:0?\.\d+|[01](?:\.\d+)?)\s*[,|\]]?\s*$/.test(l))
         numrows.push([rel, i + 1, l.trim().slice(0, 92)]);
     });
+    // 5th pass: a line-at-a-time scan structurally CANNOT see an encoding that
+    // puts the two fields on different lines -- which is what pretty-printed
+    // JSON and YAML both do. Re-scan the whole file text with the same pattern,
+    // map every match back to its line, and dedupe against the per-line hits.
+    dataPatG.lastIndex = 0;
+    let mm;
+    while ((mm = dataPatG.exec(txt)) !== null) {
+      if (mm[0].length === 0) { dataPatG.lastIndex++; continue; }
+      const ln = txt.slice(0, mm.index).split('\n').length;
+      const key = rel + ':' + ln;
+      if (candSeen.has(key)) continue;
+      candSeen.add(key);
+      candidates.push([rel, ln, (lines[ln - 1] || mm[0]).trim().slice(0, 92)]);
+    }
   }
   const restateFiles = [...new Set(restatements.map(h => h[0]))];
   const fwdFiles = [...new Set(forward.map(h => h[0]))];
@@ -197,14 +238,53 @@ rule();
     ['inline JSON one-liner',                         '{"completeness":0.72,"fidelity":0.55}'],
     ['renamed columns (score_c, score_f)',            'score_c,score_f\n0.72,0.55'],
   ];
-  let blind = 0;
-  line('  PROBE POWER — can dataPat even see a scored table? (7 fixtures)');
+  // 5th pass: encodings the WIDENED pattern still cannot reach. Closing the
+  // seven above does not make the search complete, and A0's null result must
+  // not be read as if it did. These are measured by running the widened
+  // pattern against them, exactly as the seven are — not assumed.
+  const residual = [
+    ['opaque single-letter columns (case,c,f)',       'case,c,f\n1,0.72,0.55'],
+    ['opaque axis names (id,x,y), legend elsewhere',  'id,x,y\n1,0.72,0.55'],
+    ['array-of-arrays, column names in another file', '[[0.72,0.55],[0.41,0.33]]'],
+    ['the pair stated in prose, never tabulated',     'Case 3 scored 0.72 on structure and resolved at 0.55.'],
+  ];
+  // Detection here mirrors the repo walk above EXACTLY — per-line first, then
+  // the whole-file pass. Measuring a probe the scan does not actually run
+  // would be the same error this harness is hunting.
+  const seesV1 = (t) => t.split('\n').some((l) => dataPatV1.test(l));
+  const seesV2 = (t) => {
+    if (t.split('\n').some((l) => dataPat.test(l))) return true;
+    dataPatG.lastIndex = 0;
+    return dataPatG.test(t);
+  };
+  let blind = 0, blindV1 = 0, blindNamed = 0;
+  line('  PROBE POWER — can the evidence search even SEE a scored table?');
+  line('  A0 asserts a NEGATIVE, so it is worth exactly what this search is worth.');
+  line('');
+  line('    v1 (before)  v2 (now)   encoding');
   for (const [lab, txt] of fixtures) {
-    const hit = txt.split('\n').some((l) => dataPat.test(l));
-    if (!hit) blind++;
-    line(`    ${hit ? 'DETECTED' : 'MISSED  '}  ${lab}`);
+    const h1 = seesV1(txt), h2 = seesV2(txt);
+    if (!h1) blindV1++;
+    if (!h2) { blindNamed++; blind++; }
+    line(`    ${h1 ? 'DETECTED  ' : 'MISSED    '} ${h2 ? 'DETECTED' : 'MISSED  '}   ${lab}`);
   }
-  line(`  dataPat is BLIND to ${blind}/${fixtures.length} realistic encodings.`);
+  line(`  of these ${fixtures.length} encodings the OLD pattern was blind to ${blindV1}; the WIDENED pattern is blind to ${blindNamed}.`);
+  line('');
+  line('  RESIDUAL BLINDNESS — encodings the WIDENED pattern still cannot see:');
+  let blindResidual = 0;
+  for (const [lab, txt] of residual) {
+    const h2 = seesV2(txt);
+    if (!h2) { blindResidual++; blind++; }
+    line(`    ${h2 ? 'DETECTED' : 'MISSED  '}  ${lab}`);
+  }
+  line(`  ${blindResidual}/${residual.length} still missed: no name-based pattern can recover a column whose`);
+  line('  name carries no shared vocabulary. Those are the numeric-pair pass below.');
+  const binExts = ['.xlsx', '.xls', '.ods', '.numbers', '.parquet', '.db', '.sqlite', '.pdf'];
+  const unscanned = binExts.filter((e) => !exts.has(e));
+  line(`  and ${unscanned.length}/${binExts.length} file types are never walked at all: ${unscanned.join(' ')}`);
+  line('  (a set of ten hand-extractions lives in a spreadsheet at least as often');
+  line('   as in a repository file, and no regex over this walk reaches one.)');
+  line(`  dataPat is BLIND to ${blind}/${fixtures.length + residual.length} realistic encodings.`);
   line('');
   const coFiles = [...new Set([...cofile].map(k => k.split('\u0000')[0]))]
     .filter(f => cofile.has(f + '\u0000c') && cofile.has(f + '\u0000f'));
@@ -215,9 +295,11 @@ rule();
   line('');
   if (candidates.length === 0) {
     line('  VERDICT: this probe finds no scored validation set. Read that at the');
-    line(`           strength the instrument supports: dataPat is blind to ${blind} of 7`);
-    line('           realistic encodings, and this walk covers the WORKING TREE AT');
-    line('           HEAD ONLY — git history is not searched. The honest statement');
+    line(`           strength the instrument supports: dataPat sees all ${fixtures.length - blindNamed} of the`);
+    line(`           ${fixtures.length} named encodings after the 5th-pass widening but is still blind`);
+    line(`           to ${blind} of ${fixtures.length + residual.length} once opaque column names are counted, and this walk`);
+    line('           covers the WORKING TREE AT HEAD ONLY — git history is not');
+    line('           searched. The honest statement');
     line('           is "no scored set is visible to these probes here and now",');
     line('           not "none exists". The co-occurrence and numeric-pair passes');
     line('           above are the fallback; inspect any file they list.');
@@ -249,7 +331,7 @@ rule();
   }
   if (restatements.length && !candidates.length)
     DEFECTS.push(`A0 the headline number is asserted in ${restateFiles.length} file(s) and evidenced in none`);
-  if (blind) DEFECTS.push(`A0 dataPat is blind to ${blind}/7 encodings; its null result is bounded`);
+  if (blind) DEFECTS.push(`A0 dataPat is blind to ${blind}/${fixtures.length + residual.length} encodings; its null result is bounded`);
 
 }
 
@@ -312,13 +394,25 @@ line(`  MAXIMUM                      : ${vals[vals.length - 1].toFixed(4)}`);
 line(`  the source clamps with Math.min(..., 1)`);
 line(`  does that clamp ever engage? : ${vals[vals.length - 1] >= 1 ? 'YES' : 'NO — it is dead code'}`);
 line('');
-line('  The weight blocks sum to 0.96, not 1.00. A perfect extraction — every');
-line('  field present, three well-formed agents, a nested parent, a classified');
-line('  collision with a trough signature, all three suppression fields, and a');
-line('  verdict with reasoning — scores 0.9600 and can never score higher. The');
-line('  metric is not on a [0,1] scale despite being clamped to one and being');
-line('  read as a fraction. Any downstream consumer that treats 1.0 as the');
-line('  ceiling is calibrated against a point the function cannot reach.');
+{
+  // Narration is interpolated from the same measurement the defect gate below
+  // reads (vals[vals.length - 1]) and branches on the same condition (< 1), so
+  // this paragraph cannot drift from the counters.
+  const maxV = vals[vals.length - 1];
+  if (maxV < 1) {
+    line(`  The measured ceiling is ${maxV.toFixed(4)}, not 1.0000. A perfect`);
+    line('  extraction — every field filled, well-formed agents, a nested parent,');
+    line('  a classified collision, all suppression fields, a verdict with');
+    line('  reasoning — cannot score higher. The metric is not on a [0,1] scale');
+    line('  despite being clamped to one and read as a fraction; any consumer');
+    line('  treating 1.0 as the ceiling is calibrated against a point the');
+    line('  function cannot reach.');
+  } else {
+    line(`  The measured ceiling is ${maxV.toFixed(4)} exactly: the full [0,1] scale is`);
+    line('  reachable and the Math.min(..., 1) clamp is a live guard at the top');
+    line('  of the range, not dead code.');
+  }
+}
 if (unenumerated.length) DEFECTS.push('A1 lattice is not exhaustive');
 if (vals[vals.length - 1] < 1) DEFECTS.push('A1 Math.min(...,1) clamp is dead code; ceiling is 0.96');
 
@@ -392,14 +486,28 @@ rule();
   line(`  vacuous beats the deep reading by     : ${(sVac - sDeep).toFixed(4)}  (${(sVac / sDeep).toFixed(2)}x)`);
   if (sRich === sVac) DEFECTS.push('A3 a content-free extraction scores identically to a real reading');
   line('');
-  line('  Every predicate in the scorer is a presence test — !!b.name, .length');
-  line('  >= 1, Boolean(field). None of them reads content. So the score is a');
-  line('  measure of SCHEMA COVERAGE, not of modelling quality, and the two are');
-  line('  not the same variable. That matters more here than it would elsewhere:');
-  line('  the producer is an LLM asked to fill this exact schema, and filling a');
-  line('  schema is the one thing an LLM will do whether or not the material');
-  line('  supports it. The extraction prompt says "do not invent structure it did');
-  line('  not infer" — the scorer pays for inventing it anyway.');
+  // Branches on the identical condition the A3 defect gate uses (sRich ===
+  // sVac), interpolating the measured scores, so the prose tracks the scorer
+  // actually shipped rather than the version this siege was written against.
+  if (sRich === sVac) {
+    line('  Every predicate in the scorer is a presence test — !!b.name, .length');
+    line('  >= 1, Boolean(field). None of them reads content. So the score is a');
+    line('  measure of SCHEMA COVERAGE, not of modelling quality, and the two are');
+    line('  not the same variable. That matters more here than it would elsewhere:');
+    line('  the producer is an LLM asked to fill this exact schema, and filling a');
+    line('  schema is the one thing an LLM will do whether or not the material');
+    line('  supports it. The extraction prompt says "do not invent structure it did');
+    line('  not infer" — the scorer pays for inventing it anyway.');
+  } else {
+    line(`  A content-free extraction no longer scores like a real one: "." in`);
+    line(`  every field scores ${sVac.toFixed(4)} against ${sRich.toFixed(4)} for the rich reading.`);
+    line('  But the floors that separate them are SYNTACTIC — a character class,');
+    line('  minimum lengths, a placeholder list. They tell "filled with a');
+    line('  placeholder" from "filled"; they cannot tell a plausible INVENTED');
+    line('  extraction from a true one. The score is schema coverage with a');
+    line('  syntactic floor, not modelling quality, and the producer is still an');
+    line('  LLM asked to fill this exact schema.');
+  }
   line('');
   line('  The direction of the bias is the problem. If completeness is really a');
   line('  proxy for schema-filling eagerness, then a correlation with downstream');
@@ -407,6 +515,25 @@ rule();
   line('  the runs on richer dockets. The claim needs the confound ruled out;');
   line('  nothing in this repo rules it out.');
 }
+
+// The tie patterns A5 enumerates its exact permutation null over. Hoisted out
+// of A5 (5th pass) for one reason: A4 measures how LIKELY ties are and then
+// hands that result to A5, so A4 has to be able to state, from the same array
+// A5 actually uses, how many patterns are enumerated and what rank convention
+// they carry. Two copies of this list would let the prose drift from the code,
+// which is the exact defect class this siege hunts.
+//
+// Each entry is a vector of RANKS for the predictor, using MIDRANKS: a group of
+// g tied cases spanning sorted positions p..p+g-1 all carry the mean of those
+// positions (so a 2-way tie at the bottom is 1.5,1.5 and a 4-way tie at the top
+// is 8.5 four times). A4 VERIFIES that property rather than assuming it.
+const TIE_PATTERNS = [
+  ['no ties (the shortcut case)      ', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]],
+  ['one 2-way tie                    ', [1.5, 1.5, 3, 4, 5, 6, 7, 8, 9, 10]],
+  ['two 2-way ties                   ', [1.5, 1.5, 3.5, 3.5, 5, 6, 7, 8, 9, 10]],
+  ['one 3-way tie                    ', [2, 2, 2, 4, 5, 6, 7, 8, 9, 10]],
+  ['one 4-way tie at the top (cf. A2)', [1, 2, 3, 4, 5, 6, 8.5, 8.5, 8.5, 8.5]],
+];
 
 // ---------------------------------------------------------------- A4
 line('');
@@ -448,6 +575,56 @@ rule();
   line('  to two decimals with no tie correction stated and no n=10 table to');
   line('  inspect, so its tie structure is unknown and its third digit is not');
   line('  recoverable from anything in this repository.');
+
+  // 5th pass. A4 measured that ties are common and then said nothing about how
+  // this siege TREATS them — which left the reader unable to tell whether the
+  // null A5 feeds on is the tied one or the untied one. State it, and drive
+  // every quantity below off the arrays and counters actually computed here.
+  // Not one number in this paragraph is typed in by hand; an earlier pass of
+  // this harness shipped prose that said "several files" while its own counter
+  // said 2 lines in 1 file, and that is the failure this run exists to stop.
+  const tiedPatterns = TIE_PATTERNS.filter(([, xr]) => new Set(xr).size < xr.length);
+  let tieGroups = 0, midrankOK = 0, maxGroup = 0, tiedCases = 0;
+  for (const [, xr] of TIE_PATTERNS) {
+    const sorted = xr.slice().sort((a, b) => a - b);
+    let p = 0;
+    while (p < sorted.length) {
+      let q = p;
+      while (q + 1 < sorted.length && sorted[q + 1] === sorted[p]) q++;
+      const g = q - p + 1;
+      if (g > 1) {
+        tieGroups++;
+        tiedCases += g;
+        if (g > maxGroup) maxGroup = g;
+        // midrank = mean of the 1-based sorted positions the group spans
+        let mid = 0;
+        for (let r = p + 1; r <= q + 1; r++) mid += r;
+        mid /= g;
+        if (Math.abs(mid - sorted[p]) < 1e-12) midrankOK++;
+      }
+      p = q + 1;
+    }
+  }
+  let fact = 1;
+  for (let i = 2; i <= n10; i++) fact *= i;
+  line('');
+  line('  HOW THIS SIEGE HANDLES THE TIES IT JUST MEASURED');
+  line(`    tie patterns enumerated (A5 runs its null over each) : ${TIE_PATTERNS.length}`);
+  line(`    of those, patterns carrying at least one tie         : ${tiedPatterns.length}`);
+  line(`    distinct tie GROUPS across all patterns              : ${tieGroups}`);
+  line(`    largest group / cases inside a tied group            : ${maxGroup}-way / ${tiedCases}`);
+  line(`    convention: MIDRANKS — a group of g tied cases spanning sorted`);
+  line(`    positions p..p+g-1 carries the mean of those positions. VERIFIED,`);
+  line(`    not assumed: ${midrankOK} of ${tieGroups} groups satisfy it (${tieGroups ? (100 * midrankOK / tieGroups).toFixed(0) : '0'}%).`);
+  line(`    rho is then Pearson-on-ranks over those midranks, and each of the`);
+  line(`    ${TIE_PATTERNS.length} patterns gets all ${fact.toLocaleString('en-US')} = ${n10}! relabelings enumerated exactly.`);
+  line(`    P(at least one tie among n=${n10}) as measured above : ${pTie.toFixed(4)}, so at`);
+  line(`    least ${(pTie * 100).toFixed(2)}% of ten-case studies of this predictor land in the`);
+  line(`    tied regime and ${(100 - pTie * 100).toFixed(2)}% at most in the untied one. The ${tiedPatterns.length} tied`);
+  line(`    patterns are therefore the expected case, not a corner case, and`);
+  line(`    the untied shortcut identity applies to at most ${(100 - pTie * 100).toFixed(2)}% of studies.`);
+  line(`    What is NOT stated anywhere in this repository is which convention`);
+  line('    produced the reported +0.61 — that is what the defect below records.');
   if (pTie > 0.25) DEFECTS.push('A4 ties are likely at n=10 and no tie handling is stated');
   if (K < 40) DEFECTS.push('A4 rank resolution is coarse in the realised band');
 }
@@ -495,13 +672,7 @@ rule();
     for (const v of arr) { if (v >= OBS - 1e-12) ge++; else break; }
     return { total: w, one: ge / w, two: 2 * ge / w, crit: arr[Math.floor(0.025 * w)] };
   };
-  const patterns = [
-    ['no ties (the shortcut case)      ', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]],
-    ['one 2-way tie                    ', [1.5, 1.5, 3, 4, 5, 6, 7, 8, 9, 10]],
-    ['two 2-way ties                   ', [1.5, 1.5, 3.5, 3.5, 5, 6, 7, 8, 9, 10]],
-    ['one 3-way tie                    ', [2, 2, 2, 4, 5, 6, 7, 8, 9, 10]],
-    ['one 4-way tie at the top (cf. A2)', [1, 2, 3, 4, 5, 6, 8.5, 8.5, 8.5, 8.5]],
-  ];
+  const patterns = TIE_PATTERNS;   // 5th pass: hoisted, so A4 counts what A5 runs
   line(`  permutations per pattern      : 3,628,800   (10!, fully enumerated)`);
   line('');
   line('  tie pattern in the predictor        two-sided p   5% crit   +0.61 clears?');
@@ -631,8 +802,14 @@ line('    - +0.61 at n=10 does not reach two-sided significance (A5, exact)');
 line('    - its 95% interval contains zero, and overlaps the +0.08 it is being');
 line('      contrasted with; "7x" is a ratio of two indistinguishable-from-zero');
 line('      point estimates (A6)');
-line('    - and the predictor is schema coverage, not modelling quality: a');
-line('      content-free extraction scores the maximum (A3)');
+if (DEFECTS.some(d => d.startsWith('A3'))) {
+  line('    - and the predictor is schema coverage, not modelling quality: a');
+  line('      content-free extraction scores the maximum (A3)');
+} else {
+  line('    - and even with A3 cleared, the predictor remains schema coverage');
+  line('      with a syntactic floor, not modelling quality; the confound in A3');
+  line('      is unaddressed');
+}
 line('');
 line('  The repository already contains the correct instrument and already knows');
 line('  why. observer-live.ts exists because "every retrospective test of kappa');

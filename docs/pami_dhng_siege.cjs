@@ -215,6 +215,7 @@ hdr('B0 · radial range of the bridge  (is depth even a variable?)');
   say('COUNTERFACTUAL — shrink the index leaves by α and re-measure:');
   say('   α        ‖ripVector‖ mean   saturated%   depth range   depth sd');
   let recovered = 0;
+  let rangeAt1 = 0;
   for (const a of [1, 0.5, 0.2, 0.1, 0.05, 0.02]) {
     const ns = [], ds = [];
     for (const [, x] of probe) {
@@ -225,12 +226,15 @@ hdr('B0 · radial range of the bridge  (is depth even a variable?)');
     const st = mean(ns.map((v) => (v >= 1 - 1e-9 ? 1 : 0)));
     const rg = Math.max(...ds) - Math.min(...ds);
     if (rg > 1e-6) recovered++;
+    if (a === 1) rangeAt1 = rg;
     say(`   ${String(a).padEnd(7)}  ${fmt(mean(ns), 6).padStart(14)}   ${(100 * st).toFixed(0).padStart(8)}%   ${fmt(rg, 6).padStart(11)}   ${fmt(sd(ds), 6).padStart(8)}`);
   }
   say('');
-  say(recovered > 0
-    ? `CONCLUSION: depth is flat at α=1 but SPREADS at ${recovered} smaller scale(s). The radial variation is present in the index and is being DESTROYED by the clamp at hyper.ts:198 — this is a discarded coordinate, not a missing one. Replacing that clamp with a monotone squash (e.g. f ← f·tanh(‖f‖)/‖f‖) is a one-line change that restores the axis.`
-    : `CONCLUSION: depth stays flat at every α tested. The clamp is not the only cause; the hashed sum itself may carry no usable radial signal.`);
+  say(rangeAt1 > 1e-6
+    ? `CONCLUSION: depth SPREADS at native scale α=1 (range ${fmt(rangeAt1, 6)}) and at ${recovered} of 6 scales tested. The radial coordinate is live: the index-to-radius mapping passes variation through at the scale production actually runs.`
+    : recovered > 0
+      ? `CONCLUSION: depth is flat at α=1 but SPREADS at ${recovered} smaller scale(s). The radial variation is present in the index and is being DESTROYED before the ball — this is a discarded coordinate, not a missing one. A monotone radial squash (e.g. f ← f·tanh(‖f‖)/‖f‖) in ripVector restores the axis.`
+      : `CONCLUSION: depth stays flat at every α tested. The saturating map is not the only cause; the hashed sum itself may carry no usable radial signal.`);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

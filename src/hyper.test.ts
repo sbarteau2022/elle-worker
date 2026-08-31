@@ -125,12 +125,82 @@ describe('ripVector (feature hashing over ripper reports)', () => {
     expect(v1.length).toBe(RIP_DIM);
   });
 
-  it('stays bounded (‖f‖ ≤ 1) and differs across different structures', () => {
+  it('stays bounded (‖f‖ < 1, STRICTLY) and differs across different structures', () => {
     const v1 = ripVector(vfarRip);
     const v2 = ripVector({ spectrum: { centroid: 0.4, flatness: 0.1, periodicity: 0.9 } });
-    expect(norm(v1)).toBeLessThanOrEqual(1 + 1e-9);
-    expect(norm(v2)).toBeLessThanOrEqual(1 + 1e-9);
+    // Strictly inside, not merely ≤ 1: the old hard clamp satisfied ≤ 1 by
+    // pinning saturated vectors to EXACTLY 1, which is what killed the radial axis.
+    expect(norm(v1)).toBeLessThan(1);
+    expect(norm(v2)).toBeLessThan(1);
     expect(v1).not.toEqual(v2);
+  });
+
+  // ── radial-squash regression: ‖f‖ must carry bits ─────────────────────
+  // ripVector used to end with `if (n > 1) f[i] /= n` — a hard clamp that mapped
+  // EVERY over-unit vector onto exactly norm 1. On real PAMI indices that fired
+  // 100% of the time, so ‖f‖ was the constant 1, placeFeatures produced the
+  // constant tangent norm TANGENT_SCALE, and depth() returned the constant
+  // 2·atanh(tanh 0.9) = 1.8 for every point in the store. Every case below sits
+  // ABOVE the old clamp threshold (pre-squash norm > 1), so each one returned an
+  // identical vector and an identical depth under the old code and fails loudly
+  // if the clamp is ever reintroduced.
+
+  // same leaf paths (⇒ same hashed directions), three different magnitudes.
+  const byMagnitude = (k: number) => {
+    const o: Record<string, number> = {};
+    for (let i = 0; i < 6; i++) o[`leaf${i}`] = (1 + i) * k;
+    return o;
+  };
+
+  it('magnitude survives: larger reports give strictly larger ‖f‖ (monotone, not clamped)', () => {
+    const n1 = norm(ripVector(byMagnitude(0.2)));
+    const n2 = norm(ripVector(byMagnitude(1)));
+    const n3 = norm(ripVector(byMagnitude(4)));
+    // all three exceed 1 before the squash — the old clamp collapsed them to 1
+    expect(Math.atanh(n1)).toBeGreaterThan(1);
+    expect(n1).toBeLessThan(n2);
+    expect(n2).toBeLessThan(n3);
+    expect(n3).toBeLessThan(1);
+  });
+
+  it('magnitude reaches the ball: different-magnitude reports land at different depths', () => {
+    const dShallow = depth(placeFeatures(ripVector(byMagnitude(0.2)), RIP_DIM));
+    const dDeep = depth(placeFeatures(ripVector(byMagnitude(4)), RIP_DIM));
+    expect(dShallow).toBeLessThan(dDeep);
+    expect(dDeep - dShallow).toBeGreaterThan(1e-3);
+    // and neither is pinned to the structural ceiling the clamp used to force
+    const ceiling = 2 * Math.atanh(Math.tanh(0.9));
+    expect(dDeep).toBeLessThan(ceiling);
+  });
+
+  it('the squash preserves direction exactly (it is a positive scalar multiple)', () => {
+    // one leaf ⇒ one hashed direction; only the magnitude differs, so the two
+    // vectors must be exactly parallel while having different norms.
+    const a = ripVector({ a: 1 });
+    const b = ripVector({ a: 1000 });
+    expect(norm(a)).toBeLessThan(norm(b));
+    expect(dot(a, b) / (norm(a) * norm(b))).toBeCloseTo(1, 12);
+    for (let i = 0; i < RIP_DIM; i++) {
+      if (a[i] !== 0) expect(Math.sign(b[i])).toBe(Math.sign(a[i]));
+    }
+  });
+
+  it('is a near no-op for small vectors (tanh(n)/n → 1 as n → 0)', () => {
+    const tiny = ripVector({ a: 1e-6 });
+    const n = norm(tiny);
+    // pre-squash norm is recoverable as atanh(‖f‖); for tiny n the squash
+    // must not measurably move it.
+    expect(Math.abs(Math.atanh(n) - n) / n).toBeLessThan(1e-9);
+  });
+
+  it('never escapes the ball, even for a pathologically large report', () => {
+    const huge: Record<string, number> = {};
+    for (let i = 0; i < 400; i++) huge[`k${i}`] = 1e12 * (i + 1);
+    const f = ripVector(huge);
+    expect(f.every(Number.isFinite)).toBe(true);
+    expect(norm(f)).toBeLessThan(1);
+    expect(norm(placeFeatures(f, RIP_DIM))).toBeLessThan(1);
+    expect(Number.isFinite(depth(placeFeatures(f, RIP_DIM)))).toBe(true);
   });
 
   it('handles junk and empties without throwing', () => {

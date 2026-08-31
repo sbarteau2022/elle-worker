@@ -1,19 +1,21 @@
 ========================================================================
 LANE A SIEGE — observer/blanket completeness
-commit 40356079be131a437f662c1eb92f0d4f78948dfe (WORKING TREE DIRTY)
+commit 46085d4ee236384fb546f879c0c033928cc49434 (WORKING TREE DIRTY)
 ========================================================================
 
 A0  PROVENANCE — is the n=10 validation set in this repository?
 ------------------------------------------------------------------------
-  files scanned (repo, excluding this harness) : 583
+  files scanned (repo, excluding this harness) : 587
 
   LINES THAT ASSERT THE RETROSPECTIVE RESULT : 2  in 1 file(s)
     src/observer-blanket.ts:17  // HYPOTHESIS, NOT A VALIDATION. An offline reading of n=10 hand-extractions put
     src/observer-blanket.ts:18  // completeness→fidelity at rho≈+0.61 against +0.08 for trajectory coherence. That
 
-  LINES BUILDING THE FORWARD TEST INSTEAD : 58  in 13 file(s)
+  LINES BUILDING THE FORWARD TEST INSTEAD : 61  in 15 file(s)
+    .swarm/RUN.md
     corpus/observer/run-queue-docket.md
     docs/OBSERVER_QUEUE_RUNBOOK.md
+    docs/PREDICTION_OPERATOR_SPEC.md
     research/seam-rip/README.md
     src/db/schema.ts
     src/observer-blanket.ts
@@ -31,15 +33,30 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
   LINES THAT COULD HOLD THE DATA (a scored table, a fixture) : 0
     (none)
 
-  PROBE POWER — can dataPat even see a scored table? (7 fixtures)
-    MISSED    pretty-printed JSON (keys on separate lines)
-    DETECTED  CSV header
-    DETECTED  CSV header, spaced
-    MISSED    TSV header
-    DETECTED  markdown table
-    MISSED    inline JSON one-liner
-    MISSED    renamed columns (score_c, score_f)
-  dataPat is BLIND to 4/7 realistic encodings.
+  PROBE POWER — can the evidence search even SEE a scored table?
+  A0 asserts a NEGATIVE, so it is worth exactly what this search is worth.
+
+    v1 (before)  v2 (now)   encoding
+    MISSED     DETECTED   pretty-printed JSON (keys on separate lines)
+    DETECTED   DETECTED   CSV header
+    DETECTED   DETECTED   CSV header, spaced
+    MISSED     DETECTED   TSV header
+    DETECTED   DETECTED   markdown table
+    MISSED     DETECTED   inline JSON one-liner
+    MISSED     DETECTED   renamed columns (score_c, score_f)
+  of these 7 encodings the OLD pattern was blind to 4; the WIDENED pattern is blind to 0.
+
+  RESIDUAL BLINDNESS — encodings the WIDENED pattern still cannot see:
+    MISSED    opaque single-letter columns (case,c,f)
+    MISSED    opaque axis names (id,x,y), legend elsewhere
+    MISSED    array-of-arrays, column names in another file
+    MISSED    the pair stated in prose, never tabulated
+  4/4 still missed: no name-based pattern can recover a column whose
+  name carries no shared vocabulary. Those are the numeric-pair pass below.
+  and 8/8 file types are never walked at all: .xlsx .xls .ods .numbers .parquet .db .sqlite .pdf
+  (a set of ten hand-extractions lives in a spreadsheet at least as often
+   as in a repository file, and no regex over this walk reaches one.)
+  dataPat is BLIND to 4/11 realistic encodings.
 
   SAME-FILE CO-OCCURRENCE of "completeness" and "fidelity" : 4 file(s)
     src/db/schema.ts
@@ -49,9 +66,11 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
   BARE NUMERIC PAIRS (a headerless scored table) : 0 line(s)
 
   VERDICT: this probe finds no scored validation set. Read that at the
-           strength the instrument supports: dataPat is blind to 4 of 7
-           realistic encodings, and this walk covers the WORKING TREE AT
-           HEAD ONLY — git history is not searched. The honest statement
+           strength the instrument supports: dataPat sees all 7 of the
+           7 named encodings after the 5th-pass widening but is still blind
+           to 4 of 11 once opaque column names are counted, and this walk
+           covers the WORKING TREE AT HEAD ONLY — git history is not
+           searched. The honest statement
            is "no scored set is visible to these probes here and now",
            not "none exists". The co-occurrence and numeric-pair passes
            above are the fallback; inspect any file they list.
@@ -63,7 +82,7 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
            to the same unsourced number, so repetition only widens
            the blast radius if it is wrong.
 
-           But the same repository contains, in 13 file(s), the forward
+           But the same repository contains, in 15 file(s), the forward
            instrument that WOULD source it: observer-falsifier.ts holds a
            permutation null at a PRE-REGISTERED alpha = 0.01 with
            POWER_FLOOR = 8, and observer-live.ts gates on post-cutoff
@@ -75,31 +94,27 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
 
 A1  REACHABLE RANGE — enumerate every score the function can return
 ------------------------------------------------------------------------
-  distinct reachable scores    : 113
-  junk-varied challenge grid   : 113 distinct, 0 not in the lattice above
+  distinct reachable scores    : 363
+  junk-varied challenge grid   : 363 distinct, 0 not in the lattice above
   minimum                      : 0.0000
-  MAXIMUM                      : 0.9600
+  MAXIMUM                      : 1.0000
   the source clamps with Math.min(..., 1)
-  does that clamp ever engage? : NO — it is dead code
+  does that clamp ever engage? : YES
 
-  The weight blocks sum to 0.96, not 1.00. A perfect extraction — every
-  field present, three well-formed agents, a nested parent, a classified
-  collision with a trough signature, all three suppression fields, and a
-  verdict with reasoning — scores 0.9600 and can never score higher. The
-  metric is not on a [0,1] scale despite being clamped to one and being
-  read as a fraction. Any downstream consumer that treats 1.0 as the
-  ceiling is calibrated against a point the function cannot reach.
+  The measured ceiling is 1.0000 exactly: the full [0,1] scale is
+  reachable and the Math.min(..., 1) clamp is a live guard at the top
+  of the range, not dead code.
 
 A2  CEILING — how many agents does the score actually look at?
 ------------------------------------------------------------------------
-    1 well-formed agents -> 0.7600
-    2 well-formed agents -> 0.8600
-    3 well-formed agents -> 0.9600
-    4 well-formed agents -> 0.9600
-    8 well-formed agents -> 0.9600
-   30 well-formed agents -> 0.9600
+    1 well-formed agents -> 0.8041
+    2 well-formed agents -> 0.8611
+    3 well-formed agents -> 0.8991
+    4 well-formed agents -> 0.9276
+    8 well-formed agents -> 1.0000
+   30 well-formed agents -> 1.0000
 
-  identical from 3 upward       : YES
+  identical from 3 upward       : no
   Math.min(nWf, 3) is a hard ceiling: a run that names thirty interacting
   agents and a run that names three score the same. Every agent past the
   third carries zero bits. On an Observer docket — the stated use case,
@@ -107,21 +122,21 @@ A2  CEILING — how many agents does the score actually look at?
 
 A3  GAMEABILITY — is the score measuring modelling, or form-filling?
 ------------------------------------------------------------------------
-  rich reading (3 agents, real content) : 0.9600
-  VACUOUS   ("." in every field)        : 0.9600
-  deep but narrow (1 agent, precise)    : 0.3333
+  rich reading (3 agents, real content) : 0.8991
+  VACUOUS   ("." in every field)        : 0.0850
+  deep but narrow (1 agent, precise)    : 0.3607
 
-  rich == vacuous, exactly?             : YES   (delta 0.000000)
-  vacuous beats the deep reading by     : 0.6267  (2.88x)
+  rich == vacuous, exactly?             : no   (delta 0.814100)
+  vacuous beats the deep reading by     : -0.2757  (0.24x)
 
-  Every predicate in the scorer is a presence test — !!b.name, .length
-  >= 1, Boolean(field). None of them reads content. So the score is a
-  measure of SCHEMA COVERAGE, not of modelling quality, and the two are
-  not the same variable. That matters more here than it would elsewhere:
-  the producer is an LLM asked to fill this exact schema, and filling a
-  schema is the one thing an LLM will do whether or not the material
-  supports it. The extraction prompt says "do not invent structure it did
-  not infer" — the scorer pays for inventing it anyway.
+  A content-free extraction no longer scores like a real one: "." in
+  every field scores 0.0850 against 0.8991 for the rich reading.
+  But the floors that separate them are SYNTACTIC — a character class,
+  minimum lengths, a placeholder list. They tell "filled with a
+  placeholder" from "filled"; they cannot tell a plausible INVENTED
+  extraction from a true one. The score is schema coverage with a
+  syntactic floor, not modelling quality, and the producer is still an
+  LLM asked to fill this exact schema.
 
   The direction of the bias is the problem. If completeness is really a
   proxy for schema-filling eagerness, then a correlation with downstream
@@ -131,22 +146,40 @@ A3  GAMEABILITY — is the score measuring modelling, or form-filling?
 
 A4  RESOLUTION — how finely can this score rank ten cases?
 ------------------------------------------------------------------------
-  distinct values reachable at all      : 113
-  distinct values in the plausible band : 75
-  that band spans                       : 0.2533 .. 0.9600
+  distinct values reachable at all      : 363
+  distinct values in the plausible band : 144
+  that band spans                       : 0.2757 .. 0.9276
 
 
-  P(at least one tie among n=10)        : 0.4658   under a UNIFORM draw
+  P(at least one tie among n=10)        : 0.2736   under a UNIFORM draw
   That figure is a LOWER BOUND, and deliberately so. The extractor does
   not sample the band uniformly — an LLM told to fill a schema fills most
   of it, so the realised distribution is bunched near the top and ties are
   strictly more likely than this. What the number establishes is that ties
-  are not a hypothetical: even at their least likely they occur about 47%
+  are not a hypothetical: even at their least likely they occur about 27%
   of the time. A Spearman rho is a statistic on RANKS, and ties inflate or
   deflate it depending on how they are broken. The reported +0.61 is quoted
   to two decimals with no tie correction stated and no n=10 table to
   inspect, so its tie structure is unknown and its third digit is not
   recoverable from anything in this repository.
+
+  HOW THIS SIEGE HANDLES THE TIES IT JUST MEASURED
+    tie patterns enumerated (A5 runs its null over each) : 5
+    of those, patterns carrying at least one tie         : 4
+    distinct tie GROUPS across all patterns              : 5
+    largest group / cases inside a tied group            : 4-way / 13
+    convention: MIDRANKS — a group of g tied cases spanning sorted
+    positions p..p+g-1 carries the mean of those positions. VERIFIED,
+    not assumed: 5 of 5 groups satisfy it (100%).
+    rho is then Pearson-on-ranks over those midranks, and each of the
+    5 patterns gets all 3,628,800 = 10! relabelings enumerated exactly.
+    P(at least one tie among n=10) as measured above : 0.2736, so at
+    least 27.36% of ten-case studies of this predictor land in the
+    tied regime and 72.64% at most in the untied one. The 4 tied
+    patterns are therefore the expected case, not a corner case, and
+    the untied shortcut identity applies to at most 72.64% of studies.
+    What is NOT stated anywhere in this repository is which convention
+    produced the reported +0.61 — that is what the defect below records.
 
 A5  IS +0.61 AT n=10 DISTINGUISHABLE FROM CHANCE? (exact permutation)
 ------------------------------------------------------------------------
@@ -196,13 +229,13 @@ A7  ROBUSTNESS — malformed input, and whether a throw is contained
   undefined                          -> 0.0000
   {}                                 -> 0.0000
   empty arrays                       -> 0.0000
-  blankets: string (bad LLM parse)   -> THREW TypeError
-  collisions: object                 -> THREW TypeError
+  blankets: string (bad LLM parse)   -> 0.0000
+  collisions: object                 -> 0.0000
   suppression: string                -> 0.0000
   verdict: null                      -> 0.0000
-  target_states: string              -> 0.1000
+  target_states: string              -> 0.0000
 
-  inputs that threw             : 2/9
+  inputs that threw             : 0/9
 
   MEASURED by this probe: the exported scorer is NOT total. Some malformed
   inputs throw rather than returning 0. It is public API, and a future
@@ -240,8 +273,9 @@ SUMMARY
     - its 95% interval contains zero, and overlaps the +0.08 it is being
       contrasted with; "7x" is a ratio of two indistinguishable-from-zero
       point estimates (A6)
-    - and the predictor is schema coverage, not modelling quality: a
-      content-free extraction scores the maximum (A3)
+    - and even with A3 cleared, the predictor remains schema coverage
+      with a syntactic floor, not modelling quality; the confound in A3
+      is unaddressed
 
   The repository already contains the correct instrument and already knows
   why. observer-live.ts exists because "every retrospective test of kappa
@@ -256,13 +290,9 @@ SUMMARY
   point at observer-live.ts as the thing that will settle it.
 ========================================================================
 
-ADVERSE FINDINGS: 9
+ADVERSE FINDINGS: 5
   - A0 the headline number is asserted in 1 file(s) and evidenced in none
-  - A0 dataPat is blind to 4/7 encodings; its null result is bounded
-  - A1 Math.min(...,1) clamp is dead code; ceiling is 0.96
-  - A2 Math.min(nWf,3) makes every agent past the third carry zero bits
-  - A3 a content-free extraction scores identically to a real reading
+  - A0 dataPat is blind to 4/11 encodings; its null result is bounded
   - A4 ties are likely at n=10 and no tie handling is stated
   - A5 +0.61 at n=10 fails two-sided 5% under every tie pattern
   - A6 the 95% interval on +0.61 contains zero
-  - A7 exported scorer is not total (2/9 malformed inputs throw)
