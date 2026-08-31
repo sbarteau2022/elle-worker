@@ -178,16 +178,17 @@ the model, not low, against the pixels) — but it should be cited as contested.
    estimated confidence; `T_k`/`D_k` accumulate precision-weighted magnitudes. This is
    the one change that makes the three-cell reading expressible at all, and §1 gives a
    closed-form, iteration-free way to do it. Prerequisite to everything else.
-2. ~~**Measure delta-hyperbolicity on content-derived structure.**~~ **Done — and it
-   fails.** `DELTA_HYPERBOLICITY_CONTENT.md`. Real corpus (51 files -> 1021 production
+2. ~~**Measure delta-hyperbolicity on content-derived structure.**~~ **Measured on two
+   of three arms — precondition not cleared.** `DELTA_HYPERBOLICITY_CONTENT.md`. Real corpus (51 files -> 1021 production
    chunks, tf-idf k-NN) reads graph delta/diam **0.16-0.25** against a synthetic-tree band
    of 0.00-0.08 and a ring/cycle band of 0.475-0.480: **not tree-like**. Instrument
    validated on four controls with hard assertions. Two measured caveats bound the claim:
    the pull-comparison half of the pre-registered rule is uninformative through any k-NN
    pipeline (it returns "not tree-like" for a corpus that IS a tree by construction), and
    tf-idf distances on this corpus are concentrated (IQR/median 0.0210), so the low metric
-   delta is an artifact, not evidence of hyperbolicity. tf-idf is a lexical proxy for the
-   production bge embedding — that arm is not repo-only measurable.
+   delta is an artifact, not evidence of hyperbolicity. The decisive arm — the production
+   bge embedding on the same chunks — is egress-blocked from this environment and
+   remains open; "not cleared" is not "refuted".
 3. **Build one correspondence probe and run it held-out** (§3). Semantic-entropy probe
    is the cheapest honest start; conformal abstention is the one that yields a bound.
    Until a held-out number exists, `agreement` stays absent — a producer that has not
@@ -198,10 +199,12 @@ the model, not low, against the pixels) — but it should be cited as contested.
    a training-time change and we do not train the base model.
 
 **Verdict on Target C: not yet, and now for a measured reason.** Item 2 was its own
-stated precondition; it has been measured and the content-derived structure does **not**
-read as tree-like, so the hyperbolic prior Target C would assume is not justified by the
-corpus's shape. Item 1 is a separate defect in the mechanism Target C would be built on
-and is unaffected. Item 2 is no longer "not yet done" — it is answered in the negative.
+stated precondition; measured where reachable, no arm found tree-likeness and the lexical
+arm reads against it, so the hyperbolic prior Target C would assume is currently
+unjustified. It is not condemned: the production-embedding arm is blocked-unmeasured, and
+unblocking it (see `DELTA_HYPERBOLICITY_CONTENT.md`) is the one path that could still
+clear the precondition. Item 1 is a separate defect in the mechanism Target C would be
+built on and is unaffected.
 
 ---
 

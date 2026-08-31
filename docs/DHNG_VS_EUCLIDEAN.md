@@ -77,10 +77,12 @@ is not confined to the radius.
   synthetic-tree band of 0.00–0.08 and a ring/cycle band of 0.475–0.480. The
   earlier `GRAPH_PRESSURE_TEST.md` reading (also cyclic) was over co-recall edges
   the retriever itself created and did not settle this; the new one is over
-  structure derived from the content. **So the conditional above has fired: the
-  real structure is cyclic-or-mixed, and none of the above transfers.** The +10.9%
-  mAP gain stands as a synthetic-tree-corpus result only. Two measured caveats
-  bound how hard that is stated — see that doc's Limitations 1–3.
+  structure derived from the content. **The conditional's antecedent is supported
+  by the lexical arm and unrefuted by any arm, so the precondition for transfer is
+  not cleared** — the decisive arm (the production bge embedding) is blocked from
+  measurement and remains open. The +10.9% mAP gain stands as a
+  synthetic-tree-corpus result only. See that doc's Limitations 1–3 and "The
+  blocked decisive arm".
 - +10.9% on 303 synthetic queries is not a production result. It justifies
   building the held-out benchmark; it does not substitute for one.
 - Cost is unpriced here. A 128-dim atlas over a real memory graph carries the

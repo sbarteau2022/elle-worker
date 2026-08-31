@@ -14,16 +14,26 @@ and repo-only — no network, no external dependency. Re-run with `node docs/<fi
 
 ## Verdict
 
-**The corpus's content-derived structure does not read as tree-like.** Graph
-δ/diam sits at **0.16–0.25** across k ∈ {3,5,8}, against a synthetic-tree band of
-**0.00–0.08** and a synthetic-ring / cycle-control band of **0.475–0.480**. It is
-between the two, nearer the tree end at k=3, but outside the tree band at every k.
+**The tree-like precondition is not cleared — which is not the same as refuted.**
+The precise three-arm status:
+
+- **Lexical arm** (tf-idf over 1021 production chunks): graph δ/diam **0.16–0.25**
+  across k ∈ {3,5,8}, against a synthetic-tree band of **0.00–0.08** and a
+  synthetic-ring / cycle-control band of **0.475–0.480**. Outside the tree band at
+  every k — reads against tree-likeness, bounded by Limitations 2 and 3.
+- **PAMI arm** (real content geometry, not lexical): δ/diam 0.20–0.29 — also not
+  tree-like, though it measures signal-descriptor space, not the corpus.
+- **Semantic arm** (production bge-large embedding — the decisive one): **blocked,
+  unmeasured.** See "The blocked decisive arm" below.
 
 So `DHNG_VS_EUCLIDEAN.md`'s caveat **stands rather than being lifted**: the +10.9% mAP
-atlas gain remains a synthetic-tree-corpus result, and "if the real graph is cyclic, none
-of the above transfers" is now the measured case, not the hypothetical one.
+atlas gain remains a synthetic-tree-corpus result. No arm produced evidence of
+tree-likeness, two arms produced evidence against it, and the strongest supportable
+statement stops there. The corpus is not established to be cyclic; the hyperbolic prior
+is not established to be justified; the burden of proof sat on tree-likeness and was
+not met.
 
-**Target C precondition: does not clear.**
+**Target C precondition: not cleared** (unmet, pending the semantic arm — not "dead").
 
 Two limits bound how hard that verdict can be stated; both are recorded below, and
 neither is an argument — each was itself measured.
@@ -141,6 +151,27 @@ as a limitation before the first run, not discovered afterwards. The production 
 could plausibly be less concentrated than tf-idf; whether it is also less cyclic is
 unmeasured and would need a network-permitted run to settle.
 
+## The blocked decisive arm — production embedding geometry
+
+The one measurement that would remove Limitations 2 and 3 entirely is δ over a k-NN
+graph built from the production embedding (`@cf/baai/bge-large-en-v1.5`) on the same
+1021 chunks. Two routes were attempted from this environment and both are closed by
+egress policy, not by the repo:
+
+- **Local inference with the same weights**: `Xenova/bge-large-en-v1.5` (ONNX
+  conversion of the identical model) via transformers.js. `huggingface.co` returns
+  **403 CONNECT** — an organization policy denial, reported rather than retried.
+- **The deployed vectors themselves**: corpus vectors live only in Cloudflare
+  Vectorize (`env.VECTORIZE.upsert`, `src/index.ts:762`); the worker host is
+  egress-blocked and the available Cloudflare tooling exposes D1/KV/R2/Workers but
+  not Vectorize.
+
+What unblocks it, either one: allow `huggingface.co` + `cdn-lfs.huggingface.co` in the
+environment's custom network access (then re-run locally, same chunks, same instrument,
+same controls), or dump the 1021 vectors / their top-9 neighbor lists from any
+network-permitted machine and hand the file to the probe. The analysis side is already
+written and calibrated; only the vectors are missing.
+
 ## Why the prior reading did not already answer this
 
 `GRAPH_PRESSURE_TEST.md` reports toroidal 0.53–0.73 (cyclic), but over **co-recall edges
@@ -153,9 +184,11 @@ derived from the content itself.
 
 ## What this changes
 
-- `PREDICTIVE_CODING_LITERATURE.md` §6 item 2 moves from "never done" to measured, with
-  the precondition **failing**.
-- `DHNG_VS_EUCLIDEAN.md`'s "What this does NOT establish" caveat is now confirmed, not
-  pending. Hyperbolic embedding of the real corpus is not justified by its measured shape.
-- Target C stays blocked, now for a measured reason rather than an unmeasured one. §6
-  item 1 (precision term) remains the other blocker and is unaffected by this result.
+- `PREDICTIVE_CODING_LITERATURE.md` §6 item 2 moves from "never done" to measured on
+  two of three arms, with the precondition **not cleared** and the decisive arm blocked.
+- `DHNG_VS_EUCLIDEAN.md`'s "What this does NOT establish" caveat stands with measured
+  weight behind it. Hyperbolic embedding of the real corpus is not justified by any
+  measurement in hand — and not condemned by one either.
+- Target C stays blocked: previously for an unmeasured precondition, now for one that
+  was measured where reachable and did not clear. §6 item 1 (precision term) remains
+  the other blocker and is unaffected by this result.
