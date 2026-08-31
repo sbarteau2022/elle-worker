@@ -16,3 +16,5 @@ crates/**/target/
 
 
 
+.swarm/laneA.out
+.swarm/laneB.out

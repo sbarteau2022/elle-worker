@@ -1,6 +1,6 @@
 ========================================================================
 LANE A SIEGE — observer/blanket completeness
-commit 4e551557044cbbe6fddc8fefb476e6752b513674 (WORKING TREE DIRTY)
+commit 40356079be131a437f662c1eb92f0d4f78948dfe (WORKING TREE DIRTY)
 ========================================================================
 
 A0  PROVENANCE — is the n=10 validation set in this repository?

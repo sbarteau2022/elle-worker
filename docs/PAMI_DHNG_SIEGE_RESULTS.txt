@@ -1,6 +1,6 @@
 ========================================================================
 LANE-B SIEGE — PAMI residual → DHNG geometry
-commit 4e551557044cbbe6fddc8fefb476e6752b513674 (WORKING TREE DIRTY)
+commit 40356079be131a437f662c1eb92f0d4f78948dfe (WORKING TREE DIRTY)
 ========================================================================
 index length 21 floats (8 phases + 13 dims) · RIP_DIM 16
 structural depth ceiling 2·atanh(tanh 0.9) = 1.8000
