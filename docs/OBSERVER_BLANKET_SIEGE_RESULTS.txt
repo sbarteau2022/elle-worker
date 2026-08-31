@@ -1,0 +1,201 @@
+
+  ../../../tmp/blanket-siege-afl8lB/bundle.cjs  50.6kb
+
+⚡ Done in 62ms
+========================================================================
+LANE A SIEGE — observer/blanket completeness
+========================================================================
+
+A0  PROVENANCE — is the n=10 validation set in this repository?
+------------------------------------------------------------------------
+  files scanned (repo, excluding this harness) : 578
+
+  LINES THAT ASSERT THE RETROSPECTIVE RESULT : 5  in 3 file(s)
+    src/db/schema.ts:199  // COMPLETENESS score. Validated to predict prediction↔outcome fidelity far
+    src/observer-blanket.ts:17  // Validated offline (n=10 hand-extractions): structured completeness predicts
+    src/observer-blanket.ts:18  // prediction↔outcome fidelity at rho≈+0.61, vs +0.08 for trajectory coherence —
+    src/observer.ts:295  // and score its completeness. Predicts prediction↔outcome fidelity far better
+    src/observer.ts:296  // than trajectory coherence (validated rho≈+0.61 vs +0.08). Best-effort; the
+
+  LINES BUILDING THE FORWARD TEST INSTEAD : 56  in 12 file(s)
+    corpus/observer/run-queue-docket.md
+    docs/OBSERVER_QUEUE_RUNBOOK.md
+    research/seam-rip/README.md
+    src/db/schema.ts
+    src/observer-docket.test.ts
+    src/observer-docket.ts
+    src/observer-falsifier.test.ts
+    src/observer-falsifier.ts
+    src/observer-live.test.ts
+    src/observer-live.ts
+    src/observer.test.ts
+    src/observer.ts
+  (a permutation null, a power floor, a post-cutoff admissibility gate —
+   apparatus, not assertion. Counted separately on purpose.)
+
+  LINES THAT COULD HOLD THE DATA (a scored table, a fixture) : 0
+    (none)
+
+  VERDICT: no scored validation set exists in this repository. The
+           retrospective result is asserted in 3 file(s) and evidenced in
+           none. Restating it in a schema comment and a second module does
+           not corroborate it — every copy traces to the same unsourced
+           number, so repetition only widens the blast radius if it is wrong.
+
+           But the same repository contains, in 12 file(s), the forward
+           instrument that WOULD source it: observer-falsifier.ts holds a
+           permutation null at a PRE-REGISTERED alpha = 0.01 with
+           POWER_FLOOR = 8, and observer-live.ts gates on post-cutoff
+           admissibility. Both are wired into production (observer.ts:697
+           calls falsify(); observer.ts imports logLivePrediction,
+           resolveLivePrediction and liveValidation). The apparatus is real.
+           It has simply not returned a verdict yet — and by its own
+           pre-registered alpha, the headline +0.61 would not clear it.
+
+A1  REACHABLE RANGE — enumerate every score the function can return
+------------------------------------------------------------------------
+  distinct reachable scores    : 113
+  minimum                      : 0.0000
+  MAXIMUM                      : 0.9600
+  the source clamps with Math.min(..., 1)
+  does that clamp ever engage? : NO — it is dead code
+
+  The weight blocks sum to 0.96, not 1.00. A perfect extraction — every
+  field present, three well-formed agents, a nested parent, a classified
+  collision with a trough signature, all three suppression fields, and a
+  verdict with reasoning — scores 0.9600 and can never score higher. The
+  metric is not on a [0,1] scale despite being clamped to one and being
+  read as a fraction. Any downstream consumer that treats 1.0 as the
+  ceiling is calibrated against a point the function cannot reach.
+
+A2  CEILING — how many agents does the score actually look at?
+------------------------------------------------------------------------
+    1 well-formed agents -> 0.7600
+    2 well-formed agents -> 0.8600
+    3 well-formed agents -> 0.9600
+    4 well-formed agents -> 0.9600
+    8 well-formed agents -> 0.9600
+   30 well-formed agents -> 0.9600
+
+  identical from 3 upward       : YES
+  Math.min(nWf, 3) is a hard ceiling: a run that names thirty interacting
+  agents and a run that names three score the same. Every agent past the
+  third carries zero bits. On an Observer docket — the stated use case,
+  institutional capture with many nested parties — three is not a lot.
+
+A3  GAMEABILITY — is the score measuring modelling, or form-filling?
+------------------------------------------------------------------------
+  rich reading (3 agents, real content) : 0.9600
+  VACUOUS   ("." in every field)        : 0.9600
+  deep but narrow (1 agent, precise)    : 0.3333
+
+  rich == vacuous, exactly?             : YES   (delta 0.000000)
+  vacuous beats the deep reading by     : 0.6267  (2.88x)
+
+  Every predicate in the scorer is a presence test — !!b.name, .length
+  >= 1, Boolean(field). None of them reads content. So the score is a
+  measure of SCHEMA COVERAGE, not of modelling quality, and the two are
+  not the same variable. That matters more here than it would elsewhere:
+  the producer is an LLM asked to fill this exact schema, and filling a
+  schema is the one thing an LLM will do whether or not the material
+  supports it. The extraction prompt says "do not invent structure it did
+  not infer" — the scorer pays for inventing it anyway.
+
+  The direction of the bias is the problem. If completeness is really a
+  proxy for schema-filling eagerness, then a correlation with downstream
+  fidelity is exactly what you would ALSO see if eager runs were simply
+  the runs on richer dockets. The claim needs the confound ruled out;
+  nothing in this repo rules it out.
+
+A4  RESOLUTION — how finely can this score rank ten cases?
+------------------------------------------------------------------------
+  distinct values reachable at all      : 113
+  distinct values in the plausible band : 75
+  that band spans                       : 0.2533 .. 0.9600
+
+  A Spearman rho is a statistic on RANKS. With a coarse, heavily-tied
+  predictor, ten observations will contain ties, and ties inflate or
+  deflate rho depending on how they are broken. The reported +0.61 is
+  quoted to two decimals with no tie correction stated and no n=10
+  table to inspect, so its tie structure is unknown.
+
+A5  IS +0.61 AT n=10 DISTINGUISHABLE FROM CHANCE? (exact permutation)
+------------------------------------------------------------------------
+  permutations enumerated       : 3,628,800   (10! = 3,628,800)
+  P(rho >= +0.61 | H0)          : 0.03337   one-sided
+  P(|rho| >= 0.61 | H0)         : 0.06674   two-sided
+  exact two-sided 5% critical   : rho = 0.6485
+  does +0.61 clear it?          : NO
+
+  At n=10, +0.61 does not reach two-sided significance. It is inside the
+  range chance produces roughly one time in twenty even when the two
+  variables are completely unrelated. That is not a claim that the effect
+  is absent — it is the statement that ten hand-extractions cannot tell
+  the difference, and that a comment reporting the point estimate without
+  the interval reads as far stronger evidence than it is.
+
+A6  THE INTERVAL, AND THE "7x LIFT"
+------------------------------------------------------------------------
+  rho = +0.61, n=10  ->  95% CI [-0.032, 0.896]
+  rho = +0.08, n=10  ->  95% CI [-0.579, 0.676]
+  the two intervals overlap over    : [-0.032, 0.676]
+
+  "+0.61 vs +0.08 — a 7x lift" is a ratio of two point estimates whose
+  intervals both straddle zero and overlap each other across most of
+  their length. A ratio of two quantities that may both be zero is not a
+  lift; 7x is an artefact of dividing by a small noisy denominator. Had
+  the trajectory figure landed at +0.02 the same data would have read as
+  "a 30x lift", and at -0.01 the ratio would have changed sign.
+
+A7  ROBUSTNESS — malformed input, and whether a throw is contained
+------------------------------------------------------------------------
+  null                               -> 0.0000
+  undefined                          -> 0.0000
+  {}                                 -> 0.0000
+  empty arrays                       -> 0.0000
+  blankets: string (bad LLM parse)   -> THREW TypeError
+  collisions: object                 -> THREW TypeError
+  suppression: string                -> 0.0000
+  verdict: null                      -> 0.0000
+  target_states: string              -> 0.1000
+
+  inputs that threw             : 2/9
+  extractBlanketModel guards Array.isArray(parsed.blankets) and coerces
+  collisions before the scorer sees them, so the LLM path is protected,
+  and every call site is inside an async function whose rejection is
+  caught. The exported scorer itself is NOT total, though: it is public
+  API and a future caller that skips the guard gets a throw, not a 0.
+
+========================================================================
+SUMMARY
+========================================================================
+  The scorer is real, pure, deterministic and cheap. Its header is honest
+  about behaviour: the number ranks and gates nothing, and a full grep
+  confirms it — it is written to observer_blankets.completeness and
+  observer_predictions_live.mode_a_completeness and read back only by the
+  live_status readout. Unlike lane B, the producer audit comes back CLEAN:
+  extractAndPersistBlanket really does run on every observer analysis
+  (observer.ts:299) plus a backfill (observer.ts:384), and observer-live.ts
+  and falcon-ground.ts each compute the same number.
+
+  What does not survive is the headline number.
+    - the n=10 set is not in this repository (A0)
+    - +0.61 at n=10 does not reach two-sided significance (A5, exact)
+    - its 95% interval contains zero, and overlaps the +0.08 it is being
+      contrasted with; "7x" is a ratio of two indistinguishable-from-zero
+      point estimates (A6)
+    - and the predictor is schema coverage, not modelling quality: a
+      content-free extraction scores the maximum (A3)
+
+  The repository already contains the correct instrument and already knows
+  why. observer-live.ts exists because "every retrospective test of kappa
+  NULLed ... you cannot validate a reasoning-quality metric against
+  outcomes the model already knows." An offline retrospective study of ten
+  hand-extractions is precisely that shape. observer-live.ts is a CLOCK: it
+  returns no verdict until post-cutoff cases resolve. Until it does, the
+  honest form of the header is a hypothesis, not a validation.
+
+  Recommended edit to src/observer-blanket.ts:17 — keep the module, keep
+  the wiring, restate the claim with its interval and its provenance, and
+  point at observer-live.ts as the thing that will settle it.
+========================================================================
