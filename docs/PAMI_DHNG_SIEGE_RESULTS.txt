@@ -1,4 +1,7 @@
+========================================================================
 LANE-B SIEGE — PAMI residual → DHNG geometry
+commit 4e551557044cbbe6fddc8fefb476e6752b513674 (WORKING TREE DIRTY)
+========================================================================
 index length 21 floats (8 phases + 13 dims) · RIP_DIM 16
 structural depth ceiling 2·atanh(tanh 0.9) = 1.8000
 
@@ -16,6 +19,17 @@ depth  min 1.8000  max 1.8000  mean 1.8000  sd 0.000000
 
 VERDICT: DEAD. Radial depth is CONSTANT (range 0.000000000). Every PAMI index lands at the same distance from the origin, so "depth = surprisal" carries exactly 0 bits through this bridge.
 
+COUNTERFACTUAL — shrink the index leaves by α and re-measure:
+   α        ‖ripVector‖ mean   saturated%   depth range   depth sd
+   1              1.000000        100%      0.000000   0.000000
+   0.5            1.000000        100%      0.000000   0.000000
+   0.2            0.862423          3%      0.804921   0.222526
+   0.1            0.494760          0%      0.930008   0.154781
+   0.05           0.264287          0%      0.506821   0.085276
+   0.02           0.109951          0%      0.213216   0.036113
+
+CONCLUSION: depth is flat at α=1 but SPREADS at 4 smaller scale(s). The radial variation is present in the index and is being DESTROYED by the clamp at hyper.ts:198 — this is a discarded coordinate, not a missing one. Replacing that clamp with a monotone squash (e.g. f ← f·tanh(‖f‖)/‖f‖) is a one-line change that restores the axis.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 B1 · phase-torus destruction  (native metric wraps; bridge does not)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -27,6 +41,20 @@ native  wrap/control ratio: 1.000   (≈1 ⇒ the native metric sees the wrap as
 bridge  wrap/control ratio: 148.372   (≫1 ⇒ the bridge tears the torus)
 
 VERDICT: CONFIRMED. The bridge inflates a 2ε torus step into a 148× separation. tanh(symlog(θ)) is a map of ℝ, not of 𝕋⁸ — the phase half of the index (8 of 21 floats, the entire F6 fingerprint) is geometrically wrong the moment it enters the ball.
+
+ε SWEEP (synthetic index) — the tear must not be an artefact of ε=0.01:
+   ε          native wrap/ctrl   bridge wrap/ctrl
+   1e-1                 1.000               16.7
+   1e-2                 1.000              148.4
+   1e-3                 1.000             1465.4
+   1e-4                 1.000            14636.0
+   1e-5                 1.000           146342.2
+   1e-6                 1.000          1463401.8
+   tear ratio holds at ≥ 16.7× across all six decades: YES
+
+REAL-INDEX ARM — same test on indices pamiIndex actually produced:
+   n = 20 real indices · bridge wrap/ctrl ratio: min 116.3  median 123.0  max 145.0
+   the synthetic finding SURVIVES contact with real pamiIndex output.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 B2 · rank fidelity of the bridge  (Spearman: native metric vs ball)
@@ -49,12 +77,20 @@ B3 · surprisal sensitivity  (amplitude invariance vs structure sensitivity)
 (b) does the NATIVE metric separate structure families?
     within-family  mean 0.1223 ± 0.0814  (n=1200)
     between-family mean 0.2417 ± 0.0923  (n=3750)
-    Cohen's d = 1.373
+    Cohen's d = 1.373   [DESCRIPTIVE ONLY — see F4 note below]
 
 (c) same question, through the bridge:
     within-family  mean 1.4755 ± 0.7364
     between-family mean 2.0196 ± 0.6318
     Cohen's d = 0.793   (native d = 1.373; retention 58%)
+
+    F4 NOTE — these two d values are DESCRIPTIVE and carry no interval.
+    The 1200 within- and 3750 between-family values are pairwise distances over
+    only 100 indices, so each index appears in many pairs and the "n" in any
+    standard error would be a fiction. The 1st-pass harness reported d as
+    though the pairs were independent. They are not. The retention figure
+    is a ratio of two such statistics and inherits the same limitation:
+    read it as a magnitude, never as a test.
 
 (d) radial depth per family — the actual "surprise = depth" claim:
     sine   depth 1.8000 ± 0.000000
@@ -64,26 +100,64 @@ B3 · surprisal sensitivity  (amplitude invariance vs structure sensitivity)
     ordering (shallow→deep): sine 1.8000  <  white 1.8000  <  ar1_9 1.8000  <  burst 1.8000
     expected if depth = surprisal: sine < ar1_9 < burst ≈ white
 
+(e) INDEPENDENT statistic — leave-one-out nearest-neighbour family purity
+    (one trial per index, so this one carries a real interval; chance = 0.250)
+    native metric : 95/100 = 0.950   95% Wilson [0.888, 0.978]
+    through bridge: 81/100 = 0.810   95% Wilson [0.722, 0.875]
+    bridge interval excludes the native point estimate: YES
+    bridge interval excludes chance (0.250): YES
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 B4 · reference-measure calibration  (where is the store's centre of mass?)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 store n = 120 "ordinary" (predictable-ish) indices
-Euclidean-mean centroid: ‖c‖ = 0.564979   (0 ⇒ the store's mass IS at the origin)
-mean geodesic to centroid 1.3675 ± 0.266428
-mean geodesic to origin   1.8000 ± 0.000000
-ρ(depth, distance-from-centroid) = 0.0905
+Euclidean centroid (1st pass, WRONG centre): ‖c‖ = 0.564979   mean d² = 1.940922
+Fréchet/Karcher mean (42 iters, |Δ| 6.5e-13): ‖c‖ = 0.456618   mean d² = 1.810980
+origin as a candidate centre:                ‖c‖ = 0.000000   mean d² = 3.240000
+Fréchet mean beats the Euclidean centroid on its own objective: YES
+the 1st pass OVERSTATED the offset by 0.108361 (19.2%) — direction measured, not assumed
 
-The store's mass sits 0.5650 off the origin, so d(0,ψ) is NOT "distance from typicality" — it is distance from an arbitrary point the design happened to pick.
+mean geodesic to Fréchet mean 1.3306 ± 0.201024
+mean geodesic to Euclid mean  1.3675 ± 0.266428
+mean geodesic to origin       1.8000 ± 0.000000
+ρ(depth, distance-from-Fréchet-mean) = 0.0865
+
+The store's mass sits 0.4566 off the origin, so d(0,ψ) is NOT "distance from typicality" — it is distance from an arbitrary point the design happened to pick.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-L1 residual → index : NO PRODUCER IN CODE. Every non-test pamiIndex call is
-   fed synthetic memorySignalNeutral() in phi-minimax-scorecard.ts; the one
-   live path (router.ts case 'pami') takes signal[] verbatim from LLM JSON,
-   and pami.ts:617 / router.ts:553 both instruct the CALLER to "subtract your
-   prediction first". There is no prediction operator 𝒫 anywhere in src/.
-L2 index → pamiDistance : real, pure, deterministic, torus-correct.
-L3 index → ball         : see B0–B2 above.
+Every line below is tagged MEASURED (a probe in this file executed it) or
+UNMEASURED (read off the working tree). A grep is not a call-graph, and a
+read cannot support the same weight as a run.
 
-Nothing here was measured against a live residual, because there is not one.
+L1 residual → index  [UNMEASURED — this is a READ of the tree, not a run]
+   NO PRODUCER IN CODE. Every non-test pamiIndex call is fed synthetic
+   memorySignalNeutral() in phi-minimax-scorecard.ts; the one live path
+   (router.ts case 'pami') takes signal[] verbatim from LLM JSON, and
+   pami.ts:617 / router.ts:553 both instruct the CALLER to "subtract your
+   prediction first". No prediction operator 𝒫 was found anywhere in src/.
+   BOUND: this is a source read. It establishes that no producer was FOUND,
+   not that none can exist — a dynamically dispatched or externally supplied
+   residual would not appear to it. Treat it as a strong lead, not a proof.
+
+L2 index → pamiDistance  [MEASURED — B1 control arm, B2, B3(b), B3(e)]
+   Real, pure, deterministic, and torus-correct: the native metric treats the
+   ±π wrap as the small step it is (B1 native ratio ≈ 1) and separates
+   structure families well above chance (B3(e), interval reported there).
+
+L3 index → ball  [MEASURED — B0, B1, B2, B3(c), B4]
+   See the per-probe verdicts above; the adverse ones are listed below.
+
+Nothing here was measured against a live residual, because none was found.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ADVERSE FINDINGS: 7
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  - B0 radial depth is constant across all families; the bridge carries 0 radial bits
+  - B0 ripVector saturates on 100% of real indices (clamp at hyper.ts:198)
+  - B1 the bridge tears the phase torus (148× inflation of a 2ε wrap step)
+  - B1 the torus tear reproduces on real pamiIndex output, not just synthetic inputs
+  - B3(d) per-family depth means are identical; depth does not order families at all
+  - B3(e) the bridge loses family purity relative to the native metric (intervals do not cover it)
+  - B4 the store's Fréchet mean sits 0.457 off the origin; d(0,ψ) is not distance-from-typicality

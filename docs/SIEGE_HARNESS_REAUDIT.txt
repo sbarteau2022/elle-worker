@@ -1,0 +1,130 @@
+RE-AUDIT OF THE SIEGE HARNESSES  —  commit 4e551557044cbbe6fddc8fefb476e6752b513674
+Each probe below tests the INSTRUMENT, not the codebase.
+
+R1  A1 EXHAUSTIVENESS CLAIM  ("enumerate every score the function can return")
+  shipped lattice          : 113 distinct scores  (harness reported 113)
+  lattice with junk varied : 113 distinct scores
+  reachable but UNENUMERATED: 0 -> []
+  predicted-missing cell (0 well-formed + nested_within) scores 0.0400 ; in shipped lattice? true
+  VERDICT: NOT CONFIRMED — the exhaustiveness claim survives.
+
+R2  A4-b TIE PROBABILITY  (harness asserts ties matter, never measures it)
+  distinct attainable values in band K = 75
+  P(at least one tie among n=10) under a UNIFORM draw = 0.4658
+  (uniform is an assumption, not a measurement of the real score distribution —
+   the real distribution is more concentrated, so this is a LOWER bound.)
+
+R3  A5 NULL DISTRIBUTION  (harness uses the UNTIED Spearman identity)
+  observed rho = 0.61, n = 10, 10! = 3,628,800 permutations per case
+  case                                  p(1-sided)   p(2-sided)   exact 5% two-sided crit
+  untied            [1..10]             0.03337      0.06674      0.6364  <- 0.61 fails
+  one 2-way tie      (1.5,1.5,3..10)    0.03201      0.06403      0.6383  <- 0.61 fails
+  two 2-way ties                        0.03175      0.06350      0.6403  <- 0.61 fails
+  one 3-way tie                         0.03171      0.06343      0.6442  <- 0.61 fails
+  one 4-way tie (flat top, cf. A2)      0.03271      0.06542      0.6441  <- 0.61 fails
+  The harness reports ONLY the first row and calls it "the exact null".
+  Ties MOVE the critical value; direction depends on the tie pattern.
+
+R4  A6 STANDARD ERROR  (Pearson se applied to a Spearman rho)
+  Pearson se  1/sqrt(n-3)   (AS SHIPPED)  se=0.37796
+      rho=0.61 -> [-0.032, 0.896]   rho=0.08 -> [-0.579, 0.676]
+      overlap [-0.032, 0.676]   0.61-interval contains 0? true
+  Spearman se 1.06/sqrt(n-3) (CORRECT)    se=0.40064
+      rho=0.61 -> [-0.076, 0.904]   rho=0.08 -> [-0.608, 0.699]
+      overlap [-0.076, 0.699]   0.61-interval contains 0? true
+  The shipped se is TOO SMALL by 6% -> intervals reported NARROWER than truth.
+  Direction of the error runs IN THE HARNESS'S OWN FAVOUR (a wider interval
+  contains zero even more clearly), which is exactly why it must be stated.
+
+R5  A0 dataPat POWER  (does the "0 candidates -> no validation set exists" verdict hold?)
+  MISSED   pretty-printed JSON (keys on separate lines)
+  DETECTED CSV header
+  DETECTED CSV header, spaced
+  MISSED   TSV header
+  DETECTED markdown table
+  MISSED   inline JSON one-liner
+  MISSED   renamed columns
+  4 of 7 realistic encodings of a scored validation set go UNDETECTED.
+  VERDICT: A0 cannot support "no scored validation set exists in this repository".
+  It supports only "no line matching dataPat exists in the working tree at HEAD".
+
+SUMMARY: 3 material defects CONFIRMED BY EXECUTION in the siege harnesses.
+
+
+════════════════════════════════════════════════════════════════════════════
+SECOND PASS — LANE B (docs/pami_dhng_siege.cjs)
+The same treatment applied to the PAMI→DHNG harness. Six defects found by
+reading it adversarially (F1–F6), one more found only by RUNNING the repair
+(G). Every one is now fixed in the harness itself.
+════════════════════════════════════════════════════════════════════════════
+
+F1  NO SELF-STAMP. The harness wrote a results file with no commit id and no
+    dirty flag, so its numbers could not be tied to a tree state.
+    FIX: git rev-parse HEAD + git status --porcelain in the header.
+
+F2  WRONG CAUSAL ATTRIBUTION — CONFIRMED BY A VERBATIM READ OF src/hyper.ts.
+    The 1st pass blamed the depth collapse on "the clamp interacting with
+    placeFeatures' n>1 branch". It is not an interaction. ripVector already
+    clamps to ‖f‖ ≤ 1 (hyper.ts:198), so placeFeatures' n>1 branch is
+    UNREACHABLE from this path — it always takes the else branch and scales
+    by 0.9. The clamp at hyper.ts:198 destroys the radial coordinate BY
+    ITSELF. Same number, wrong mechanism; a wrong mechanism sends the fix to
+    the wrong line.
+    FIX: attribution corrected, and an α-scaling counterfactual added that
+    distinguishes "the variation is absent" from "the variation is discarded".
+    MEASURED: at α=1 depth range is 0.000000; at α=0.1 it is 0.930008. The
+    radial signal EXISTS and is being thrown away.
+
+F3  SINGLE-ε, SYNTHETIC-ONLY TORUS TEST. The 148× tear was measured at one
+    ε on one hand-built index. A tear that only appears at ε=0.01, or only on
+    synthetic input, is an artefact.
+    FIX: ε swept over six decades (1e-1…1e-6) plus a real-pamiIndex arm.
+    MEASURED: tear holds at ≥16.7× across all six decades and reproduces on
+    real indices (min 116.3, median 123.0, max 145.0).
+
+F4  DEPENDENT-PAIR COHEN'S d. 1200 within- and 3750 between-family distances
+    over only 100 indices: each index appears in many pairs, so the "n" in
+    any standard error is a fiction. The 1st pass reported d as though the
+    pairs were independent.
+    FIX: d relabelled [DESCRIPTIVE ONLY] with the limitation stated inline,
+    and supplemented by a statistic with ONE TRIAL PER INDEX — leave-one-out
+    nearest-neighbour family purity, with Wilson 95% intervals.
+    MEASURED: native 95/100 = 0.950 [0.888, 0.978]; bridge 81/100 = 0.810
+    [0.722, 0.875]. Chance = 0.250. The loss is real at 95%.
+
+F5  EUCLIDEAN CENTROID IN A HYPERBOLIC SPACE. B4 averaged coordinates
+    arithmetically. That is not the centre of mass of points in the ball.
+    FIX: Fréchet/Karcher mean by Riemannian iteration on the SHIPPED
+    mobiusAdd, reported against the Euclidean centroid and the origin on the
+    same Σd² objective, so the reader can see which centre actually wins.
+    MEASURED: Fréchet ‖c‖ = 0.4566 (mean d² 1.8110) beats Euclid ‖c‖ = 0.5650
+    (mean d² 1.9409). Origin: mean d² 3.2400.
+
+F6  A HARNESS THAT CANNOT FAIL. Constant exit 0 — unwireable into CI.
+    FIX: DEFECTS ledger + process.exit(DEFECTS.length ? 1 : 0).
+    MEASURED: exit 1, 7 adverse findings.
+
+G   ASSERTED THE DIRECTION OF ITS OWN CORRECTION — FOUND BY RUNNING F5, NOT
+    BY READING IT. The F5 comment predicted that a Euclidean average is
+    "pulled toward the origin and understates the offset", and the output
+    line hardcoded the word "understated". The run says the opposite: the
+    Fréchet mean is 19.2% CLOSER to the origin, so the 1st pass OVERSTATED
+    the offset. The repair had smuggled in an unmeasured claim of its own.
+    FIX: the direction is now taken from sign(cnFre − cnEuc) and printed as
+    "direction measured, not assumed", plus a defect that fires if the
+    Karcher iteration ever fails to beat the Euclidean centroid on its own
+    objective — so the probe can no longer vouch for itself.
+
+SUMMARY (lane B): 6 defects found by reading, 1 found only by running.
+The standing lesson holds in both lanes — a read cannot support the same
+weight as a run, and that applies to the audit's own repairs.
+
+H   LANE A, 4th PASS — PROSE THAT OUTRAN ITS OWN COUNTERS, FOUND BY RE-RUNNING.
+    After the selfSites fix cut A0's restatement count from 5-lines-in-2-files
+    to 2-lines-in-1-file, the surrounding paragraph still read "asserted in
+    several files ... a schema comment and a second module". The counters were
+    right; the sentence around them was stale. This is the same defect class
+    the siege exists to hunt — an unmeasured claim standing next to a measured
+    one — and it was inside the siege.
+    FIX: every quantity in that paragraph is now interpolated from
+    restatements.length and restateFiles.length. Nothing in it is typed by hand.

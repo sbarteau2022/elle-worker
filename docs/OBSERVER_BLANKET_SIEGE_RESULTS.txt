@@ -1,38 +1,22 @@
-CAPTURED AT COMMIT b4855be — BEFORE the correction this siege recommends.
-
-This transcript is the RECORD OF THE FINDING, not a description of current
-source. The commit immediately following it restates the three claim sites
-(src/observer-blanket.ts:17, src/db/schema.ts:198, src/observer.ts:294) as a
-hypothesis carrying its interval and its provenance. Re-running the harness
-against corrected source will still report hits in A0: the probe matches
-MENTIONS of the number by regex and cannot tell an assertion from a
-retraction. That is a limitation of A0, not a regression — read the source.
-
-------------------------------------------------------------------------
-
-  ../../../tmp/blanket-siege-afl8lB/bundle.cjs  50.6kb
-
-⚡ Done in 62ms
 ========================================================================
 LANE A SIEGE — observer/blanket completeness
+commit 4e551557044cbbe6fddc8fefb476e6752b513674 (WORKING TREE DIRTY)
 ========================================================================
 
 A0  PROVENANCE — is the n=10 validation set in this repository?
 ------------------------------------------------------------------------
-  files scanned (repo, excluding this harness) : 578
+  files scanned (repo, excluding this harness) : 583
 
-  LINES THAT ASSERT THE RETROSPECTIVE RESULT : 5  in 3 file(s)
-    src/db/schema.ts:199  // COMPLETENESS score. Validated to predict prediction↔outcome fidelity far
-    src/observer-blanket.ts:17  // Validated offline (n=10 hand-extractions): structured completeness predicts
-    src/observer-blanket.ts:18  // prediction↔outcome fidelity at rho≈+0.61, vs +0.08 for trajectory coherence —
-    src/observer.ts:295  // and score its completeness. Predicts prediction↔outcome fidelity far better
-    src/observer.ts:296  // than trajectory coherence (validated rho≈+0.61 vs +0.08). Best-effort; the
+  LINES THAT ASSERT THE RETROSPECTIVE RESULT : 2  in 1 file(s)
+    src/observer-blanket.ts:17  // HYPOTHESIS, NOT A VALIDATION. An offline reading of n=10 hand-extractions put
+    src/observer-blanket.ts:18  // completeness→fidelity at rho≈+0.61 against +0.08 for trajectory coherence. That
 
-  LINES BUILDING THE FORWARD TEST INSTEAD : 56  in 12 file(s)
+  LINES BUILDING THE FORWARD TEST INSTEAD : 58  in 13 file(s)
     corpus/observer/run-queue-docket.md
     docs/OBSERVER_QUEUE_RUNBOOK.md
     research/seam-rip/README.md
     src/db/schema.ts
+    src/observer-blanket.ts
     src/observer-docket.test.ts
     src/observer-docket.ts
     src/observer-falsifier.test.ts
@@ -47,13 +31,39 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
   LINES THAT COULD HOLD THE DATA (a scored table, a fixture) : 0
     (none)
 
-  VERDICT: no scored validation set exists in this repository. The
-           retrospective result is asserted in 3 file(s) and evidenced in
-           none. Restating it in a schema comment and a second module does
-           not corroborate it — every copy traces to the same unsourced
-           number, so repetition only widens the blast radius if it is wrong.
+  PROBE POWER — can dataPat even see a scored table? (7 fixtures)
+    MISSED    pretty-printed JSON (keys on separate lines)
+    DETECTED  CSV header
+    DETECTED  CSV header, spaced
+    MISSED    TSV header
+    DETECTED  markdown table
+    MISSED    inline JSON one-liner
+    MISSED    renamed columns (score_c, score_f)
+  dataPat is BLIND to 4/7 realistic encodings.
 
-           But the same repository contains, in 12 file(s), the forward
+  SAME-FILE CO-OCCURRENCE of "completeness" and "fidelity" : 4 file(s)
+    src/db/schema.ts
+    src/observer-blanket.ts
+    src/observer-live.ts
+    src/observer.ts
+  BARE NUMERIC PAIRS (a headerless scored table) : 0 line(s)
+
+  VERDICT: this probe finds no scored validation set. Read that at the
+           strength the instrument supports: dataPat is blind to 4 of 7
+           realistic encodings, and this walk covers the WORKING TREE AT
+           HEAD ONLY — git history is not searched. The honest statement
+           is "no scored set is visible to these probes here and now",
+           not "none exists". The co-occurrence and numeric-pair passes
+           above are the fallback; inspect any file they list.
+
+           What the probe DOES establish at full strength is the
+           asymmetry: the number is asserted on 2 line(s) across
+           1 file(s) and evidenced in none of them. Restating it
+           does not corroborate it — every one of those lines traces
+           to the same unsourced number, so repetition only widens
+           the blast radius if it is wrong.
+
+           But the same repository contains, in 13 file(s), the forward
            instrument that WOULD source it: observer-falsifier.ts holds a
            permutation null at a PRE-REGISTERED alpha = 0.01 with
            POWER_FLOOR = 8, and observer-live.ts gates on post-cutoff
@@ -66,6 +76,7 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
 A1  REACHABLE RANGE — enumerate every score the function can return
 ------------------------------------------------------------------------
   distinct reachable scores    : 113
+  junk-varied challenge grid   : 113 distinct, 0 not in the lattice above
   minimum                      : 0.0000
   MAXIMUM                      : 0.9600
   the source clamps with Math.min(..., 1)
@@ -124,19 +135,36 @@ A4  RESOLUTION — how finely can this score rank ten cases?
   distinct values in the plausible band : 75
   that band spans                       : 0.2533 .. 0.9600
 
-  A Spearman rho is a statistic on RANKS. With a coarse, heavily-tied
-  predictor, ten observations will contain ties, and ties inflate or
-  deflate rho depending on how they are broken. The reported +0.61 is
-  quoted to two decimals with no tie correction stated and no n=10
-  table to inspect, so its tie structure is unknown.
+
+  P(at least one tie among n=10)        : 0.4658   under a UNIFORM draw
+  That figure is a LOWER BOUND, and deliberately so. The extractor does
+  not sample the band uniformly — an LLM told to fill a schema fills most
+  of it, so the realised distribution is bunched near the top and ties are
+  strictly more likely than this. What the number establishes is that ties
+  are not a hypothetical: even at their least likely they occur about 47%
+  of the time. A Spearman rho is a statistic on RANKS, and ties inflate or
+  deflate it depending on how they are broken. The reported +0.61 is quoted
+  to two decimals with no tie correction stated and no n=10 table to
+  inspect, so its tie structure is unknown and its third digit is not
+  recoverable from anything in this repository.
 
 A5  IS +0.61 AT n=10 DISTINGUISHABLE FROM CHANCE? (exact permutation)
 ------------------------------------------------------------------------
-  permutations enumerated       : 3,628,800   (10! = 3,628,800)
-  P(rho >= +0.61 | H0)          : 0.03337   one-sided
-  P(|rho| >= 0.61 | H0)         : 0.06674   two-sided
-  exact two-sided 5% critical   : rho = 0.6485
-  does +0.61 clear it?          : NO
+  permutations per pattern      : 3,628,800   (10!, fully enumerated)
+
+  tie pattern in the predictor        two-sided p   5% crit   +0.61 clears?
+  no ties (the shortcut case)          0.06674     0.6364    NO
+  one 2-way tie                        0.06403     0.6383    NO
+  two 2-way ties                       0.06350     0.6403    NO
+  one 3-way tie                        0.06343     0.6442    NO
+  one 4-way tie at the top (cf. A2)    0.06542     0.6441    NO
+
+  The tie correction MATTERS to the arithmetic and does not rescue the
+  claim. Every tie pattern moves the 5% critical value AWAY from +0.61,
+  not toward it: ties compress the null less than they compress the
+  observed statistic. So the first version of this probe reached the right
+  verdict by the wrong route, and the corrected route reaches it by more.
+  does +0.61 clear ANY pattern? : NO
 
   At n=10, +0.61 does not reach two-sided significance. It is inside the
   range chance produces roughly one time in twenty even when the two
@@ -147,9 +175,13 @@ A5  IS +0.61 AT n=10 DISTINGUISHABLE FROM CHANCE? (exact permutation)
 
 A6  THE INTERVAL, AND THE "7x LIFT"
 ------------------------------------------------------------------------
-  rho = +0.61, n=10  ->  95% CI [-0.032, 0.896]
-  rho = +0.08, n=10  ->  95% CI [-0.579, 0.676]
-  the two intervals overlap over    : [-0.032, 0.676]
+  Pearson  se = 1/sqrt(n-3)      = 0.37796   (WRONG statistic here)
+  Spearman se = 1.06/sqrt(n-3)   = 0.40064   (Bonett & Wright)
+
+  rho = +0.61, n=10  ->  95% CI [-0.076, 0.904]   (Pearson se would say [-0.032, 0.896])
+  rho = +0.08, n=10  ->  95% CI [-0.608, 0.699]   (Pearson se would say [-0.579, 0.676])
+  the two intervals overlap over    : [-0.076, 0.699]
+  does the +0.61 interval contain 0 : YES
 
   "+0.61 vs +0.08 — a 7x lift" is a ratio of two point estimates whose
   intervals both straddle zero and overlap each other across most of
@@ -171,23 +203,36 @@ A7  ROBUSTNESS — malformed input, and whether a throw is contained
   target_states: string              -> 0.1000
 
   inputs that threw             : 2/9
+
+  MEASURED by this probe: the exported scorer is NOT total. Some malformed
+  inputs throw rather than returning 0. It is public API, and a future
+  caller that skips the extractor guard gets a throw, not a score.
+
+  UNMEASURED — read, not executed, and stated here as such: that
   extractBlanketModel guards Array.isArray(parsed.blankets) and coerces
-  collisions before the scorer sees them, so the LLM path is protected,
-  and every call site is inside an async function whose rejection is
-  caught. The exported scorer itself is NOT total, though: it is public
-  API and a future caller that skips the guard gets a throw, not a 0.
+  collisions before the scorer sees them, and that every call site sits
+  inside an async function whose rejection is caught. Those two claims
+  come from reading observer.ts, not from running it. They are the reason
+  the CURRENT blast radius is small; they are not a reason the scorer is
+  safe, and a probe that executes the call sites has not been written.
 
 ========================================================================
 SUMMARY
 ========================================================================
-  The scorer is real, pure, deterministic and cheap. Its header is honest
-  about behaviour: the number ranks and gates nothing, and a full grep
-  confirms it — it is written to observer_blankets.completeness and
-  observer_predictions_live.mode_a_completeness and read back only by the
-  live_status readout. Unlike lane B, the producer audit comes back CLEAN:
-  extractAndPersistBlanket really does run on every observer analysis
-  (observer.ts:299) plus a backfill (observer.ts:384), and observer-live.ts
-  and falcon-ground.ts each compute the same number.
+  MEASURED by these probes: the scorer is real, pure, deterministic and
+  cheap; every number above came out of the shipped module, bundled from
+  src/observer-blanket.ts at the commit stamped at the top of this file.
+
+  UNMEASURED — established by reading the tree, not by executing it, and
+  stated here as such: that the number ranks and gates nothing (it is
+  written to observer_blankets.completeness and to
+  observer_predictions_live.mode_a_completeness, and read back only by the
+  live_status readout); that extractAndPersistBlanket runs on every
+  observer analysis (observer.ts:299) plus a backfill (observer.ts:384);
+  and that observer-live.ts and falcon-ground.ts each compute the same
+  number. A grep over a working tree is not a call-graph. On that evidence
+  the producer audit comes back CLEAN — unlike lane B — but the evidence is
+  a read, and the distinction is the whole point of this second pass.
 
   What does not survive is the headline number.
     - the n=10 set is not in this repository (A0)
@@ -210,3 +255,14 @@ SUMMARY
   the wiring, restate the claim with its interval and its provenance, and
   point at observer-live.ts as the thing that will settle it.
 ========================================================================
+
+ADVERSE FINDINGS: 9
+  - A0 the headline number is asserted in 1 file(s) and evidenced in none
+  - A0 dataPat is blind to 4/7 encodings; its null result is bounded
+  - A1 Math.min(...,1) clamp is dead code; ceiling is 0.96
+  - A2 Math.min(nWf,3) makes every agent past the third carry zero bits
+  - A3 a content-free extraction scores identically to a real reading
+  - A4 ties are likely at n=10 and no tie handling is stated
+  - A5 +0.61 at n=10 fails two-sided 5% under every tie pattern
+  - A6 the 95% interval on +0.61 contains zero
+  - A7 exported scorer is not total (2/9 malformed inputs throw)
