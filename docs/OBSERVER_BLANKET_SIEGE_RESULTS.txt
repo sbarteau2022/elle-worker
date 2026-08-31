@@ -1,11 +1,11 @@
 ========================================================================
 LANE A SIEGE — observer/blanket completeness
-commit 46085d4ee236384fb546f879c0c033928cc49434 (WORKING TREE DIRTY)
+commit 442b161298fecdbb5e1e9658396d9b3a0a6b404d (WORKING TREE DIRTY)
 ========================================================================
 
 A0  PROVENANCE — is the n=10 validation set in this repository?
 ------------------------------------------------------------------------
-  files scanned (repo, excluding this harness) : 587
+  files scanned (repo, excluding this harness) : 589
 
   LINES THAT ASSERT THE RETROSPECTIVE RESULT : 2  in 1 file(s)
     src/observer-blanket.ts:17  // HYPOTHESIS, NOT A VALIDATION. An offline reading of n=10 hand-extractions put

@@ -39,6 +39,7 @@
 import type { Env } from './index';
 import { callLLM } from './llm';
 import { CONDUCTANCE, type EdgeKind, type MemEdge } from './graph';
+import { isPamiIndexLike, pamiBridgeVector } from './pami-bridge';
 
 // ── the geometry (pure): the Poincaré ball, curvature −1 ─────────────────
 // B = { x ∈ ℝⁿ : ‖x‖ < 1 }. All points live strictly inside; project() is
@@ -161,7 +162,7 @@ function hashDirection(key: string, dim: number): number[] {
 // spectrum, a vFAR field report, and a PAMI index all become commensurable
 // vectors in the same tangent space.
 
-export const RIP_DIM = 16;      // encoder output dimensionality
+export const RIP_DIM = 29;      // encoder output dimensionality (= PAMI_BRIDGE_DIM)
 const MAX_LEAVES = 512;         // a rip report is small; a bad caller is not
 const TANGENT_SCALE = 0.9;      // ψ(f) = exp₀(0.9·f̂): pure-feature points sit at depth ≤ 2·atanh(tanh 0.9)
 
@@ -187,6 +188,13 @@ export function numericLeaves(x: unknown, prefix = '', out: Array<[string, numbe
 const symlog = (v: number) => Math.sign(v) * Math.log1p(Math.abs(v));
 
 export function ripVector(rip: unknown, dim = RIP_DIM): number[] {
+  // PAMI indices get the torus-aware bridge: (cos θ, sin θ) per phase keeps
+  // angular wraparound continuous, which the generic hashed encoder cannot.
+  if (isPamiIndexLike(rip)) {
+    const v = pamiBridgeVector(rip).slice(0, dim);
+    while (v.length < dim) v.push(0);
+    return v;
+  }
   const f = new Array(dim).fill(0);
   const leaves = numericLeaves(rip);
   for (const [path, value] of leaves) {
