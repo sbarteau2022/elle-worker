@@ -230,6 +230,13 @@ export interface Env extends LLMEnv {
   ELLE_LANE_PROTOCOL?: string;
   JWT_SECRET:       string;
   ELLE_SERVICE_KEY: string;
+  // Narrow, dispatch-only credential for /api/elle-sandbox-lane (x-lane-dispatch-key).
+  // ELLE_SERVICE_KEY works there too, but it is the god credential and lives in
+  // several places (see docs/SERVICE_KEYS.md) — a remote harness that only needs to
+  // hand work to an existing lane should hold this instead. Its entire blast radius
+  // is "can run a job on a lane someone else created". Unset ⇒ header never matches.
+  //   wrangler secret put ELLE_LANE_DISPATCH_KEY   (or ./scripts/set-lane-key.sh)
+  ELLE_LANE_DISPATCH_KEY?: string;
   // One client ID, or a comma-separated allowlist (web + iOS client IDs from
   // the same Google Cloud project) — see src/google-auth.ts.
   GOOGLE_CLIENT_ID?: string;
@@ -475,6 +482,15 @@ function isServiceRequest(request: Request, env: Env): boolean {
 function sandboxKeyOk(request: Request, env: Env): boolean {
   if (!env.SANDBOX_AGENT_KEY) return false;
   return timingSafeEqualStr(request.headers.get('x-sandbox-key') || '', env.SANDBOX_AGENT_KEY);
+}
+
+// The lane dispatch key (x-lane-dispatch-key) — deliberately WEAKER in scope than
+// either of the above: it authorizes exactly one action ('dispatch') on one route.
+// It exists so a caller that only needs to delegate work never has to hold the
+// service key. Same constant-time comparison and same never-match-when-unset rule.
+function laneDispatchKeyOk(request: Request, env: Env): boolean {
+  if (!env.ELLE_LANE_DISPATCH_KEY) return false;
+  return timingSafeEqualStr(request.headers.get('x-lane-dispatch-key') || '', env.ELLE_LANE_DISPATCH_KEY);
 }
 
 // Length-independent constant-time string comparison.
@@ -2373,9 +2389,15 @@ export default {
     // function, stabilized by the topological linking-number check above:
     // { action: 'create'|'list'|'remove'|'dispatch'|'stability'|'report', ... }.
     if (path === '/api/elle-sandbox-lane') {
-      if (!svc) return err('Unauthorized', 401);
       const b = body as { action?: string; name?: string; description?: string; kind?: string; payload?: Record<string, unknown>; dispatchesTo?: string[]; laneA?: string; laneB?: string };
       const action = String(b.action || '');
+      // Everything that shapes or enumerates the registry — create, remove, list,
+      // stability, report — stays on the service key. 'dispatch' alone also accepts
+      // the narrow x-lane-dispatch-key, because handing one unit of work to a lane
+      // that already exists is the one thing a remote caller genuinely needs. An
+      // unknown action falls through to `svc` only, so a new action can never
+      // inherit dispatch's looser gate by accident.
+      if (!svc && !(action === 'dispatch' && laneDispatchKeyOk(request, env))) return err('Unauthorized', 401);
       if (action === 'create') {
         if (!b.name) return err('provide { name }', 400);
         return json(await laneCreate(env, b.name, b.description));

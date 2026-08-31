@@ -60,6 +60,7 @@ surface in the fleet. Set every secret with `wrangler secret put <NAME>`.
 | `LLM_OPENROUTER_KEY` | ✅¹ | OpenRouter (free frontier models) — primary LLM lane. |
 | `LLM_GEMINI_KEY` | ✅¹ | Gemini 2.5 Flash + Google Search grounding (web search) + LLM. |
 | `SANDBOX_AGENT_KEY` | optional | Shared secret for the connect-back laptop sandbox; must equal Elle's `ELLE_SANDBOX_KEY`. Unset ⇒ sandbox doors 503. |
+| `ELLE_LANE_DISPATCH_KEY` | optional | Narrow, dispatch-only bearer for `/api/elle-sandbox-lane` (`x-lane-dispatch-key`). Authorizes `{ action: 'dispatch' }` and nothing else. Give this to a remote caller instead of `ELLE_SERVICE_KEY`. Mint with `./scripts/set-lane-key.sh`. Unset ⇒ only the service key opens the route. |
 | `GOOGLE_CLIENT_ID` | optional | Google sign-in allowlist (web + iOS client IDs, comma-separated). |
 | `RESEND_API_KEY` | optional | Contact-form email via Resend. Unset ⇒ form still logs, just no email. |
 | `GITHUB_TOKEN` | optional | GitHub corpus ops. |
@@ -349,6 +350,11 @@ Placeholder repo (README only, no code). **No keys.**
 - `ELLE_SERVICE_KEY` is the **same god credential** shared into FlockIntelligence
   and rapid2ai-ai-worker — sharing it widens where that credential lives; prefer
   a narrower per-capability token where possible.
+  For lane dispatch that narrower token now exists: `ELLE_LANE_DISPATCH_KEY`
+  (elle-worker secret, carried under the same name by the caller). It is *not* a
+  cross-repo shared value in the sense the others are — nothing else consumes it,
+  so it can be rotated or revoked alone, without touching the four other places
+  `ELLE_SERVICE_KEY` lives.
 - `INGEST_API_TOKEN` must match between `rapid2ai-ingestion` and
   `rapid2ai-email-ingest`.
 - Every Cloudflare deploy needs `CLOUDFLARE_API_TOKEN` (+ account id where the

@@ -37,6 +37,18 @@ CLOUDFLARE_ACCOUNT_ID=f60c2e6068e002f5dbad7cd562a5c165
 # Or bind both sides in one shot:  ./scripts/set-sandbox-key.sh
 # SANDBOX_AGENT_KEY=change-me-to-a-long-random-string
 
+# Lane dispatch — the NARROW credential for /api/elle-sandbox-lane, sent as the
+# x-lane-dispatch-key header. It authorizes { action: 'dispatch' } and nothing
+# else: no create, no remove, no list, no report, no other route. Give this to a
+# remote harness that only needs to hand work to an existing lane, so it never
+# has to hold ELLE_SERVICE_KEY (full admin scope, shared into three other repos).
+# ELLE_SERVICE_KEY still works on this route; this is the least-privilege door.
+# In production set it as a Worker secret, not here:
+#   wrangler secret put ELLE_LANE_DISPATCH_KEY
+# Or mint + bind in one shot:  ./scripts/set-lane-key.sh
+# Unset ⇒ the header never matches and only the service key opens the route.
+# ELLE_LANE_DISPATCH_KEY=change-me-to-a-long-random-string
+
 
 # ── Flock — social-media intelligence (src/flock.ts) ─────────────────────────
 # Image generation runs on Cloudflare Workers AI (env.AI) by default — free,
