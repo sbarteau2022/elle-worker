@@ -1,0 +1,89 @@
+LANE-B SIEGE — PAMI residual → DHNG geometry
+index length 21 floats (8 phases + 13 dims) · RIP_DIM 16
+structural depth ceiling 2·atanh(tanh 0.9) = 1.8000
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+B0 · radial range of the bridge  (is depth even a variable?)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+n = 200 indices across 5 signal families
+‖ripVector‖ saturated at 1 (⇒ depth pinned to the ceiling): 100.0%
+depth  min 1.8000  max 1.8000  mean 1.8000  sd 0.000000
+   sine   depth mean 1.8000  sd 0.000000
+   white  depth mean 1.8000  sd 0.000000
+   ar1    depth mean 1.8000  sd 0.000000
+   burst  depth mean 1.8000  sd 0.000000
+   chirp  depth mean 1.8000  sd 0.000000
+
+VERDICT: DEAD. Radial depth is CONSTANT (range 0.000000000). Every PAMI index lands at the same distance from the origin, so "depth = surprisal" carries exactly 0 bits through this bridge.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+B1 · phase-torus destruction  (native metric wraps; bridge does not)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+pair                          pamiDistance    bridge geodesic
+wrap pair  (+π−ε vs −π+ε)        0.000398         1.929583
+control    (0.5 vs 0.5+2ε)       0.000398         0.013005
+
+native  wrap/control ratio: 1.000   (≈1 ⇒ the native metric sees the wrap as the same tiny step — correct)
+bridge  wrap/control ratio: 148.372   (≫1 ⇒ the bridge tears the torus)
+
+VERDICT: CONFIRMED. The bridge inflates a 2ε torus step into a 148× separation. tanh(symlog(θ)) is a map of ℝ, not of 𝕋⁸ — the phase half of the index (8 of 21 floats, the entire F6 fingerprint) is geometrically wrong the moment it enters the ball.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+B2 · rank fidelity of the bridge  (Spearman: native metric vs ball)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+n = 90 real indices, 4005 pairs
+Spearman ρ(pamiDistance, ball geodesic) = 0.5930
+pamiDistance   range [0.0042, 0.5014]  sd 0.0952
+ball geodesic  range [0.0229, 2.9826]  sd 0.6638
+worst collision: pair (10,13) — native 0.1884 (38% of max) but ball 0.5582 (19% of max)
+
+VERDICT: PARTIAL. ρ=0.593 — the bridge preserves the coarse ordering and loses the fine one. 21 floats onto 16 non-orthogonal hashed directions cannot be injective; retrieval on the ball is not retrieval on PAMI.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+B3 · surprisal sensitivity  (amplitude invariance vs structure sensitivity)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(a) amplitude ×100, identical structure:
+    pamiDistance  mean 0.000000  max 0.000000   ← 0 = amplitude-invariant
+    |Δdepth|      mean 0.000000  max 0.000000
+
+(b) does the NATIVE metric separate structure families?
+    within-family  mean 0.1223 ± 0.0814  (n=1200)
+    between-family mean 0.2417 ± 0.0923  (n=3750)
+    Cohen's d = 1.373
+
+(c) same question, through the bridge:
+    within-family  mean 1.4755 ± 0.7364
+    between-family mean 2.0196 ± 0.6318
+    Cohen's d = 0.793   (native d = 1.373; retention 58%)
+
+(d) radial depth per family — the actual "surprise = depth" claim:
+    sine   depth 1.8000 ± 0.000000
+    white  depth 1.8000 ± 0.000000
+    ar1_9  depth 1.8000 ± 0.000000
+    burst  depth 1.8000 ± 0.000000
+    ordering (shallow→deep): sine 1.8000  <  white 1.8000  <  ar1_9 1.8000  <  burst 1.8000
+    expected if depth = surprisal: sine < ar1_9 < burst ≈ white
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+B4 · reference-measure calibration  (where is the store's centre of mass?)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+store n = 120 "ordinary" (predictable-ish) indices
+Euclidean-mean centroid: ‖c‖ = 0.564979   (0 ⇒ the store's mass IS at the origin)
+mean geodesic to centroid 1.3675 ± 0.266428
+mean geodesic to origin   1.8000 ± 0.000000
+ρ(depth, distance-from-centroid) = 0.0905
+
+The store's mass sits 0.5650 off the origin, so d(0,ψ) is NOT "distance from typicality" — it is distance from an arbitrary point the design happened to pick.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+L1 residual → index : NO PRODUCER IN CODE. Every non-test pamiIndex call is
+   fed synthetic memorySignalNeutral() in phi-minimax-scorecard.ts; the one
+   live path (router.ts case 'pami') takes signal[] verbatim from LLM JSON,
+   and pami.ts:617 / router.ts:553 both instruct the CALLER to "subtract your
+   prediction first". There is no prediction operator 𝒫 anywhere in src/.
+L2 index → pamiDistance : real, pure, deterministic, torus-correct.
+L3 index → ball         : see B0–B2 above.
+
+Nothing here was measured against a live residual, because there is not one.
