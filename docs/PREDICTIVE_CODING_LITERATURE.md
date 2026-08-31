@@ -178,8 +178,16 @@ the model, not low, against the pixels) — but it should be cited as contested.
    estimated confidence; `T_k`/`D_k` accumulate precision-weighted magnitudes. This is
    the one change that makes the three-cell reading expressible at all, and §1 gives a
    closed-form, iteration-free way to do it. Prerequisite to everything else.
-2. **Measure delta-hyperbolicity on content-derived structure.** Still never done. Still
-   the stated Target C precondition. Repo-only, no external dependency.
+2. ~~**Measure delta-hyperbolicity on content-derived structure.**~~ **Done — and it
+   fails.** `DELTA_HYPERBOLICITY_CONTENT.md`. Real corpus (51 files -> 1021 production
+   chunks, tf-idf k-NN) reads graph delta/diam **0.16-0.25** against a synthetic-tree band
+   of 0.00-0.08 and a ring/cycle band of 0.475-0.480: **not tree-like**. Instrument
+   validated on four controls with hard assertions. Two measured caveats bound the claim:
+   the pull-comparison half of the pre-registered rule is uninformative through any k-NN
+   pipeline (it returns "not tree-like" for a corpus that IS a tree by construction), and
+   tf-idf distances on this corpus are concentrated (IQR/median 0.0210), so the low metric
+   delta is an artifact, not evidence of hyperbolicity. tf-idf is a lexical proxy for the
+   production bge embedding — that arm is not repo-only measurable.
 3. **Build one correspondence probe and run it held-out** (§3). Semantic-entropy probe
    is the cheapest honest start; conformal abstention is the one that yields a bound.
    Until a held-out number exists, `agreement` stays absent — a producer that has not
@@ -189,9 +197,11 @@ the model, not low, against the pixels) — but it should be cited as contested.
 5. Defer multi-token / multi-timescale prediction heads (§2). Well-supported, but it is
    a training-time change and we do not train the base model.
 
-**Verdict on Target C: not yet.** Item 2 is its own stated precondition and remains
-unmeasured. Item 1 is a defect in the mechanism Target C would be built on. Neither is
-large; both are blocking.
+**Verdict on Target C: not yet, and now for a measured reason.** Item 2 was its own
+stated precondition; it has been measured and the content-derived structure does **not**
+read as tree-like, so the hyperbolic prior Target C would assume is not justified by the
+corpus's shape. Item 1 is a separate defect in the mechanism Target C would be built on
+and is unaffected. Item 2 is no longer "not yet done" — it is answered in the negative.
 
 ---
 

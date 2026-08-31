@@ -71,11 +71,16 @@ is not confined to the radius.
 
 ## What this does NOT establish
 
-- The corpus is synthetic and tree-shaped. δ-hyperbolicity has still never been
-  measured on real corpus content; the only reading in the repo
-  (`GRAPH_PRESSURE_TEST.md`) says **cyclic**, and was computed over co-recall
-  edges the retriever itself created. If the real graph is cyclic, none of the
-  above transfers.
+- The corpus is synthetic and tree-shaped. δ-hyperbolicity **has now been measured
+  on real corpus content** (`DELTA_HYPERBOLICITY_CONTENT.md`) and it does **not**
+  read as tree-like: graph δ/diam 0.16–0.25 across k ∈ {3,5,8}, against a
+  synthetic-tree band of 0.00–0.08 and a ring/cycle band of 0.475–0.480. The
+  earlier `GRAPH_PRESSURE_TEST.md` reading (also cyclic) was over co-recall edges
+  the retriever itself created and did not settle this; the new one is over
+  structure derived from the content. **So the conditional above has fired: the
+  real structure is cyclic-or-mixed, and none of the above transfers.** The +10.9%
+  mAP gain stands as a synthetic-tree-corpus result only. Two measured caveats
+  bound how hard that is stated — see that doc's Limitations 1–3.
 - +10.9% on 303 synthetic queries is not a production result. It justifies
   building the held-out benchmark; it does not substitute for one.
 - Cost is unpriced here. A 128-dim atlas over a real memory graph carries the
