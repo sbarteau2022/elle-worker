@@ -196,8 +196,11 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     )`,
     // observer-blanket.ts — the nested-Markov-blanket model each run inferred
     // (the operator's NestedMarkovBlanketExtraction schema) + its prediction-time
-    // COMPLETENESS score. Validated to predict prediction↔outcome fidelity far
-    // better than trajectory coherence. Read-only; best-effort; gates nothing.
+    // COMPLETENESS score. HYPOTHESIZED to predict prediction↔outcome fidelity
+    // better than trajectory coherence — the n=10 retrospective behind that is
+    // unsourced here and fails significance at n=10 (see observer-blanket.ts's
+    // header). observer-live.ts below is what will settle it. Read-only;
+    // best-effort; gates nothing.
     `CREATE TABLE IF NOT EXISTS observer_blankets (
       id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL UNIQUE,
       model_json TEXT NOT NULL, completeness REAL, n_blankets INTEGER, n_collisions INTEGER,

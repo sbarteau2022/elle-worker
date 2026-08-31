@@ -14,10 +14,33 @@
 // states and defensive behaviours, the collisions (with a risk class), the
 // suppressed signal and who bears its cost, and the systemic alignment verdict.
 //
-// Validated offline (n=10 hand-extractions): structured completeness predicts
-// prediction↔outcome fidelity at rho≈+0.61, vs +0.08 for trajectory coherence —
-// a 7× lift. This module is the unbiased, at-scale replication: the LLM does the
-// extraction here; a separate pass (a later rung) judges fidelity at resolution.
+// HYPOTHESIS, NOT A VALIDATION. An offline reading of n=10 hand-extractions put
+// completeness→fidelity at rho≈+0.61 against +0.08 for trajectory coherence. That
+// number does not survive its own siege (docs/observer_blanket_siege.cjs, results
+// in docs/OBSERVER_BLANKET_SIEGE_RESULTS.txt) and must not be quoted as settled:
+//   · the scored n=10 set is not in this repository — nothing here can check it;
+//   · exact permutation over all 10! pairings gives P(|rho|≥0.61) = 0.067. The
+//     two-sided 5% critical value at n=10 is 0.6485, so +0.61 does not clear it —
+//     and this repo's own pre-registered alpha (observer-falsifier.ts) is 0.01;
+//   · the 95% interval is [-0.032, +0.896]; +0.08's is [-0.579, +0.676]. Both
+//     contain zero and overlap across most of their length, so "7× lift" is a
+//     ratio of two estimates neither of which is distinguishable from zero;
+//   · and the study was RETROSPECTIVE, which is the exact shape observer-live.ts
+//     exists to escape (see its header: every retrospective test of κ NULLed
+//     because the weights had already memorized the dockets' endings).
+//
+// What the score actually measures is SCHEMA COVERAGE, not modelling quality:
+// every predicate below is a presence test, so a content-free extraction ('.' in
+// every field) scores the maximum 0.9600 — identical to a rich reading, and 2.88×
+// a deep-but-narrow one. Treat a high completeness as "the run filled the form",
+// and note the confound the claim needs ruled out and this repo does not rule
+// out: eager form-filling may simply track richer dockets.
+//
+// The instrument that CAN settle this is already here and already running:
+// observer-live.ts scores completeness against gated forward-sim fidelity on
+// post-cutoff cases only, and observer-falsifier.ts holds the permutation null.
+// It is a clock — UNDERPOWERED until POWER_FLOOR=8 admissible cases resolve. Read
+// its verdict, not this comment, before relying on the relationship.
 //
 // Read-only as to behaviour: it ranks and gates NOTHING. Best-effort throughout —
 // an extraction failure returns null and never fails or slows a run.

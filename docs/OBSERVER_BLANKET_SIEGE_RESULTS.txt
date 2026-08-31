@@ -1,3 +1,14 @@
+CAPTURED AT COMMIT b4855be — BEFORE the correction this siege recommends.
+
+This transcript is the RECORD OF THE FINDING, not a description of current
+source. The commit immediately following it restates the three claim sites
+(src/observer-blanket.ts:17, src/db/schema.ts:198, src/observer.ts:294) as a
+hypothesis carrying its interval and its provenance. Re-running the harness
+against corrected source will still report hits in A0: the probe matches
+MENTIONS of the number by regex and cannot tell an assertion from a
+retraction. That is a limitation of A0, not a regression — read the source.
+
+------------------------------------------------------------------------
 
   ../../../tmp/blanket-siege-afl8lB/bundle.cjs  50.6kb
 

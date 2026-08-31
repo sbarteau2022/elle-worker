@@ -292,8 +292,9 @@ export async function runAndPersistObserver(
   ]).catch(() => {});
 
   // The two-models step: extract the nested-Markov-blanket MODEL this run inferred
-  // and score its completeness. Predicts prediction↔outcome fidelity far better
-  // than trajectory coherence (validated rho≈+0.61 vs +0.08). Best-effort; the
+  // and score its completeness. HYPOTHESIZED to predict prediction↔outcome
+  // fidelity better than trajectory coherence; the n=10 retrospective behind that
+  // does not survive its siege — see observer-blanket.ts's header. Best-effort; the
   // LLM extraction here is the unbiased replication (separate from any fidelity
   // judge). Read-only, gates nothing.
   await extractAndPersistBlanket(env as unknown as BlanketEnv, analysisId, {
