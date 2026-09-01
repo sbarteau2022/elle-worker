@@ -95,6 +95,7 @@ import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, r
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
+import { cognitiveMapSnapshot, logActiveInference } from './active-inference';
 import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
 import { createBusiness, resolveBusinessesForUser, updateTaxFacts, getTaxFactsStatus, addUnit, listUnits, setOwners, listOwners, getBusiness, type FactGroup } from './tax-clients';
 import { startConnect, completeConnect, syncConnection, decodeState, listConnections } from './payroll/sync';
@@ -1809,6 +1810,43 @@ export default {
       const snapshot = await getAtlasByHash(env, String(new URL(request.url).searchParams.get('hash') || ''));
       if (!snapshot) return err('no such atlas snapshot', 404);
       return json(snapshot);
+    }
+
+    // Cognitive map — the active-inference view (active-inference.ts). SSE
+    // stream: the atlas's Poincaré-disk positions + winding vectors, the
+    // G(π)/σ(π) policy evaluation over the coherence triad, and the
+    // regulator's Lyapunov descent trace, frame by frame. Authenticated read
+    // like /api/atlas/latest; the triad comes from query params (defaults to
+    // a stressed triad so the map shows something meaningful bare). Each
+    // request also writes one elle_active_inference_log row (best-effort).
+    if (path === '/api/cognitive/map' && request.method === 'GET') {
+      const user = await getUser(request, env);
+      if (!user) return err('Unauthorized', 401);
+      const q = new URL(request.url).searchParams;
+      const num = (k: string, d: number, lo: number, hi: number): number => {
+        const v = Number(q.get(k));
+        return Number.isFinite(v) && q.get(k) !== null ? Math.min(hi, Math.max(lo, v)) : d;
+      };
+      const coherence = {
+        structural: num('structural', 0.62, 0, 1),
+        relational: num('relational', 0.55, 0, 1),
+        harmonic: num('harmonic', 0.48, 0, 1),
+      };
+      const limit = num('limit', 200, 1, 1000);
+      const steps = num('steps', 60, 1, 400);
+      return sseDoor(ctx, corsHeaders(), async (send) => {
+        const snap = await cognitiveMapSnapshot(env, user.id, coherence, { limit, steps });
+        send('atlas', { points: snap.atlas });
+        send('active_inference', snap.active_inference);
+        for (const step of snap.lyapunov) send('lyapunov', step);
+        send('done', {
+          selected_policy: snap.active_inference.selected_policy,
+          epistemic_trigger: snap.active_inference.epistemic_trigger,
+          epistemic_mass: snap.active_inference.epistemic_mass,
+        });
+        await logActiveInference(env, snap.active_inference, `map:${crypto.randomUUID()}`, user.id)
+          .catch(() => {});
+      });
     }
 
     // Embeddable consumer widget — one script tag on any hub page
