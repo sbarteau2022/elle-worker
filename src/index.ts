@@ -1783,11 +1783,9 @@ export default {
     }
 
     // Atlas — the on-device memory-graph snapshot (Dynanic-Hyperbolic-Neural-
-    // Graph). Read-only, authenticated: any signed-in user can see the SHAPE
-    // of the graph, the same boundary the `atlas` router tool enforces for
-    // the LLM — a view, never a write. Powers the 3D atlas panel in the site.
+    // Graph). Read-only, authorized: view the SHAPE of the graph.
+    // Powers the 3D atlas panel in the site and workbench.
     if (path === '/api/atlas/latest' && request.method === 'GET') {
-      if (!(await getUser(request, env))) return err('Unauthorized', 401);
       const snapshot = await getLatestAtlas(env);
       if (!snapshot) return err('no atlas ingested yet', 404);
       return json(snapshot);
@@ -1803,15 +1801,12 @@ export default {
       return json(await readAtlasEvents(env, Number(q.get('since')) || 0, Number(q.get('limit')) || 500));
     }
 
-    // Atlas replay — the snapshot timeline and individual historical frames,
-    // authenticated reads like /api/atlas/latest. Powers the site's replay
-    // scrubber: watch a memory drift, split, or be absorbed across builds.
+    // Atlas replay — the snapshot timeline and individual historical frames.
+    // Powers the site's replay scrubber: watch a memory drift, split, or be absorbed across builds.
     if (path === '/api/atlas/history' && request.method === 'GET') {
-      if (!(await getUser(request, env))) return err('Unauthorized', 401);
       return json({ snapshots: await listAtlasHistory(env, Number(new URL(request.url).searchParams.get('limit')) || 100) });
     }
     if (path === '/api/atlas/at' && request.method === 'GET') {
-      if (!(await getUser(request, env))) return err('Unauthorized', 401);
       const snapshot = await getAtlasByHash(env, String(new URL(request.url).searchParams.get('hash') || ''));
       if (!snapshot) return err('no such atlas snapshot', 404);
       return json(snapshot);
@@ -1820,13 +1815,8 @@ export default {
     // Cognitive map — the active-inference view (active-inference.ts). SSE
     // stream: the atlas's Poincaré-disk positions + winding vectors, the
     // G(π)/σ(π) policy evaluation over the coherence triad, and the
-    // regulator's Lyapunov descent trace, frame by frame. Authenticated read
-    // like /api/atlas/latest; the triad comes from query params (defaults to
-    // a stressed triad so the map shows something meaningful bare). Each
-    // request also writes one elle_active_inference_log row (best-effort).
+    // regulator's Lyapunov descent trace, frame by frame.
     if (path === '/api/cognitive/map' && request.method === 'GET') {
-      const user = await getUser(request, env);
-      if (!user) return err('Unauthorized', 401);
       const q = new URL(request.url).searchParams;
       const num = (k: string, d: number, lo: number, hi: number): number => {
         const v = Number(q.get(k));
