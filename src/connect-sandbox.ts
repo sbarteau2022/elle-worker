@@ -84,12 +84,24 @@ export async function pathOpen(env: Env, lane = 'primary'): Promise<AgentStatus>
 // before, each only gaining real execution power once a real connect-back
 // client actually polls that specific name.
 export async function dispatchToLane(env: Env, lane: string, kind: string, payload: Record<string, unknown>): Promise<unknown> {
+  // Fail fast when nobody is polling this lane: enqueueing anyway would hang
+  // the caller for the full timeout (up to 10 minutes) and then report
+  // path_open: true — the opposite of the truth, and it defeats every
+  // client-side "laptop is not polling" diagnostic keyed on path_open.
+  const st = await busPathOpen(env, lane).catch((): AgentStatus => ({ open: false }));
+  if (!st.open) {
+    const msg = `sandbox path not open: no agent is polling lane '${lane}'`;
+    return { ok: false, error: msg, stderr: msg, stdout: '', exit: -1, duration_ms: 0, path_open: false };
+  }
   const timeoutMs = Math.min(Math.max(Number(payload.timeout_ms) || 120_000, 1_000), 600_000);
   const jobId = await busEnqueueToLocal(env, lane, kind, payload);
   const result = await busAwaitResult(env, jobId, timeoutMs);
   if (result == null) {
+    // The agent was polling when we enqueued but never submitted a result in
+    // time; report the path as we last saw it rather than assuming it stayed up.
+    const open = await busPathOpen(env, lane).then((s) => s.open).catch(() => false);
     const msg = `sandbox timeout after ${timeoutMs}ms`;
-    return { ok: false, error: msg, stderr: msg, stdout: '', exit: -1, duration_ms: timeoutMs, path_open: true };
+    return { ok: false, error: msg, stderr: msg, stdout: '', exit: -1, duration_ms: timeoutMs, path_open: open };
   }
   return result;
 }

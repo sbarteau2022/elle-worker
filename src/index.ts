@@ -2447,7 +2447,7 @@ export default {
         return json({ removed: true });
       }
       if (action === 'dispatch') {
-        if (!b.name || !b.kind) return err('provide { name, kind, payload? }', 400);
+        if (typeof b.name !== 'string' || !b.name || typeof b.kind !== 'string' || !b.kind) return err('provide { name, kind, payload? } (name and kind must be non-empty strings)', 400);
         try {
           const result = await laneDispatch(env, b.name, b.kind, b.payload || {}, { dispatchesTo: b.dispatchesTo });
           return json({ ok: true, result });
@@ -2467,8 +2467,9 @@ export default {
     // The lane envelope — COROS (helix.ts) sealed under hyperbolic-sync's
     // ("the Rosen bridge") counter-free keystream, one distinct secret
     // geodesic per lane off one root secret. Proves the composed primitive
-    // round-trips, isolates lanes, and resyncs after loss — NOT that the
-    // live laneDispatch() wire is sealed yet (it isn't; see lane-envelope.ts).
+    // round-trips, isolates lanes, and resyncs after loss. The live
+    // laneDispatch() wire IS sealed with it: session-bus.ts seals every
+    // enqueue and opens every submit through this same module.
     if (path === '/api/elle-lane-envelope-selftest') {
       if (!svc) return err('Unauthorized', 401);
       return json(await laneEnvelopeSelfTest());
