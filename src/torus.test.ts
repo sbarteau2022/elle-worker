@@ -166,3 +166,43 @@ describe('GOLDEN_ANGLE', () => {
     expect((GOLDEN_ANGLE * 180) / Math.PI).toBeCloseTo(137.5077, 3);
   });
 });
+
+// ── d_T cross-language conformance ─────────────────────────────────────────
+// Same golden vector table as elle_rust_harness/tests/dt_conformance_tests.rs
+// (Rust) and elle_rust_harness/tests/dt_conformance.py (Python reference).
+// Guards the measured 148× seam tear: an unwrapped phase distance reports
+// |0.01 − (2π − 0.01)| ≈ 6.263 where the geodesic is 0.02. Tolerance 1e-12,
+// not bit-exact: this port accumulates w*w*d*d, Rust/Python (w*d)^2.
+describe('d_T cross-language conformance', () => {
+  const TAU = 2 * Math.PI;
+  const TOL = 1e-12;
+  const PHI_HALF_INV = 0.7861513777574233; // φ^(-1/2)
+  const GOLDEN: Array<[string, number[], number[], number[] | undefined, number]> = [
+    ['seam_1d', [0.01], [TAU - 0.01], undefined, 0.019999999999999574],
+    ['seam_reverse', [TAU - 0.01], [0.01], undefined, 0.019999999999999574],
+    ['antipodal', [0.0], [Math.PI], undefined, Math.PI],
+    ['identical', [1.234567], [1.234567], undefined, 0.0],
+    ['seam_2d', [0.1, 0.0], [TAU - 0.1, 0.0], undefined, 0.1999999999999993],
+    ['weighted_seam', [0.01, 0.01], [TAU - 0.01, TAU - 0.01], [1.0, PHI_HALF_INV], 0.025440392990280836],
+  ];
+
+  it('matches the shared golden vectors', () => {
+    for (const [name, a, b, w, expected] of GOLDEN) {
+      const d = torusDist(a, b, w);
+      expect(Math.abs(d - expected), `golden vector '${name}': got ${d}`).toBeLessThan(TOL);
+    }
+  });
+
+  it('seam distance is geodesic-small, not the naive ≈6.263', () => {
+    expect(torusDist([0.01], [TAU - 0.01])).toBeLessThan(0.1);
+    expect(Math.abs(0.01 - (TAU - 0.01))).toBeGreaterThan(6); // what this rules out
+  });
+
+  it('is invariant under a full-turn shift and symmetric', () => {
+    const a = [0.3, 5.9, 1.1];
+    const b = [6.1, 0.2, 4.4];
+    const d = torusDist(a, b);
+    expect(Math.abs(torusDist(a.map((x) => x + TAU), b) - d)).toBeLessThan(TOL);
+    expect(Math.abs(torusDist(b, a) - d)).toBeLessThan(TOL);
+  });
+});
