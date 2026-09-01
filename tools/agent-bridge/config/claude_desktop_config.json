@@ -1,0 +1,9 @@
+{
+  "//": "Worker side — Claude Desktop (hosting your local Qwen worker agent). Merge this mcpServers entry into claude_desktop_config.json (macOS: ~/Library/Application Support/Claude/; Windows: %APPDATA%\\Claude\\), then fully quit and reopen Claude Desktop. Claude Desktop's config speaks stdio, so we bridge to the bridge's HTTP endpoint with the 'mcp-remote' shim. Both apps MUST use the same URL so they share one board.",
+  "mcpServers": {
+    "agent-bridge": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:8787/mcp"]
+    }
+  }
+}
