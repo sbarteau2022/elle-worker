@@ -69,11 +69,16 @@ fs.writeFileSync(entry,
 const bundle = path.join(tmp, 'bundle.cjs');
 // The module graph behind observer-blanket.ts reaches the worker's LLM router,
 // which imports .md/.sql/.txt corpora as text. esbuild needs loaders for those or
-// the self-build fails on files that have nothing to do with the scorer. We bundle
-// the REAL module rather than re-implementing the arithmetic: the whole point is
-// that the numbers below come from the shipped code, not from a paraphrase of it.
+// the self-build fails on files that have nothing to do with the scorer. Same for
+// .wasm: pfar.ts dynamically imports the wasm FFT bridge, so the module graph now
+// reaches src/wasm/*.wasm. The binary loader is enough — this harness never calls
+// the FFT, and if it ever did, pfar already catches a dead bridge and falls back to
+// the float DFT. We bundle the REAL module rather than re-implementing the
+// arithmetic: the whole point is that the numbers below come from the shipped
+// code, not from a paraphrase of it.
 execFileSync('npx', ['--no-install', 'esbuild', '--bundle', '--format=cjs', '--platform=node',
   '--loader:.md=text', '--loader:.sql=text', '--loader:.txt=text', '--loader:.csv=text',
+  '--loader:.wasm=binary',
   '--outfile=' + bundle, entry], { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] });
 const { completenessFromExtraction: score } = require(bundle);
 
