@@ -95,6 +95,7 @@ import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, r
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
+import { ingestTokenOperatorRun, getTokenOperatorRun, listTokenOperatorRuns } from './token-operator';
 import { cognitiveMapSnapshot, logActiveInference } from './active-inference';
 import { getClientByUser, createClientProfile, resolveVenueForUser } from './atlas-clients';
 import { createBusiness, resolveBusinessesForUser, updateTaxFacts, getTaxFactsStatus, addUnit, listUnits, setOwners, listOwners, getBusiness, type FactGroup } from './tax-clients';
@@ -1920,6 +1921,39 @@ export default {
         const result = await ingestAtlas(env, body);
         return json(result);
       } catch (e) { return err(`atlas ingest failed: ${(e as Error).message}`, 400); }
+    }
+
+    // Token operator ingest (𝒯 — see src/token-operator.ts) — the ONLY write
+    // path onto the token-operator ledger, same shape as atlas ingest above:
+    // service key, not a user JWT; the router never calls it. The Elle
+    // workbench pushes one record per instrumented generation run (TTFT,
+    // inter-token latency, tool calls, steps, energy per phase) here; Elle
+    // only ever reads it back (the `token_operator` router tool below).
+    if (path === '/api/token-operator/ingest' && request.method === 'POST') {
+      if (!isServiceRequest(request, env)) return err('Unauthorized', 401);
+      try {
+        const result = await ingestTokenOperatorRun(env, body);
+        return json(result);
+      } catch (e) { return err(`token-operator ingest failed: ${(e as Error).message}`, 400); }
+    }
+
+    // Read-only mirrors of the router tool, for the dashboard/site widget —
+    // authenticated like /api/atlas/latest, never the write side.
+    if (path === '/api/token-operator/latest' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      const rows = await listTokenOperatorRuns(env, 1);
+      if (!rows.length) return err('no token-operator runs ingested yet', 404);
+      return json(rows[0]);
+    }
+    if (path === '/api/token-operator/recent' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      return json({ runs: await listTokenOperatorRuns(env, Number(new URL(request.url).searchParams.get('limit')) || 20) });
+    }
+    if (path === '/api/token-operator/at' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      const rec = await getTokenOperatorRun(env, String(new URL(request.url).searchParams.get('hash') || ''));
+      if (!rec) return err('no such token-operator run', 404);
+      return json(rec);
     }
 
     // Public widget chat — no key required; service key stays server-side.
