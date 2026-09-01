@@ -1,6 +1,6 @@
 ========================================================================
 LANE A SIEGE — observer/blanket completeness
-commit 69628e22c52e52f104723359f88783a92a9a568a (WORKING TREE DIRTY)
+commit 51ab37353fadc02d320078d9a1e44382dd1c4ed4 (WORKING TREE DIRTY)
 ========================================================================
 
 A0  PROVENANCE — is the n=10 validation set in this repository?
@@ -13,7 +13,7 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
     DEMOTED   src/observer-blanket.ts:17  // HYPOTHESIS, NOT A VALIDATION. An offline reading of n=10 hand-extractions put
     DEMOTED   src/observer-blanket.ts:18  // completeness→fidelity at rho≈+0.61 against +0.08 for trajectory coherence. That
 
-  LINES BUILDING THE FORWARD TEST INSTEAD : 62  in 15 file(s)
+  LINES BUILDING THE FORWARD TEST INSTEAD : 63  in 15 file(s)
     .swarm/RUN.md
     corpus/observer/run-queue-docket.md
     docs/OBSERVER_QUEUE_RUNBOOK.md

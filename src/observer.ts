@@ -297,9 +297,23 @@ export async function runAndPersistObserver(
   // does not survive its siege — see observer-blanket.ts's header. Best-effort; the
   // LLM extraction here is the unbiased replication (separate from any fidelity
   // judge). Read-only, gates nothing.
-  await extractAndPersistBlanket(env as unknown as BlanketEnv, analysisId, {
+  const blanket = await extractAndPersistBlanket(env as unknown as BlanketEnv, analysisId, {
     structural: result.structural.data, dissent: result.dissent.data, prediction: result.prediction.data,
-  }).catch(() => {});
+  }).catch(() => null);
+
+  // The live clock ticks here: every OPEN (non-docket) run auto-logs a
+  // hindsight-free live prediction, so the κ validation sample accrues without
+  // anyone calling log_live by hand. Reuses the topology extracted above (no
+  // second LLM pass). Docket subjects carry hindsight and are excluded — the
+  // same guard log_live enforces. Best-effort; must never fail a run.
+  if (!docketOutcomeForSubject(subject)) {
+    await logLivePrediction(env as unknown as LiveEnv, analysisId, {
+      caseTitle: subject,
+      modelId: result.prediction.model || 'unknown',
+      topology: blanket,
+      axisData: { structural: result.structural.data, dissent: result.dissent.data, prediction: result.prediction.data },
+    }).catch(() => {});
+  }
 
   return { analysisId, result, kappa, grounding: result.grounding };
 }

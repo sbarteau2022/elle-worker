@@ -272,9 +272,11 @@ export async function extractBlanketModel(env: BlanketEnv, axisData: { structura
 }
 
 // Extract + persist for one analysis. Idempotent (ON CONFLICT). Best-effort.
-export async function extractAndPersistBlanket(env: BlanketEnv, analysisId: string, axisData: { structural: unknown; dissent: unknown; prediction: unknown }): Promise<boolean> {
+// Returns the extracted model (null on failure) so the caller can reuse the
+// topology — e.g. the live-clock auto-log — without a second LLM extraction.
+export async function extractAndPersistBlanket(env: BlanketEnv, analysisId: string, axisData: { structural: unknown; dissent: unknown; prediction: unknown }): Promise<BlanketModel | null> {
   const model = await extractBlanketModel(env, axisData);
-  if (!model) return false;
+  if (!model) return null;
   const completeness = completenessFromExtraction(model);
   const id = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
   await env.DB.prepare(
@@ -285,5 +287,5 @@ export async function extractAndPersistBlanket(env: BlanketEnv, analysisId: stri
     model.blankets.length, model.collisions.length,
     model.systemic_alignment_verdict?.status || null,
   ).run().catch(() => {});
-  return true;
+  return model;
 }
