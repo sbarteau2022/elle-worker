@@ -794,6 +794,35 @@ export async function ensureAllSchemas(db: D1Database): Promise<void> {
     id TEXT PRIMARY KEY, user_id TEXT, brand_id TEXT, post_id TEXT,
     kind TEXT, premises TEXT, framework TEXT, alternatives TEXT,
     would_change TEXT, created_at INTEGER)`,
+    // Cognitive-mapping atlas (COGNITIVE_MAPPING_IMPLEMENTATION_PLAN.md §5.3).
+    // member-feed.ts erasure already deletes from all three by user_id.
+    // id mirrors elle_memory.id; the plan's FOREIGN KEY ... REFERENCES
+    // elle_memory(id) is deliberately dropped: elle_memory is created out of
+    // band (not in this batch), and no table here carries an FK — joins are
+    // plain TEXT ids at the query layer, keeping this batch order-free.
+    // hyperbolic_coords: 128×Float64 (1024 bytes); torus_phases: 8×Float64
+    // (64 bytes); winding_vector: JSON array of 8 ints.
+    `CREATE TABLE IF NOT EXISTS elle_memory_atlas (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+    hyperbolic_coords BLOB NOT NULL, radial_depth REAL NOT NULL,
+    torus_phases BLOB NOT NULL, winding_vector TEXT NOT NULL,
+    delta_hyperbolicity REAL NOT NULL, cycle_rank_b1 INTEGER NOT NULL,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS idx_atlas_user_depth ON elle_memory_atlas(user_id, radial_depth)`,
+    `CREATE TABLE IF NOT EXISTS elle_cognitive_disagreements (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+    node_a TEXT NOT NULL, node_b TEXT NOT NULL,
+    ball_distance REAL NOT NULL, torus_distance REAL NOT NULL,
+    classification TEXT NOT NULL CHECK(classification IN ('pami_resonance','lineage_drift','orthogonal')),
+    detected_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS idx_disagree_user_class ON elle_cognitive_disagreements(user_id, classification)`,
+    `CREATE TABLE IF NOT EXISTS elle_active_inference_log (
+    turn_id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+    structural_coherence REAL NOT NULL, relational_coherence REAL NOT NULL,
+    harmonic_coherence REAL NOT NULL, free_energy_F REAL NOT NULL,
+    internal_energy_U REAL NOT NULL, entropy_S REAL NOT NULL,
+    selected_tool_policy TEXT NOT NULL, expected_free_energy_G REAL NOT NULL,
+    created_at INTEGER NOT NULL)`,
   ];
   await db.batch(creates.map((s) => db.prepare(s)));
 

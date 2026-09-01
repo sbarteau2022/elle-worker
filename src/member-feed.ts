@@ -154,6 +154,13 @@ export async function handleMyErasure(env: Env, userId: string): Promise<Record<
   // while every row survived — no log, no alert, no retry, and the caller with
   // no way to tell. Failures are now recorded and reported.
   const failures: string[] = [];
+  // D1's batch() is one transaction: a failing statement aborts and rolls back
+  // the ENTIRE sequence. So the core deletes and the atlas deletes must not
+  // share a batch with a tolerated error — a "no such table" on an atlas table
+  // would roll back the core deletes too, and treating it as benign would
+  // return {erased:true} with every row still present (and the users row,
+  // deleted separately below, gone: a data-erasure claim with the data intact
+  // and the login destroyed). Core batch: any error is a failure to erase.
   await env.DB.batch([
     env.DB.prepare('DELETE FROM elle_conversation_turns WHERE session_id = ?').bind(session),
     env.DB.prepare('DELETE FROM elle_memory WHERE source_session_id = ?').bind(session),
@@ -161,21 +168,26 @@ export async function handleMyErasure(env: Env, userId: string): Promise<Record<
     env.DB.prepare('DELETE FROM user_prefs WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM push_devices WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM reach_outs WHERE user_id = ?').bind(userId),
-    // Pre-armed for the tables Target C introduces. They do not exist yet, and
-    // "no such table" is handled below as nothing-to-erase — so these are inert
-    // today and correct the moment the tables land. Without them an erasure
-    // request would leave behind manifold coordinates that are a keyless
-    // invertible encoding of the source prosody and screen-texture features,
-    // i.e. exactly the data the request is asking to remove.
+  ]).catch((e) => {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[ERASURE] core batch delete failed for', userId, msg);
+    failures.push(`records: ${msg}`);
+  });
+  // Cognitive-atlas tables (schema.ts / plan §5.3): manifold coordinates are a
+  // keyless invertible encoding of source features, so they must go with the
+  // rest. Separate batch, because here — and only here — "no such table" is
+  // genuinely nothing-to-erase: on a DB where ensureAllSchemas has not run,
+  // absent tables mean no coordinates were ever stored. Rolling back this trio
+  // together is harmless (all three or none); any other error is a failure.
+  await env.DB.batch([
     env.DB.prepare('DELETE FROM elle_memory_atlas WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM elle_cognitive_disagreements WHERE user_id = ?').bind(userId),
     env.DB.prepare('DELETE FROM elle_active_inference_log WHERE user_id = ?').bind(userId),
   ]).catch((e) => {
-    // A table that does not exist yet is not a failure to erase; anything else is.
     const msg = e instanceof Error ? e.message : String(e);
     if (!/no such table/i.test(msg)) {
-      console.error('[ERASURE] batch delete failed for', userId, msg);
-      failures.push(`records: ${msg}`);
+      console.error('[ERASURE] atlas batch delete failed for', userId, msg);
+      failures.push(`atlas: ${msg}`);
     }
   });
   try {
@@ -185,11 +197,16 @@ export async function handleMyErasure(env: Env, userId: string): Promise<Record<
       if (v === userId) await env.AUTH_TOKENS.delete(k.name);
     }
   } catch { /* tokens expire on their own TTL regardless */ }
-  await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run().catch((e) => {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('[ERASURE] users delete failed for', userId, msg);
-    failures.push(`account: ${msg}`);
-  });
+  // The account row goes last, and only when the data deletes succeeded —
+  // destroying the login while the data survives would leave rows nobody can
+  // erase and a caller told erased:false with no way back in to retry.
+  if (failures.length === 0) {
+    await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run().catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[ERASURE] users delete failed for', userId, msg);
+      failures.push(`account: ${msg}`);
+    });
+  }
   if (failures.length > 0) {
     return { erased: false, user_id: userId, errors: failures };
   }
