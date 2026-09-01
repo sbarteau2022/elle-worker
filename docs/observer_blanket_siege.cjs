@@ -148,6 +148,23 @@ rule();
   // These are not restatements of the number; they are the apparatus that would
   // earn one. Counting them as claims would be unfair to the codebase.
   const fwdPat   = /permutation null|POWER_FLOOR|UNDERPOWERED|power_floor|post-cutoff|HINDSIGHT-FREE|hindsight-free/;
+  // 6th-pass CORRECTION: stance, not vocabulary. claimPat matches the claim's
+  // WORDS ("hand-extractions", "rho=+0.61") wherever they appear — including
+  // inside a demotion. The recommendation below ("restate the claim with its
+  // interval and its provenance") could therefore never be credited by this
+  // probe: any restatement still carries the vocabulary, so the probe
+  // re-flags the exact edit it recommended. A probe whose pass condition its
+  // own recommendation cannot satisfy is prose outrunning measurement — the
+  // defect class this siege hunts — sitting inside the siege. So each claim
+  // line is now CLASSIFIED, not just counted: a line is DEMOTED only when its
+  // ±15-line window carries all three of (1) an explicit stance marker,
+  // (2) the arithmetic that undercuts the number, (3) a pointer at the
+  // forward instrument that would earn it. This verifies the demotion's
+  // PRESENCE, not its sincerity — three markers pasted beside a live
+  // assertion would fool it — so every matched line stays listed raw below
+  // for the reader to judge.
+  const demoteStance = /HYPOTHESIS, NOT A VALIDATION|not a validation|must not be quoted as settled|does not survive|unsourced/i;
+  const demoteMath   = /contains? zero|does not clear|not distinguishable from zero|\[\s*[-\u2212]\s*0?\.\d+\s*,\s*\+?\s*0?\.\d+\s*\]/;
   // What a stored validation set would look like: scores beside outcomes.
   // 5th-pass WIDENING. The 2nd pass MEASURED this pattern against seven
   // realistic encodings of a ten-row scored table and found it blind to four:
@@ -188,7 +205,11 @@ rule();
       // 2nd pass: these were `if / else if`, so a line that both restated the
       // number AND built the forward test counted only as a restatement — an
       // unfairness pointing at the codebase. Now a line can land in both.
-      if (claimPat.test(l)) restatements.push([rel, i + 1, l.trim().slice(0, 92)]);
+      if (claimPat.test(l)) {
+        const w = lines.slice(Math.max(0, i - 15), i + 16).join('\n');
+        const demoted = demoteStance.test(w) && demoteMath.test(w) && fwdPat.test(w);
+        restatements.push([rel, i + 1, l.trim().slice(0, 92), demoted]);
+      }
       if (fwdPat.test(l))   forward.push([rel, i + 1, l.trim().slice(0, 92)]);
       if (dataPat.test(l) && !candSeen.has(rel + ':' + (i + 1))) {
         candSeen.add(rel + ':' + (i + 1));
@@ -215,12 +236,17 @@ rule();
     }
   }
   const restateFiles = [...new Set(restatements.map(h => h[0]))];
+  const asserted    = restatements.filter(h => !h[3]);
+  const demotedR    = restatements.filter(h => h[3]);
+  const assertFiles = [...new Set(asserted.map(h => h[0]))];
   const fwdFiles = [...new Set(forward.map(h => h[0]))];
 
   line(`  files scanned (repo, excluding this harness) : ${files.length}`);
   line('');
-  line(`  LINES THAT ASSERT THE RETROSPECTIVE RESULT : ${restatements.length}  in ${restateFiles.length} file(s)`);
-  for (const [f, n, l] of restatements) line(`    ${f}:${n}  ${l}`);
+  line(`  LINES CARRYING THE CLAIM'S VOCABULARY : ${restatements.length}  in ${restateFiles.length} file(s)`);
+  line(`    ASSERTED (no demotion in the ±15-line window) : ${asserted.length}`);
+  line(`    DEMOTED IN PLACE (stance + arithmetic + forward pointer) : ${demotedR.length}`);
+  for (const [f, n, l, d] of restatements) line(`    ${d ? 'DEMOTED ' : 'ASSERTED'}  ${f}:${n}  ${l}`);
   line('');
   line(`  LINES BUILDING THE FORWARD TEST INSTEAD : ${forward.length}  in ${fwdFiles.length} file(s)`);
   for (const f of fwdFiles) line(`    ${f}`);
@@ -314,12 +340,25 @@ rule();
     // in 1 file. Hardcoded prose that outruns its own measurement is the exact
     // defect class this siege hunts, and it was sitting inside the siege.
     // Every quantity in this paragraph is now driven by the counters.
-    line('           What the probe DOES establish at full strength is the');
-    line(`           asymmetry: the number is asserted on ${restatements.length} line(s) across`);
-    line(`           ${restateFiles.length} file(s) and evidenced in none of them. Restating it`);
-    line('           does not corroborate it — every one of those lines traces');
-    line('           to the same unsourced number, so repetition only widens');
-    line('           the blast radius if it is wrong.');
+    if (asserted.length) {
+      line('           What the probe DOES establish at full strength is the');
+      line(`           asymmetry: the number is asserted undemoted on ${asserted.length} line(s)`);
+      line(`           across ${assertFiles.length} file(s) and evidenced in none of them. Restating`);
+      line('           it does not corroborate it — every one of those lines traces');
+      line('           to the same unsourced number, so repetition only widens');
+      line('           the blast radius if it is wrong.');
+    } else if (demotedR.length) {
+      line(`           The claim's vocabulary survives on ${demotedR.length} line(s), but every one`);
+      line('           sits inside a demotion: the interval, the failed');
+      line('           significance test, and the pointer at the forward');
+      line('           instrument all stand within 15 lines of it. That is the');
+      line('           edit this siege recommended. It is still not evidence —');
+      line('           the number remains unsourced until the live clock');
+      line('           returns a verdict — but nothing here asserts it as fact.');
+    } else {
+      line('           No line in the repository asserts the headline number');
+      line('           at all.');
+    }
     line('');
     line(`           But the same repository contains, in ${fwdFiles.length} file(s), the forward`);
     line('           instrument that WOULD source it: observer-falsifier.ts holds a');
@@ -334,8 +373,8 @@ rule();
     line('  VERDICT: candidate data found above — inspect it before trusting this');
     line('           probe; the rest of the siege assumes the set is absent.');
   }
-  if (restatements.length && !candidates.length)
-    DEFECTS.push(`A0 the headline number is asserted in ${restateFiles.length} file(s) and evidenced in none`);
+  if (asserted.length && !candidates.length)
+    DEFECTS.push(`A0 the headline number is asserted undemoted in ${assertFiles.length} file(s) and evidenced in none`);
   if (blind) DEFECTS.push(`A0 dataPat is blind to ${blind}/${fixtures.length + residual.length} encodings; its null result is bounded`);
 
 }
@@ -824,9 +863,16 @@ line('  hand-extractions is precisely that shape. observer-live.ts is a CLOCK: i
 line('  returns no verdict until post-cutoff cases resolve. Until it does, the');
 line('  honest form of the header is a hypothesis, not a validation.');
 line('');
-line('  Recommended edit to src/observer-blanket.ts:17 — keep the module, keep');
-line('  the wiring, restate the claim with its interval and its provenance, and');
-line('  point at observer-live.ts as the thing that will settle it.');
+if (DEFECTS.some(d => /^A0 the headline/.test(d))) {
+  line('  Recommended edit to src/observer-blanket.ts:17 — keep the module, keep');
+  line('  the wiring, restate the claim with its interval and its provenance, and');
+  line('  point at observer-live.ts as the thing that will settle it.');
+} else {
+  line('  That edit has been made: every line carrying the claim\'s vocabulary now');
+  line('  sits inside a demotion (interval, failed significance, forward pointer),');
+  line('  and A0 reads it as such. The settling instrument is unchanged —');
+  line('  observer-live.ts returns the verdict, not the header.');
+}
 line('='.repeat(72));
 
 // The harness must leave a durable, diffable record and must FAIL LOUDLY. A

@@ -1,17 +1,19 @@
 ========================================================================
 LANE A SIEGE — observer/blanket completeness
-commit 7d851cc5ca5012f3e1cab67a910a219e948a5658 (WORKING TREE DIRTY)
+commit 69628e22c52e52f104723359f88783a92a9a568a (WORKING TREE DIRTY)
 ========================================================================
 
 A0  PROVENANCE — is the n=10 validation set in this repository?
 ------------------------------------------------------------------------
   files scanned (repo, excluding this harness) : 612
 
-  LINES THAT ASSERT THE RETROSPECTIVE RESULT : 2  in 1 file(s)
-    src/observer-blanket.ts:17  // HYPOTHESIS, NOT A VALIDATION. An offline reading of n=10 hand-extractions put
-    src/observer-blanket.ts:18  // completeness→fidelity at rho≈+0.61 against +0.08 for trajectory coherence. That
+  LINES CARRYING THE CLAIM'S VOCABULARY : 2  in 1 file(s)
+    ASSERTED (no demotion in the ±15-line window) : 0
+    DEMOTED IN PLACE (stance + arithmetic + forward pointer) : 2
+    DEMOTED   src/observer-blanket.ts:17  // HYPOTHESIS, NOT A VALIDATION. An offline reading of n=10 hand-extractions put
+    DEMOTED   src/observer-blanket.ts:18  // completeness→fidelity at rho≈+0.61 against +0.08 for trajectory coherence. That
 
-  LINES BUILDING THE FORWARD TEST INSTEAD : 61  in 15 file(s)
+  LINES BUILDING THE FORWARD TEST INSTEAD : 62  in 15 file(s)
     .swarm/RUN.md
     corpus/observer/run-queue-docket.md
     docs/OBSERVER_QUEUE_RUNBOOK.md
@@ -75,12 +77,13 @@ A0  PROVENANCE — is the n=10 validation set in this repository?
            not "none exists". The co-occurrence and numeric-pair passes
            above are the fallback; inspect any file they list.
 
-           What the probe DOES establish at full strength is the
-           asymmetry: the number is asserted on 2 line(s) across
-           1 file(s) and evidenced in none of them. Restating it
-           does not corroborate it — every one of those lines traces
-           to the same unsourced number, so repetition only widens
-           the blast radius if it is wrong.
+           The claim's vocabulary survives on 2 line(s), but every one
+           sits inside a demotion: the interval, the failed
+           significance test, and the pointer at the forward
+           instrument all stand within 15 lines of it. That is the
+           edit this siege recommended. It is still not evidence —
+           the number remains unsourced until the live clock
+           returns a verdict — but nothing here asserts it as fact.
 
            But the same repository contains, in 15 file(s), the forward
            instrument that WOULD source it: observer-falsifier.ts holds a
@@ -285,13 +288,13 @@ SUMMARY
   returns no verdict until post-cutoff cases resolve. Until it does, the
   honest form of the header is a hypothesis, not a validation.
 
-  Recommended edit to src/observer-blanket.ts:17 — keep the module, keep
-  the wiring, restate the claim with its interval and its provenance, and
-  point at observer-live.ts as the thing that will settle it.
+  That edit has been made: every line carrying the claim's vocabulary now
+  sits inside a demotion (interval, failed significance, forward pointer),
+  and A0 reads it as such. The settling instrument is unchanged —
+  observer-live.ts returns the verdict, not the header.
 ========================================================================
 
-ADVERSE FINDINGS: 5
-  - A0 the headline number is asserted in 1 file(s) and evidenced in none
+ADVERSE FINDINGS: 4
   - A0 dataPat is blind to 4/11 encodings; its null result is bounded
   - A4 ties are likely at n=10 and no tie handling is stated
   - A5 +0.61 at n=10 fails two-sided 5% under every tie pattern

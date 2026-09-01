@@ -18,13 +18,16 @@
 // completeness→fidelity at rho≈+0.61 against +0.08 for trajectory coherence. That
 // number does not survive its own siege (docs/observer_blanket_siege.cjs, results
 // in docs/OBSERVER_BLANKET_SIEGE_RESULTS.txt) and must not be quoted as settled:
-//   · the scored n=10 set is not in this repository — nothing here can check it;
-//   · exact permutation over all 10! pairings gives P(|rho|≥0.61) = 0.067. The
-//     two-sided 5% critical value at n=10 is 0.6485, so +0.61 does not clear it —
-//     and this repo's own pre-registered alpha (observer-falsifier.ts) is 0.01;
-//   · the 95% interval is [-0.032, +0.896]; +0.08's is [-0.579, +0.676]. Both
-//     contain zero and overlap across most of their length, so "7× lift" is a
-//     ratio of two estimates neither of which is distinguishable from zero;
+//   · the scored n=10 set is not in this repository — nothing here can check it,
+//     and no tie-handling convention for the scoring is recorded anywhere (A4);
+//   · exact permutation over all 10! pairings gives two-sided p = 0.063–0.067,
+//     with a 5% critical value of 0.6364–0.6442 depending on tie pattern, so
+//     +0.61 clears none of them — and this repo's own pre-registered alpha is
+//     0.01 (observer-falsifier.ts holds that permutation null, POWER_FLOOR=8);
+//   · the 95% interval (Bonett–Wright, the Spearman se) is [-0.076, +0.904];
+//     +0.08's is [-0.608, +0.699]. Both contain zero and overlap across most
+//     of their length, so "7× lift" is a ratio of two estimates neither of
+//     which is distinguishable from zero;
 //   · and the study was RETROSPECTIVE, which is the exact shape observer-live.ts
 //     exists to escape (see its header: every retrospective test of κ NULLed
 //     because the weights had already memorized the dockets' endings).
