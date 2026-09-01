@@ -162,6 +162,18 @@ function hashDirection(key: string, dim: number): number[] {
 // spectrum, a vFAR field report, and a PAMI index all become commensurable
 // vectors in the same tangent space.
 
+// DIMENSION DECISION (Target C step 3, settled): ψ output stays COMPACT at 29.
+// The plan's §2.2 B^1024 hashed encoder is dead on the evidence — near-orthogonal
+// hashed directions in R^1024 make the norm clamp fire immediately, collapsing
+// every input onto one sphere where d_B is a monotone restatement of cosine
+// (docs/PSI_ENCODER_FINDING.md §1: Spearman 1.0, mAP identical to 4 decimals),
+// and no radius parameterization rescues it (§2: content share < 2% under every
+// β). The plan is also internally inconsistent: §2.4's product manifold is
+// H^128 × T^8, not H^1024. So the split stands as: ripVector produces input
+// FEATURES (29 dims — the calibrated PAMI bridge chart of T^8 × R^13, which
+// non-PAMI reports share by hashing); hyperMap's Riemannian SGD produces the
+// manifold COORDINATES (dim 128 default). Any 1024-wide consumer (Vectorize)
+// pads/projects at ITS boundary; nothing upstream widens.
 export const RIP_DIM = 29;      // encoder output dimensionality (= PAMI_BRIDGE_DIM)
 const MAX_LEAVES = 512;         // a rip report is small; a bad caller is not
 const TANGENT_SCALE = 0.9;      // ψ(f) = exp₀(0.9·f̂): pure-feature points sit at depth ≤ 2·atanh(tanh 0.9)
