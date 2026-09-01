@@ -82,7 +82,11 @@ is not confined to the radius.
   not cleared** — the decisive arm (the production bge embedding) is blocked from
   measurement and remains open. The +10.9% mAP gain stands as a
   synthetic-tree-corpus result only. See that doc's Limitations 1–3 and "The
-  blocked decisive arm".
+  blocked decisive arm". A literature check (same doc, "Literature check" section)
+  since settled the framing: no real corpus in the published record hits the pure-tree
+  band, so the strict-tree reading is conceded — while the measured values sit inside
+  the range the field calls hyperbolic-leaning, and the atlas's actual ℍⁿ×𝕋ⁿ product
+  claim predicts non-tree δ by design.
 - +10.9% on 303 synthetic queries is not a production result. It justifies
   building the held-out benchmark; it does not substitute for one.
 - Cost is unpriced here. A 128-dim atlas over a real memory graph carries the

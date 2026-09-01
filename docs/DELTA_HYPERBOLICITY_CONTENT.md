@@ -162,9 +162,11 @@ egress policy, not by the repo:
   conversion of the identical model) via transformers.js. `huggingface.co` returns
   **403 CONNECT** — an organization policy denial, reported rather than retried.
 - **The deployed vectors themselves**: corpus vectors live only in Cloudflare
-  Vectorize (`env.VECTORIZE.upsert`, `src/index.ts:762`); the worker host is
-  egress-blocked and the available Cloudflare tooling exposes D1/KV/R2/Workers but
-  not Vectorize.
+  Vectorize (`env.VECTORIZE.upsert`, `src/index.ts:762`); the worker host is now
+  egress-allowed, but `/api/search` is service-key-gated and this environment holds
+  only the lane dispatch key — the block is auth, not egress (see the literature
+  section's correction below). The available Cloudflare tooling exposes
+  D1/KV/R2/Workers but not Vectorize.
 
 What unblocks it, either one: allow `huggingface.co` + `cdn-lfs.huggingface.co` in the
 environment's custom network access (then re-run locally, same chunks, same instrument,
@@ -192,3 +194,95 @@ derived from the content itself.
 - Target C stays blocked: previously for an unmeasured precondition, now for one that
   was measured where reachable and did not clear. §6 item 1 (precision term) remains
   the other blocker and is unaffected by this result.
+
+---
+
+## Literature check — is the answer already out there? (2026-09-01)
+
+The question put to the literature: *is the semantic embedding space of a text corpus
+tree-like / δ-hyperbolic — has anyone measured it?* Answer: **yes, repeatedly, and no
+real embedding space, corpus, or network ever lands in the pure-tree band.** The field's
+"tree-like" is a comparative judgment (δ much closer to 0 than to its maximum), not
+membership in the band our synthetic tree calibrates. Sweep run over WebSearch, the
+HF papers index, and scite full-text search; arxiv.org / openreview.net /
+openaccess.thecvf.com are egress-blocked from this environment, so two exact tables
+(noted below) are corroborated qualitatively rather than quoted.
+
+### Normalization, before comparing anything
+
+- Our probe reports **δ/diam ∈ [0, 0.5]**. The vision/NLP literature (Khrulkov et al.)
+  reports **δ_rel = 2δ/diam ∈ [0, 1]** — exactly 2× ours. Converted: lexical arm
+  δ_rel **0.32–0.50**, PAMI arm δ_rel **0.40–0.58**.
+- Instrument mismatch that matters: Khrulkov / HypLoRA / 2512.20926 compute δ on
+  **metric point clouds** (feature-space distances). Our graph numbers use **BFS hop
+  distances on k-NN graphs** — the same instrument as the network-science corpus, which
+  is therefore the apples-to-apples comparison. (Our own metric-space reading is ruled
+  an artifact by Limitation 2 — distance concentration — so it is not compared.)
+
+### What the literature says
+
+1. **LLM token embeddings are measured and called tree-leaning, not trees.**
+   *Hyperbolic Fine-tuning for Large Language Models* (HypLoRA, arXiv 2410.04010)
+   measures δ-hyperbolicity of token embedding spaces across LLMs (LLaMA, Gemma, …),
+   finds low relative δ, a token-frequency power law with frequent tokens near the
+   origin, and concludes the spaces have a latent tree-like / hyperbolic organization.
+   Exact per-model table not retrievable through allowed egress; the conclusion is
+   corroborated independently by the *Hyperbolic Large Language Models* survey
+   (arXiv 2509.05757) and search-surfaced abstracts.
+2. **The field's best "tree-like" real example is δ_rel ≈ 0.24.** arXiv 2512.20926
+   (δ-hyperbolicity, ultrametricity, neighbor joining over LLM embeddings) reports
+   varying degrees of hyperbolicity; the smallest observed (ProtT5) is **0.2408**,
+   described as "tree-like with minimal deviation" — and notes tree-likeness does not
+   guarantee downstream clustering gains. Nothing real approaches 0.
+3. **The vision reference point.** Khrulkov et al., *Hyperbolic Image Embeddings*
+   (CVPR 2020, arXiv 1904.02239) define δ_rel and report image datasets "significantly
+   closer to 0 than 1", with the curvature recipe c(X) = (0.144/δ_rel)². In practice
+   the field treats δ_rel ≈ 0.14–0.35 as hyperbolic enough to benefit.
+4. **Hop-distance numbers, the fair comparison.** Real-world networks (Borassi et al.,
+   arXiv 1503.03061 and companions) span **2δ/diam ≈ 25–89%** on hop metrics; only
+   engineered near-trees go lower. Our hop-based readings convert to 2δ/diam =
+   **32–50%** (lexical) — at the *more hyperbolic* end of the measured real-world range.
+
+### What that does to the verdict
+
+- **Strict tree: conceded.** The literature settles it — no natural corpus, embedding
+  space, or network hits the synthetic-tree band. Expecting the 0.00–0.08 band was a
+  category error the pre-registered rule inherited (consistent with Limitation 1, which
+  had already shown the rule's pull-comparison half uninformative).
+- **Hyperbolic-leaning: not refuted — our values sit inside the published range.**
+  δ_rel 0.32–0.50 is above the field's best (0.24) but the same order, and the
+  hop-metric comparison puts the corpus on the more-hyperbolic side of real networks.
+- **The atlas's actual claim was never "tree".** `ℳ = ℍⁿ × 𝕋ⁿ` (atlas spec) carries a
+  flat torus factor with nontrivial cycles by design, so non-tree δ is that model's
+  *prediction*, not its failure. The product-geometry claim has independent support:
+  Gu, Sala, Gunel & Ré (ICLR 2019) show products of hyperbolic spaces beat both
+  Euclidean and single-hyperbolic word embeddings (+2.6 Spearman similarity, +3.4
+  analogy; 32.55% distortion reduction on a social graph); Gardner et al. (Nature 2022)
+  find grid-cell population activity on a torus; RoPE already places transformer
+  positional phase on a product of circles.
+- **Honest reframe of the Target C precondition:** not "the corpus is a tree" (dead)
+  but "the corpus geometry is consistent with a hyperbolic-leaning / product structure"
+  — which the measured arms support and the still-open semantic arm can sharpen.
+
+### The semantic arm's block, corrected
+
+The earlier "worker host is egress-blocked" wording is stale: the worker hostname has
+since been allowed in the environment egress policy. The remaining block is **auth,
+not egress** — `/api/search` (src/index.ts:2837) is service-key-gated and this
+environment holds only the lane dispatch key. Unblock paths unchanged in substance:
+attach `ELLE_SERVICE_KEY` via the environment's API-credentials proxy mechanism (never
+as a plain environment variable), or run the neighbor-list dump from a machine that
+holds the key and hand the file to the probe.
+
+### Sources
+
+- HypLoRA: https://arxiv.org/abs/2410.04010 (see also https://openreview.net/pdf?id=TkEdQv0bXB)
+- Hyperbolic LLM survey: https://arxiv.org/abs/2509.05757
+- δ/ultrametricity/NJ on LLM embeddings: https://arxiv.org/abs/2512.20926
+- Khrulkov et al., Hyperbolic Image Embeddings: https://arxiv.org/abs/1904.02239
+- Borassi et al., On the Hyperbolicity of Small-World and Treelike Random Graphs /
+  hyperbolicity measurement line: https://arxiv.org/abs/1503.03061
+- Gu, Sala, Gunel, Ré, Learning Mixed-Curvature Representations in Product Spaces:
+  https://openreview.net/forum?id=HJxeWnCcF7
+- Gardner et al., Toroidal topology of population activity in grid cells:
+  https://www.nature.com/articles/s41586-021-04268-7

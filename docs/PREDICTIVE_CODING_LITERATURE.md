@@ -188,7 +188,11 @@ the model, not low, against the pixels) — but it should be cited as contested.
    tf-idf distances on this corpus are concentrated (IQR/median 0.0210), so the low metric
    delta is an artifact, not evidence of hyperbolicity. The decisive arm — the production
    bge embedding on the same chunks — is egress-blocked from this environment and
-   remains open; "not cleared" is not "refuted".
+   remains open (auth-gated, no longer egress-blocked); "not cleared" is not "refuted".
+   A literature sweep (`DELTA_HYPERBOLICITY_CONTENT.md`, "Literature check") settled the
+   strict-tree question: no real corpus/embedding/network in the published record lands
+   in the pure-tree band, so the precondition is reframed from "tree-like" to
+   "hyperbolic-leaning / product-geometry-consistent" — which the measured arms support.
 3. **Build one correspondence probe and run it held-out** (§3). Semantic-entropy probe
    is the cheapest honest start; conformal abstention is the one that yields a bound.
    Until a held-out number exists, `agreement` stays absent — a producer that has not
