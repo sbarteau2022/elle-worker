@@ -1845,6 +1845,16 @@ export default {
     // G(π)/σ(π) policy evaluation over the coherence triad, and the
     // regulator's Lyapunov descent trace, frame by frame.
     if (path === '/api/cognitive/map' && request.method === 'GET') {
+      // Locally scoped and locally checked: this route sits well before the
+      // shared `const user = await getUser(...); if (!user) ...` fallthrough
+      // gate much further down in this function, so it cannot rely on that
+      // binding — referencing it here was a pre-existing bug (TS18047 'user'
+      // is possibly null, and a temporal-dead-zone ReferenceError at runtime
+      // on this route, since that later declaration never executes on this
+      // code path). Named `mapUser` rather than `user` to avoid any future
+      // confusion with that later, unrelated binding.
+      const mapUser = await getUser(request, env);
+      if (!mapUser) return err('Unauthorized — provide a valid Bearer token', 401);
       const q = new URL(request.url).searchParams;
       const num = (k: string, d: number, lo: number, hi: number): number => {
         const v = Number(q.get(k));
@@ -1858,7 +1868,7 @@ export default {
       const limit = num('limit', 200, 1, 1000);
       const steps = num('steps', 60, 1, 400);
       return sseDoor(ctx, corsHeaders(), async (send) => {
-        const snap = await cognitiveMapSnapshot(env, user.id, coherence, { limit, steps });
+        const snap = await cognitiveMapSnapshot(env, mapUser.id, coherence, { limit, steps });
         send('atlas', { points: snap.atlas });
         send('active_inference', snap.active_inference);
         for (const step of snap.lyapunov) send('lyapunov', step);
@@ -1867,7 +1877,7 @@ export default {
           epistemic_trigger: snap.active_inference.epistemic_trigger,
           epistemic_mass: snap.active_inference.epistemic_mass,
         });
-        await logActiveInference(env, snap.active_inference, `map:${crypto.randomUUID()}`, user.id)
+        await logActiveInference(env, snap.active_inference, `map:${crypto.randomUUID()}`, mapUser.id)
           .catch(() => {});
       });
     }
