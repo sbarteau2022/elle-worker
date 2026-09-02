@@ -58,6 +58,7 @@ import {
   type LaneHelloWire, type LaneAcceptWire,
 } from './lane-handshake';
 import type { HypState, HypChannel } from './hyperbolic-sync';
+import * as ratchet from './lane-ratchet';
 
 const STALE_MS = 45_000; // no poll within this window ⇒ the lane reads as closed
 
@@ -74,7 +75,29 @@ const STALE_MS = 45_000; // no poll within this window ⇒ the lane reads as clo
 // authenticates every door (x-sandbox-key) AND is folded into every derived
 // root (the combiner), so v2 is never weaker than v1 during migration.
 export function laneProtocolV2Enabled(env: Env): boolean {
-  return (env.ELLE_LANE_PROTOCOL || '').toLowerCase() === 'v2';
+  const p = (env.ELLE_LANE_PROTOCOL || '').toLowerCase();
+  return p === 'v2' || p === 'v3';
+}
+// ── PQC lane protocol v3: the Double Ratchet over the v2 roots ─────────────
+// v3 keeps the v2 handshake (the hybrid KEM agrees the roots) and replaces the
+// geodesic per-tick key schedule with the lane Double Ratchet (lane-ratchet.ts
+// — the worker is the RESPONDER, the laptop the INITIATOR). One ratchet per
+// lane, seeded from BOTH direction roots; forward secrecy from message 0 and
+// post-compromise security after one round trip. A break is detectable
+// (opens that fail, gaps in the chain) and REKEYS FROM BOTH SIDES: after
+// RATCHET_REKEY_AFTER consecutive failed opens the poll advertises `rekey`,
+// the laptop runs a fresh handshake at a higher epoch, and both ends rebuild.
+// Flag-gated like v2: ELLE_LANE_PROTOCOL=v3 (which implies v2).
+export function laneProtocolV3Enabled(env: Env): boolean {
+  return (env.ELLE_LANE_PROTOCOL || '').toLowerCase() === 'v3';
+}
+const RATCHET_REKEY_AFTER = 3;
+const RATCHET_SEED_INFO = 'elle-lane-v3-root';
+
+// The one 32-byte seed both ends derive from the two direction roots.
+export async function ratchetSeed(rootLocal: Uint8Array, rootCloud: Uint8Array): Promise<Uint8Array> {
+  const ikm = new Uint8Array(rootLocal.length + rootCloud.length); ikm.set(rootLocal, 0); ikm.set(rootCloud, rootLocal.length);
+  return ratchet.hkdf32(ikm, RATCHET_SEED_INFO);
 }
 
 function newId(): string { return crypto.randomUUID().replace(/-/g, '').slice(0, 20); }
@@ -125,6 +148,12 @@ export interface BusStore {
   resultPlaintextFor(replyTo: string): Promise<string | null>;
   touchLane(lane: string, meta: Record<string, unknown>): Promise<{ last_seen: number } | void>;
   laneHeartbeat(lane: string): Promise<{ last_seen: number; meta: Record<string, unknown> } | null>;
+  // v3: one serialized Double Ratchet per lane, plus the consecutive-failure
+  // counter that raises the rekey flag. Its own table: the state table's
+  // CHECK constraints are for the geodesic sender/receiver rows.
+  loadRatchet(lane: string): Promise<{ state: string; failures: number; epoch: number } | null>;
+  saveRatchet(lane: string, state: string, failures: number, epoch: number): Promise<void>;
+  clearRatchet(lane: string): Promise<void>;
 }
 
 let schemaReady = false;
@@ -166,6 +195,15 @@ async function ensureSchema(db: D1Database): Promise<void> {
     // holding the base64 root_lane the hybrid handshake agreed. The active epoch
     // for a channel is simply MAX(epoch) present here — a fresh handshake bumps
     // it, and pruneHandshakeRootsBelow deletes the superseded rows for FS.
+    db.prepare(
+      `CREATE TABLE IF NOT EXISTS elle_session_bus_ratchet (
+         lane TEXT PRIMARY KEY,
+         state TEXT NOT NULL,
+         failures INTEGER NOT NULL DEFAULT 0,
+         epoch INTEGER NOT NULL DEFAULT 0,
+         updated_at INTEGER NOT NULL
+       )`
+    ),
     db.prepare(
       `CREATE TABLE IF NOT EXISTS elle_session_bus_handshake (
          channel TEXT NOT NULL,
@@ -272,7 +310,30 @@ function d1Store(env: Env): BusStore {
       try { meta = JSON.parse(row.meta || '{}'); } catch { /* ignore */ }
       return { last_seen: row.last_seen, meta };
     },
+    async loadRatchet(lane) {
+      await ensureSchema(db);
+      const row = await db.prepare(`SELECT state, failures, epoch FROM elle_session_bus_ratchet WHERE lane = ?`).bind(lane).first() as { state: string; failures: number; epoch: number } | null;
+      return row ? { state: row.state, failures: row.failures, epoch: row.epoch } : null;
+    },
+    async saveRatchet(lane, state, failures, epoch) {
+      await ensureSchema(db);
+      await db.prepare(
+        `INSERT INTO elle_session_bus_ratchet (lane, state, failures, epoch, updated_at) VALUES (?,?,?,?,?)
+         ON CONFLICT (lane) DO UPDATE SET state = excluded.state, failures = excluded.failures, epoch = excluded.epoch, updated_at = excluded.updated_at`,
+      ).bind(lane, state, failures, epoch, Date.now()).run();
+    },
+    async clearRatchet(lane) {
+      await ensureSchema(db);
+      await db.prepare(`DELETE FROM elle_session_bus_ratchet WHERE lane = ?`).bind(lane).run();
+    },
   };
+}
+
+// ── v3 helpers ─────────────────────────────────────────────────────────────
+async function loadRatchetState(store: BusStore, lane: string): Promise<{ st: ratchet.RatchetState; failures: number; epoch: number } | null> {
+  const row = await store.loadRatchet(lane);
+  if (!row) return null;
+  try { return { st: ratchet.decodeState(row.state), failures: row.failures, epoch: row.epoch }; } catch { return null; }
 }
 
 // ── the store-agnostic engine — same logic for D1 and the self-test's
@@ -295,12 +356,22 @@ async function resolveChannel(
 }
 
 async function engineEnqueueToLocal(
-  store: BusStore, root: Uint8Array, lane: string, kind: string, payload: unknown, replyTo?: string, v2Enabled = false,
+  store: BusStore, root: Uint8Array, lane: string, kind: string, payload: unknown, replyTo?: string, v2Enabled = false, v3Enabled = false,
 ): Promise<string> {
-  const ch = await resolveChannel(store, root, lane, 'to_local', v2Enabled);
-  const state = (await store.loadState(lane, 'to_local', 'sender')) || laneChannelStart(ch);
-  const { wire, next } = await sealForLane(ch, state, payload);
-  await store.saveState(lane, 'to_local', 'sender', next);
+  let wire: Uint8Array;
+  const r3 = v3Enabled ? await loadRatchetState(store, lane) : null;
+  if (r3) {
+    // v3: the selector rides INSIDE the AEAD (the outer `kind` is transport metadata only)
+    const sealed = await ratchet.seal(r3.st, new TextEncoder().encode(JSON.stringify({ ...(payload as object), kind })));
+    await store.saveRatchet(lane, ratchet.encodeState(sealed.next), r3.failures, r3.epoch);
+    wire = sealed.wire;
+  } else {
+    const ch = await resolveChannel(store, root, lane, 'to_local', v2Enabled);
+    const state = (await store.loadState(lane, 'to_local', 'sender')) || laneChannelStart(ch);
+    const sealed = await sealForLane(ch, state, payload);
+    await store.saveState(lane, 'to_local', 'sender', sealed.next);
+    wire = sealed.wire;
+  }
   const id = newId();
   await store.insertRow({ id, lane, direction: 'to_local', kind, replyTo, wire: b64(wire), plaintext: JSON.stringify(payload), status: 'pending' });
   return id;
@@ -313,14 +384,33 @@ async function enginePoll(store: BusStore, lane: string, opts: { limit?: number;
   return rows;
 }
 
-async function engineSubmit(store: BusStore, root: Uint8Array, lane: string, items: BusSubmitItem[], v2Enabled = false): Promise<BusSubmitResult[]> {
-  const ch = await resolveChannel(store, root, lane, 'to_cloud', v2Enabled);
+async function engineSubmit(store: BusStore, root: Uint8Array, lane: string, items: BusSubmitItem[], v2Enabled = false, v3Enabled = false): Promise<BusSubmitResult[]> {
+  const r3 = v3Enabled ? await loadRatchetState(store, lane) : null;
+  const ch = r3 ? null : await resolveChannel(store, root, lane, 'to_cloud', v2Enabled);
   const out: BusSubmitResult[] = [];
   for (const item of items) {
     try {
-      const state = (await store.loadState(lane, 'to_cloud', 'receiver')) || laneChannelStart(ch);
-      const { payload, next } = await openFromLane(ch, state, unb64(item.wire), 32);
-      await store.saveState(lane, 'to_cloud', 'receiver', next);
+      let payload: unknown;
+      if (r3) {
+        // v3: open under the ratchet; a failure counts toward the rekey flag,
+        // a success clears the count. The state never moves on a failed open.
+        let opened: ratchet.OpenResult;
+        try { opened = await ratchet.open(r3.st, unb64(item.wire)); }
+        catch (e) {
+          r3.failures += 1;
+          await store.saveRatchet(lane, ratchet.encodeState(r3.st), r3.failures, r3.epoch);
+          throw new Error(`v3 open failed (${r3.failures}/${RATCHET_REKEY_AFTER} toward rekey): ${e instanceof Error ? e.message : String(e)}`);
+        }
+        r3.st = opened.next; r3.failures = 0;
+        await store.saveRatchet(lane, ratchet.encodeState(r3.st), 0, r3.epoch);
+        payload = JSON.parse(new TextDecoder().decode(opened.plaintext));
+        if (opened.gap) (payload as Record<string, unknown>).__gap = opened.gap;   // reported, never absorbed
+      } else {
+        const state = (await store.loadState(lane, 'to_cloud', 'receiver')) || laneChannelStart(ch!);
+        const o = await openFromLane(ch!, state, unb64(item.wire), 32);
+        await store.saveState(lane, 'to_cloud', 'receiver', o.next);
+        payload = o.payload;
+      }
       const id = newId();
       await store.insertRow({ id, lane, direction: 'to_cloud', kind: item.kind, replyTo: item.replyTo, wire: item.wire, plaintext: JSON.stringify(payload), status: 'done' });
       if (item.replyTo) await store.markDone(item.replyTo);
@@ -359,12 +449,12 @@ function splitChannel(channel: string): { lane: string; direction: Direction } {
   throw new Error(`handshake channel must end in :to_local or :to_cloud, got "${channel}"`);
 }
 
-export interface BusProtocolInfo { supported: number[]; v2: boolean; epoch: number }
+export interface BusProtocolInfo { supported: number[]; v2: boolean; epoch: number; v3?: boolean; rekey?: boolean }
 
 // What the poll advertises so the laptop knows whether to (re)handshake. v2 is
 // "active" for a lane only when BOTH directions have a root on file; the epoch
 // reported is the older of the two (the lane is fully v2 from that epoch on).
-async function engineProtocolInfo(store: BusStore, v2Enabled: boolean, lane: string): Promise<BusProtocolInfo> {
+async function engineProtocolInfo(store: BusStore, v2Enabled: boolean, lane: string, v3Enabled = false): Promise<BusProtocolInfo> {
   if (!v2Enabled) return { supported: [1], v2: false, epoch: 0 };
   const [local, cloud] = await Promise.all([
     store.loadLatestHandshakeRoot(`${lane}:to_local`),
@@ -372,7 +462,14 @@ async function engineProtocolInfo(store: BusStore, v2Enabled: boolean, lane: str
   ]);
   const v2 = !!(local && cloud);
   const epoch = local && cloud ? Math.min(local.epoch, cloud.epoch) : 0;
-  return { supported: [1, 2], v2, epoch };
+  if (!v3Enabled) return { supported: [1, 2], v2, epoch };
+  const r3 = await store.loadRatchet(lane);
+  const v3 = !!(r3 && r3.epoch === epoch && epoch > 0);
+  // the collapse signal: the worker has failed to open RATCHET_REKEY_AFTER
+  // results in a row — it tells the laptop, which re-handshakes at a higher
+  // epoch, and both sides rebuild from fresh randomness.
+  const rekey = !!(r3 && r3.failures >= RATCHET_REKEY_AFTER);
+  return { supported: [1, 2, 3], v2, epoch, v3, rekey };
 }
 
 // Answer one or more HELLOs. Each is a self-contained KEM: encapsulate to the
@@ -402,6 +499,15 @@ async function engineHandshake(
     // forward secrecy: superseded roots for this channel are deleted.
     await store.pruneHandshakeRootsBelow(channel, epoch);
     accepts.push(encodeAccept(ciphertext));
+    // v3: once BOTH directions have a root at this epoch, seed the lane's
+    // ratchet (worker = responder). A new epoch replaces the old ratchet —
+    // that is the rekey: the captured chain is gone, the fresh seed is not.
+    const [rl, rc] = await Promise.all([store.loadLatestHandshakeRoot(`${lane}:to_local`), store.loadLatestHandshakeRoot(`${lane}:to_cloud`)]);
+    if (rl && rc && rl.epoch === epoch && rc.epoch === epoch) {
+      const seed = await ratchetSeed(rl.rootLane, rc.rootLane);
+      const st = await ratchet.create(seed, 'responder');
+      await store.saveRatchet(lane, ratchet.encodeState(st), 0, epoch);
+    }
   }
   return accepts;
 }
@@ -412,13 +518,13 @@ export async function busPathOpen(env: Env, lane = 'primary'): Promise<BusStatus
   return enginePathOpen(d1Store(env), lane);
 }
 export async function busEnqueueToLocal(env: Env, lane: string, kind: string, payload: unknown, replyTo?: string): Promise<string> {
-  return engineEnqueueToLocal(d1Store(env), rootSecretOf(env), lane, kind, payload, replyTo, laneProtocolV2Enabled(env));
+  return engineEnqueueToLocal(d1Store(env), rootSecretOf(env), lane, kind, payload, replyTo, laneProtocolV2Enabled(env), laneProtocolV3Enabled(env));
 }
 export async function busPoll(env: Env, lane: string, opts: { limit?: number; meta?: Record<string, unknown> } = {}): Promise<BusJob[]> {
   return enginePoll(d1Store(env), lane, opts);
 }
 export async function busSubmit(env: Env, lane: string, items: BusSubmitItem[]): Promise<BusSubmitResult[]> {
-  return engineSubmit(d1Store(env), rootSecretOf(env), lane, items, laneProtocolV2Enabled(env));
+  return engineSubmit(d1Store(env), rootSecretOf(env), lane, items, laneProtocolV2Enabled(env), laneProtocolV3Enabled(env));
 }
 export async function busAwaitResult<T = unknown>(env: Env, jobId: string, timeoutMs = 120_000, pollMs = 400): Promise<T | null> {
   return engineAwaitResult<T>(d1Store(env), jobId, timeoutMs, pollMs);
@@ -426,7 +532,7 @@ export async function busAwaitResult<T = unknown>(env: Env, jobId: string, timeo
 // Version negotiation the poll returns; the laptop reads it to decide whether to
 // (re)handshake. Cheap enough to compute on every poll.
 export async function busProtocolInfo(env: Env, lane: string): Promise<BusProtocolInfo> {
-  return engineProtocolInfo(d1Store(env), laneProtocolV2Enabled(env), lane);
+  return engineProtocolInfo(d1Store(env), laneProtocolV2Enabled(env), lane, laneProtocolV3Enabled(env));
 }
 // The responder half of the hybrid lane handshake. Only reachable when v2 is
 // armed (the route gates on laneProtocolV2Enabled); returns one ACCEPT per HELLO.
@@ -444,6 +550,7 @@ function memoryStore(): BusStore {
   const handshakes = new Map<string, { epoch: number; rootLane: Uint8Array }>(); // 'channel:epoch' → root
   const rows: Array<{ id: string; lane: string; direction: Direction; kind: string; replyTo?: string; wire: string; plaintext: string; status: string; created_at: number }> = [];
   const lanes = new Map<string, { last_seen: number; meta: Record<string, unknown> }>();
+  const ratchets = new Map<string, { state: string; failures: number; epoch: number }>();
   const key = (lane: string, direction: Direction, role: Role) => `${lane} ${direction} ${role}`;
   let seq = 0;
   return {
@@ -478,10 +585,14 @@ function memoryStore(): BusStore {
     },
     async touchLane(lane, meta) { lanes.set(lane, { last_seen: Date.now(), meta }); },
     async laneHeartbeat(lane) { return lanes.get(lane) || null; },
+    async loadRatchet(lane) { return ratchets.get(lane) || null; },
+    async saveRatchet(lane, state, failures, epoch) { ratchets.set(lane, { state, failures, epoch }); },
+    async clearRatchet(lane) { ratchets.delete(lane); },
   };
 }
 
 export interface SessionBusSelfTest {
+  v3_roundtrip: boolean; v3_break_raises_rekey: boolean; v3_rekey_strands_capture: boolean;
   ok: boolean;
   job_roundtrip: boolean;         // enqueue -> poll -> submit(result) -> await returns the real payload
   lane_isolation: boolean;        // a wire sealed for lane alpha does not open under lane beta's store state
@@ -603,11 +714,47 @@ export async function sessionBusSelfTest(): Promise<SessionBusSelfTest> {
     } catch { flag_off_stays_v1 = false; }
   }
 
+  // ── v3: the Double Ratchet over the v2 roots, both directions, then a
+  // break → rekey flag → fresh epoch → the captured chain is stranded. ────
+  let v3_roundtrip = false, v3_break_raises_rekey = false, v3_rekey_strands_capture = false;
+  {
+    const lane = 'epsilon';
+    const hs = async (epoch: number) => {
+      const kL = laneHandshakeClientKeys(), kC = laneHandshakeClientKeys();
+      const acc = await engineHandshake(store, root, [encodeHello(`${lane}:to_local`, epoch, kL.publicKey), encodeHello(`${lane}:to_cloud`, epoch, kC.publicKey)]);
+      const rL = await laneHandshakeClientFinish(root, `${lane}:to_local`, epoch, kL, decodeAcceptCt(acc[0]));
+      const rC = await laneHandshakeClientFinish(root, `${lane}:to_cloud`, epoch, kC, decodeAcceptCt(acc[1]));
+      return ratchet.create(await ratchetSeed(rL, rC), 'initiator');   // the laptop's ratchet
+    };
+    let laptop = await hs(1);
+    const info1 = await engineProtocolInfo(store, true, lane, true);
+    const jobId = await engineEnqueueToLocal(store, root, lane, 'exec', { code: 'print(3)' }, undefined, true, true);
+    const jobRow = (await enginePoll(store, lane, {})).find((j) => j.id === jobId)!;
+    const o1 = await ratchet.open(laptop, unb64(jobRow.wire)); laptop = o1.next;
+    const gotJob = (JSON.parse(new TextDecoder().decode(o1.plaintext)) as { code?: string }).code === 'print(3)';
+    const s1 = await ratchet.seal(laptop, new TextEncoder().encode(JSON.stringify({ exit: 0, stdout: '3\n' }))); laptop = s1.next;
+    const sub = await engineSubmit(store, root, lane, [{ kind: 'result', wire: b64(s1.wire), replyTo: jobId }], true, true);
+    const res = await engineAwaitResult<{ exit: number; stdout: string }>(store, jobId, 2_000, 50);
+    v3_roundtrip = info1.supported.includes(3) && info1.v3 === true && gotJob && sub[0]?.ok === true && res?.exit === 0 && res?.stdout === '3\n';
+    for (let i = 0; i < 3; i++) await engineSubmit(store, root, lane, [{ kind: 'result', wire: b64(crypto.getRandomValues(new Uint8Array(80))) }], true, true);
+    const info2 = await engineProtocolInfo(store, true, lane, true);
+    v3_break_raises_rekey = info2.rekey === true;
+    const captured = laptop;
+    laptop = await hs(2);
+    const info3 = await engineProtocolInfo(store, true, lane, true);
+    const jobId2 = await engineEnqueueToLocal(store, root, lane, 'exec', { code: 'print(4)' }, undefined, true, true);
+    const jobRow2 = (await enginePoll(store, lane, {})).find((j) => j.id === jobId2)!;
+    let capturedOpens = true;
+    try { await ratchet.open(captured, unb64(jobRow2.wire)); } catch { capturedOpens = false; }
+    const o2 = await ratchet.open(laptop, unb64(jobRow2.wire));
+    v3_rekey_strands_capture = info3.rekey === false && info3.epoch === 2 && !capturedOpens && (JSON.parse(new TextDecoder().decode(o2.plaintext)) as { code?: string }).code === 'print(4)';
+  }
+
   const ok = job_roundtrip && lane_isolation && heartbeat_tracks_polls && awaits_time_out_honestly &&
-    v2_handshake_roundtrip && v2_is_really_v2 && flag_off_stays_v1;
+    v2_handshake_roundtrip && v2_is_really_v2 && flag_off_stays_v1 && v3_roundtrip && v3_break_raises_rekey && v3_rekey_strands_capture;
   return {
     ok, job_roundtrip, lane_isolation, heartbeat_tracks_polls, awaits_time_out_honestly,
-    v2_handshake_roundtrip, v2_is_really_v2, flag_off_stays_v1,
+    v2_handshake_roundtrip, v2_is_really_v2, flag_off_stays_v1, v3_roundtrip, v3_break_raises_rekey, v3_rekey_strands_capture,
     note: 'The full enqueue -> poll -> submit -> await orchestration, run against an in-memory store (this repo has no D1 test harness — every D1-backed module here proves its decision logic this way, per sandboxRegistrySelfTest). Real lane-envelope sealing throughout, not simulated: the "local" side seals with the same sealForLane primitive the real laptop client uses. The v2 invariants run the hybrid handshake through the SAME engine production uses — a per-direction handshake seeds forward-secret geodesics, the wire is genuinely v2 (v1 cannot open it), and the ELLE_LANE_PROTOCOL flag gates it (off ⇒ a stored root is ignored, v1 is used).',
   };
 }

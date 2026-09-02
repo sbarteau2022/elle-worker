@@ -343,3 +343,34 @@ Rollback is trivial while flag-gated: flip back to v1, the pasted root still wor
 Proceed to Phase 1 (hybrid X25519+ML-KEM lane handshake, flag-gated, with the
 interop test landed first)? Include Phase 2 (ML-DSA origin auth), or defer it
 given the single-operator trust model?
+
+## Addendum (2026-09-02) — protocol v3: the Double Ratchet over the v2 roots
+
+An adversarial review of the shipped code found the geodesic per-tick schedule
+adds **no secrecy and no forward secrecy**: every tick key is `HKDF(master,
+tick ‖ Q(γ(tick)))` with `Q(γ)` deterministic from `master`, so a compromise
+of the master reads every past and future wire, and a desync collapses the
+channel on the honest peer while an attacker holding the master reads in
+lockstep silently. (L1/L2 in §2.2 said as much; the geometry is covertness
+and lockstep, never the lock.) The review also found the Rust and JS `bound()`
+disagreed (Euclidean projection vs Möbius retraction), so cross-runtime lanes
+desynced permanently around tick 50 — fixed, with a shared known-answer walk.
+
+v3 keeps the v2 hybrid handshake (ML-KEM-768 + X25519, PSK-authenticated) and
+replaces the key schedule with the lane **Double Ratchet** (`lane-ratchet.ts`
+here, `lane-ratchet.cjs` in Elle, `ratchet.rs` in the harness — byte-identical
+wire v3, interop-tested across all three):
+
+- one ratchet per lane, seeded `HKDF(root_to_local ‖ root_to_cloud, "elle-lane-v3-root")`;
+  worker = responder, laptop = initiator;
+- **forward secrecy from message 0**: symmetric chains advanced by a one-way KDF and
+  overwritten in place; **post-compromise security after one round trip**: every
+  reply folds a fresh X25519 secret into the root key — the wire is braided from both ends;
+- the `kind` selector rides **inside** the AEAD; gaps in the chain are reported, never absorbed;
+- **break → collapse → both aware → rekey → resend**: three consecutive failed opens on
+  either side (or the worker advertising `rekey` on the poll) clears the lane's roots and
+  forces a fresh handshake at a higher epoch; the captured chain cannot follow
+  (`sessionBusSelfTest.v3_rekey_strands_capture`);
+- flag-gated: `ELLE_LANE_PROTOCOL=v3` (implies v2); `ELLE_SANDBOX_KEY` must be ≥ 32 bytes.
+
+φ remains the public clock (checkpoint cadence, position labels), never the key.

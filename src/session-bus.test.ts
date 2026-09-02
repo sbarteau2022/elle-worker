@@ -34,3 +34,13 @@ describe('sessionBusSelfTest — the event bus that replaces the socket (COROS o
     expect((await sessionBusSelfTest()).ok).toBe(true);
   });
 });
+
+describe('sessionBusSelfTest — v3: the Double Ratchet over the v2 roots', () => {
+  it('round-trips both directions under the ratchet, raises rekey after three failed opens, and strands a captured chain after the rekey', async () => {
+    const t = await sessionBusSelfTest();
+    expect(t.v3_roundtrip).toBe(true);
+    expect(t.v3_break_raises_rekey).toBe(true);
+    expect(t.v3_rekey_strands_capture).toBe(true);
+    expect(t.ok).toBe(true);
+  });
+});

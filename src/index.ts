@@ -1818,6 +1818,8 @@ export default {
     // G(π)/σ(π) policy evaluation over the coherence triad, and the
     // regulator's Lyapunov descent trace, frame by frame.
     if (path === '/api/cognitive/map' && request.method === 'GET') {
+      const user = await getUser(request, env);
+      const userId = user?.id || 'public';
       const q = new URL(request.url).searchParams;
       const num = (k: string, d: number, lo: number, hi: number): number => {
         const v = Number(q.get(k));
@@ -1831,7 +1833,7 @@ export default {
       const limit = num('limit', 200, 1, 1000);
       const steps = num('steps', 60, 1, 400);
       return sseDoor(ctx, corsHeaders(), async (send) => {
-        const snap = await cognitiveMapSnapshot(env, user.id, coherence, { limit, steps });
+        const snap = await cognitiveMapSnapshot(env, userId, coherence, { limit, steps });
         send('atlas', { points: snap.atlas });
         send('active_inference', snap.active_inference);
         for (const step of snap.lyapunov) send('lyapunov', step);
@@ -1840,7 +1842,7 @@ export default {
           epistemic_trigger: snap.active_inference.epistemic_trigger,
           epistemic_mass: snap.active_inference.epistemic_mass,
         });
-        await logActiveInference(env, snap.active_inference, `map:${crypto.randomUUID()}`, user.id)
+        await logActiveInference(env, snap.active_inference, `map:${crypto.randomUUID()}`, userId)
           .catch(() => {});
       });
     }
