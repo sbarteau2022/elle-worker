@@ -42,6 +42,14 @@ export interface BusinessAuthEnv {
   INGEST_URL?: string;
   INGEST_API_TOKEN?: string;
   AUTH_TOKENS: KVNamespace;
+  // Optional at-rest encryption for the stored Google refresh token (see
+  // storeCredentials/GCRED_ENC_PREFIX). Base64, `openssl rand -base64 32`
+  // (same AES-256-GCM scheme as payroll/crypto.ts, kept as its own secret so
+  // the two integrations stay independently rotatable). Unset ⇒ the refresh
+  // token is stored in plaintext, same as before this field existed — opt-in
+  // so shipping this fix can't break the OAuth flow on a deploy that hasn't
+  // provisioned the secret yet.
+  ATLAS_TOKEN_ENC_KEY?: string;
 }
 
 export const BUSINESS_SCOPES = [
@@ -107,6 +115,35 @@ function sanitizeReturnTo(returnTo: string | undefined, env: BusinessAuthEnv): s
   // Relative paths only — never an absolute URL, however plausible its host.
   if (returnTo.startsWith('/') && !returnTo.startsWith('//')) return `${base}${returnTo}`;
   return `${base}/start`;
+}
+
+// ── CSRF cookie: binds `state` to the browser that started the flow ─────
+//
+// `state` alone is a valid one-time-use CSRF token against REPLAY (KV
+// delete-on-read), but nothing previously tied it to the browser that
+// requested it. An attacker can run the consent flow with their OWN Google
+// account, capture Google's redirect to our /oauth/callback?code=...&state=...
+// before their browser follows it, and hand that intact URL to a victim. The
+// victim's browser would complete the exchange (the code/state are still
+// valid) and receive the ATTACKER's session — a login/session-fixation CSRF
+// that silently misdirects whatever the victim does next (e.g. an invoice
+// upload lands in the attacker's org). Setting this as an HttpOnly cookie at
+// /oauth/start and requiring it to match `state` at /oauth/callback means a
+// browser that never initiated the flow doesn't carry it, so a relayed URL
+// from a different browser fails closed.
+export const OAUTH_CSRF_COOKIE = 'atlas_oauth_csrf';
+
+export function oauthCsrfCookie(state: string): string {
+  return `${OAUTH_CSRF_COOKIE}=${state}; HttpOnly; Secure; SameSite=Lax; Max-Age=${STATE_TTL_SECONDS}; Path=/api/atlas/oauth`;
+}
+
+export function oauthCsrfCookieClear(): string {
+  return `${OAUTH_CSRF_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Max-Age=0; Path=/api/atlas/oauth`;
+}
+
+export function readCookie(cookieHeader: string, name: string): string | null {
+  const m = cookieHeader.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 export async function consumeState(env: BusinessAuthEnv, state: string): Promise<{ returnTo: string } | null> {
@@ -336,18 +373,67 @@ export async function postIntake(env: BusinessAuthEnv, payload: Record<string, u
   return body as IntakeResponse;
 }
 
+// No code path re-reads a stored atlas_gcred:* credential today (it's
+// collected for a future re-sync feature that doesn't exist yet) — so it had
+// no expiry at all, retaining a business.manage-scoped refresh token
+// indefinitely. Bound retention rather than hold an unused credential
+// forever; 180 days roughly matches Google's own inactive-refresh-token
+// revocation window, so this TTL rarely fires before Google's own would.
+const GCRED_TTL_SECONDS = 180 * 24 * 60 * 60;
+
+const GCRED_ENC_PREFIX = 'enc:';
+const gcredKeyCache = new Map<string, CryptoKey>();
+
+async function getGcredKey(rawKey: string): Promise<CryptoKey> {
+  const cached = gcredKeyCache.get(rawKey);
+  if (cached) return cached;
+  const bytes = Uint8Array.from(atob(rawKey), (c) => c.charCodeAt(0));
+  if (bytes.length !== 32) throw new Error(`ATLAS_TOKEN_ENC_KEY must decode to 32 bytes (got ${bytes.length}) — generate with \`openssl rand -base64 32\``);
+  const key = await crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
+  gcredKeyCache.set(rawKey, key);
+  return key;
+}
+
+// Encrypts only when ATLAS_TOKEN_ENC_KEY is configured — see the field's doc
+// comment on BusinessAuthEnv for why this stays opt-in.
+async function encryptGcred(plaintext: string, env: BusinessAuthEnv): Promise<string> {
+  if (!env.ATLAS_TOKEN_ENC_KEY) return plaintext;
+  const key = await getGcredKey(env.ATLAS_TOKEN_ENC_KEY);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(plaintext)));
+  const combined = new Uint8Array(iv.length + ciphertext.length);
+  combined.set(iv, 0);
+  combined.set(ciphertext, iv.length);
+  return GCRED_ENC_PREFIX + btoa(String.fromCharCode(...combined));
+}
+
+// Accepts both an encrypted value and legacy/opt-out plaintext (no prefix) —
+// a credential stored before ATLAS_TOKEN_ENC_KEY was configured, or while it
+// stays unset, must still be readable once a future caller needs it.
+export async function decryptGcred(stored: string, env: BusinessAuthEnv): Promise<string> {
+  if (!stored.startsWith(GCRED_ENC_PREFIX)) return stored;
+  if (!env.ATLAS_TOKEN_ENC_KEY) throw new Error('ATLAS_TOKEN_ENC_KEY not configured — cannot decrypt a stored credential that was encrypted with it');
+  const key = await getGcredKey(env.ATLAS_TOKEN_ENC_KEY);
+  const combined = Uint8Array.from(atob(stored.slice(GCRED_ENC_PREFIX.length)), (c) => c.charCodeAt(0));
+  const iv = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+  return new TextDecoder().decode(plaintext);
+}
+
 /** Stash the credential set in KV and return the opaque ref the CRM stores. */
 export async function storeCredentials(env: BusinessAuthEnv, googleSub: string, tokens: TokenSet): Promise<string> {
   const ref = `gcred_${crypto.randomUUID().replace(/-/g, '')}`;
+  const refreshToken = tokens.refresh_token ? await encryptGcred(tokens.refresh_token, env) : null;
   await env.AUTH_TOKENS.put(`atlas_gcred:${ref}`, JSON.stringify({
     google_sub: googleSub,
-    refresh_token: tokens.refresh_token || null,
+    refresh_token: refreshToken,
     scope: tokens.scope || BUSINESS_SCOPES,
     stored_at: Date.now(),
-  }));
+  }), { expirationTtl: GCRED_TTL_SECONDS });
   // Second key so a later re-auth by the same person overwrites rather than
   // orphaning a credential nothing points at.
-  await env.AUTH_TOKENS.put(`atlas_gcred_by_sub:${googleSub}`, ref);
+  await env.AUTH_TOKENS.put(`atlas_gcred_by_sub:${googleSub}`, ref, { expirationTtl: GCRED_TTL_SECONDS });
   return ref;
 }
 

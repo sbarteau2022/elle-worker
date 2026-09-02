@@ -90,3 +90,18 @@ CLOUDFLARE_ACCOUNT_ID=f60c2e6068e002f5dbad7cd562a5c165
 #     certificate_id = "<id from the upload command>"
 # Until that's done, ADP's connect/sync report "not configured" like any
 # other unset integration — it is not a bug, it's the fail-closed default.
+
+# ── getUser's local-dev convenience identity (src/index.ts) ──────────────
+# Both must be set for the dev-only identity to fire: ENVIRONMENT != 'production'
+# is not enough on its own (a dropped/misconfigured ENVIRONMENT var must not
+# reopen it), and it never grants an admin tier even when active.
+#   ENVIRONMENT=development
+#   DEV_AUTH_BYPASS=some-local-only-marker   # any non-empty value; never set in
+#     wrangler.toml's committed [vars] or as a real deploy's secret
+
+# ── Atlas Google Business OAuth credential storage (src/atlas-business-auth.ts) ──
+# Optional at-rest encryption for the stored Google refresh token. Unset ⇒
+# stored in plaintext (unchanged prior behavior) — this is opt-in, not
+# required for the OAuth flow to work.
+#   ATLAS_TOKEN_ENC_KEY=<base64, `openssl rand -base64 32`>
+# In production set as a Worker secret, not here: wrangler secret put ATLAS_TOKEN_ENC_KEY
