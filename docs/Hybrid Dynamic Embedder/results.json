@@ -1,0 +1,18 @@
+{
+  "phi": 1.618033988749895,
+  "phi_mod1": 0.6180339887498949,
+  "predictions": {
+    "P1_unique_maximiser": true,
+    "P2_fibonacci_discrepancy": true,
+    "P3_three_gap_phi_ratios": true,
+    "P4_isotropic_geodesic": true
+  },
+  "confirmed": 4,
+  "stern_brocot_error": 7.945166746736732e-11,
+  "fibonacci_discrepancy_ratio_to_phi": 1.6174204356631936,
+  "three_gap_ratios": [
+    1.618026570641351,
+    1.6180534098433015
+  ],
+  "geodesic_variance": 2.0589900714992583e-28
+}
