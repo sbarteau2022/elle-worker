@@ -119,7 +119,7 @@ def test_pairwise_p3_gate1_miss_with_gate2_failure_isolates_receipt():
 
 def test_pairwise_p4_tangent_scaling_and_lorentz_dual_chart_conversion():
     """P4: 1/sqrt(D) Tangent Scaling + Lorentz Dual-Chart Conversion."""
-    D = 3584
+    D = 5120
     scale = 1.0 / math.sqrt(D)
     z = [2.0] * D
     scaled_z = [x * scale for x in z]
@@ -174,7 +174,7 @@ def test_pairwise_p6_roi_bounding_box_transposition_induces_gate3_quarantine():
 def test_pairwise_p7_span_level_pooling_and_shm_descriptor_binary_alignment():
     """P7: Span-Level Pooling + 64-Byte ShmTensorDescriptor."""
     num_layers = 7
-    hidden_dim = 3584
+    hidden_dim = 5120
     # Pooled tensor size in f16
     payload_bytes = num_layers * hidden_dim * 2
     raw_desc = pack_shm_descriptor(
@@ -185,9 +185,9 @@ def test_pairwise_p7_span_level_pooling_and_shm_descriptor_binary_alignment():
     )
     assert len(raw_desc) == 64
     desc = unpack_shm_descriptor(raw_desc)
-    assert desc["payload_bytes"] == 50176
+    assert desc["payload_bytes"] == 71680
     assert desc["num_layers"] == 7
-    assert desc["hidden_dim"] == 3584
+    assert desc["hidden_dim"] == 5120
 
 
 def test_pairwise_p8_dora_adapters_and_compound_manifold_loss_gradient_flow():
@@ -241,13 +241,13 @@ def test_pairwise_p11_gate2_sql_foreign_key_atomicity_and_ledger_immutability():
 
 
 def test_pairwise_p12_zero_copy_shm_mmap_offset_and_rust_arrayview_stride():
-    """P12: Shm 64-Byte Alignment + ArrayView Stride [3584, 1]."""
+    """P12: Shm 64-Byte Alignment + ArrayView Stride [5120, 1]."""
     raw_desc = pack_shm_descriptor(payload_offset=64)
     desc = unpack_shm_descriptor(raw_desc)
     assert (desc["payload_offset"] % 64) == 0
-    stride_0 = desc["hidden_dim"]  # 3584
+    stride_0 = desc["hidden_dim"]  # 5120
     stride_1 = 1
-    assert stride_0 == 3584
+    assert stride_0 == 5120
     assert stride_1 == 1
 
 

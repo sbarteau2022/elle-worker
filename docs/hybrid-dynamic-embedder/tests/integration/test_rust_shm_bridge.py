@@ -38,12 +38,12 @@ def test_shm_descriptor_binary_layout():
     assert desc["version"] == VERSION_V1
     assert desc["dtype"] == DTYPE_FLOAT16
     assert desc["num_layers"] == 7
-    assert desc["hidden_dim"] == 3584
+    assert desc["hidden_dim"] == 5120
     assert desc["seq_len"] == 12
     assert desc["gated_fusion_active"] is True
     assert desc["dora_active"] is True
     assert desc["payload_offset"] == 64
-    assert desc["payload_bytes"] == 50176
+    assert desc["payload_bytes"] == 71680
     assert desc["sequence_id"] == 42
 
 

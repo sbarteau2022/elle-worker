@@ -163,10 +163,10 @@ def test_roi_batch_extraction_multiline():
 
 def test_roi_pooler_class():
     """Verifies stateful RoIPooler operator."""
-    pooler = RoIPooler(grid_shape=(4, 4), hidden_dim=3584)
-    tokens = [[1.0] * 3584 for _ in range(16)]
+    pooler = RoIPooler(grid_shape=(4, 4), hidden_dim=5120)
+    tokens = [[1.0] * 5120 for _ in range(16)]
     pooled = pooler.pool_item(tokens, [0.0, 0.0, 0.5, 0.5])
-    assert len(pooled) == 3584
+    assert len(pooled) == 5120
     assert pooled[0] == pytest.approx(1.0, abs=1e-9)
 
 
@@ -201,7 +201,7 @@ def test_dynamic_gating_context_router():
 
 def test_shared_tangent_fusion_exact_oracle_parity():
     """F8.2, F8.3, F8.5: Machine-precision parity with oracle implementation."""
-    D = 3584
+    D = 5120
     z_text = [1.0] * D
     z_vis = [0.5] * D
     g = 0.8
@@ -287,17 +287,17 @@ def test_vision_tower_2d_rope_relative_translation_invariance():
 
 
 def test_patch_merger_dimensions_and_projection():
-    """Verifies 2x2 patch merger projection to D=3584."""
-    merger = PatchMerger(in_dim=1152, out_dim=3584, backend="numpy", seed=42)
+    """Verifies 2x2 patch merger projection to D=5120."""
+    merger = PatchMerger(in_dim=1152, out_dim=5120, backend="numpy", seed=42)
     patches = np.ones((1, 4, 4, 1152), dtype=np.float32)
 
     visual_tokens, meta = merger.merge_and_project(patches)
-    assert visual_tokens.shape == (1, 2, 2, 3584)
+    assert visual_tokens.shape == (1, 2, 2, 5120)
     assert meta["grid_h"] == 2
     assert meta["grid_w"] == 2
     assert meta["effective_patch_size"] == 28
     assert meta["token_count"] == 4
-    assert meta["out_dim"] == 3584
+    assert meta["out_dim"] == 5120
     assert len(meta["centroids"]) == 2
     assert len(meta["centroids"][0]) == 2
 
@@ -306,14 +306,14 @@ def test_patch_merger_dimensions_and_projection():
 def test_vision_tower_and_merger_mlx_backend():
     """Verifies VisionTower and PatchMerger execute on MLX Metal backend."""
     tower = VisionTower(patch_size=14, embed_dim=1152, backend="mlx", seed=42)
-    merger = PatchMerger(in_dim=1152, out_dim=3584, backend="mlx", seed=42)
+    merger = PatchMerger(in_dim=1152, out_dim=5120, backend="mlx", seed=42)
 
     img = mx.ones((1, 56, 56, 3), dtype=mx.float32)
     patches, meta = tower.extract_patches(img)
     assert patches.shape == (1, 4, 4, 1152)
 
     tokens, merger_meta = merger.merge_and_project(patches, meta)
-    assert tokens.shape == (1, 2, 2, 3584)
+    assert tokens.shape == (1, 2, 2, 5120)
     assert merger_meta["token_count"] == 4
 
 
@@ -324,24 +324,24 @@ def test_end_to_end_vision_to_tangent_fusion_pipeline():
     img = np.ones((56, 56, 3), dtype=np.float32)
     patches, meta = tower.extract_patches(img)
 
-    # 2. Patch Merger: 2x2 grouping -> D=3584
-    merger = PatchMerger(in_dim=1152, out_dim=3584, backend="numpy", seed=42)
+    # 2. Patch Merger: 2x2 grouping -> D=5120
+    merger = PatchMerger(in_dim=1152, out_dim=5120, backend="numpy", seed=42)
     visual_tokens, spatial_meta = merger.merge_and_project(patches, meta)
 
-    # Flatten tokens to (N_tokens, 3584)
-    flat_tokens = visual_tokens[0].reshape(-1, 3584)
+    # Flatten tokens to (N_tokens, 5120)
+    flat_tokens = visual_tokens[0].reshape(-1, 5120)
 
     # 3. RoI Pooling: Extract visual token for bounding box
     bbox = [0.1, 0.1, 0.8, 0.8]
     z_vis = extract_roi_visual_embedding(flat_tokens, bbox, grid_shape=(2, 2))
-    assert len(z_vis) == 3584
+    assert len(z_vis) == 5120
 
     # 4. Tangent Fusion: Blend with text representation in tangent space
-    z_text = [0.5] * 3584
+    z_text = [0.5] * 5120
     g = compute_dynamic_gate_context("invoice_anomaly", conf_ocr=0.9, q_image=0.85)
-    fused_tangent, poincare_pt = shared_tangent_fusion(z_text, z_vis, g=g, D=3584)
+    fused_tangent, poincare_pt = shared_tangent_fusion(z_text, z_vis, g=g, D=5120)
 
-    assert len(fused_tangent) == 3584
-    assert len(poincare_pt) == 3584
+    assert len(fused_tangent) == 5120
+    assert len(poincare_pt) == 5120
     p_norm = vector_norm(poincare_pt)
     assert 0.0 < p_norm < 1.0

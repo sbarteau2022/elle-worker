@@ -5,7 +5,8 @@ Implements server-side extraction logic to capture hidden states from layers
 [0, 12, 24, 36, 48, 60, "final"] with immediate span-level pooling.
 Avoids whole-sequence tensor bloat by computing span pooling on-the-fly and
 calling mx.eval(h) immediately within-block, capping transient memory allocation
-well below the <= 140 MB budget (and <= 30 MB for N <= 4096).
+well below the <= 140 MB budget (and <= 40 MB for N <= 4096 at
+hidden_dim 5120; this sub-budget was <= 30 MB when the tap width was 3584).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ except ImportError:
 
 EXTRACTED_LAYERS: List[Union[int, str]] = [0, 12, 24, 36, 48, 60, "final"]
 EXPECTED_LAYER_COUNT: int = 7
-EXPECTED_HIDDEN_DIM: int = 3584
+EXPECTED_HIDDEN_DIM: int = 5120
 MAX_TRANSIENT_MEMORY_MB: float = 140.0
 
 # Binary layout per PROJECT.md § M2/M3 <-> M4 Interface Contract:
@@ -34,11 +35,11 @@ MAX_TRANSIENT_MEMORY_MB: float = 140.0
 # version: u16 (2B) - 0x0001
 # dtype: u16 (2B) - 0x0001 (Float16)
 # num_layers: u32 (4B) - 7 layers
-# hidden_dim: u32 (4B) - 3584
+# hidden_dim: u32 (4B) - 5120
 # seq_len: u32 (4B)
 # flags: u32 (4B) - Bit 0: Gated visual fusion, Bit 1: DoRA active
 # payload_offset: u64 (8B)
-# payload_bytes: u64 (8B) - 7 * 3584 * 2 = 50,176 bytes
+# payload_bytes: u64 (8B) - 7 * 5120 * 2 = 71,680 bytes
 # timestamp_ns: u64 (8B)
 # sequence_id: u64 (8B)
 # reserved / padding: 8 bytes to achieve 64-byte alignment
@@ -47,7 +48,7 @@ SHM_DESCRIPTOR_SIZE = struct.calcsize(SHM_DESCRIPTOR_FORMAT)  # 64 bytes
 MAGIC_DHNG = 0x44484E47  # "DHNG" in ASCII little-endian
 VERSION_V1 = 0x0001
 DTYPE_FLOAT16 = 0x0001
-PAYLOAD_BYTES_DEFAULT = EXPECTED_LAYER_COUNT * EXPECTED_HIDDEN_DIM * 2  # 50,176 bytes
+PAYLOAD_BYTES_DEFAULT = EXPECTED_LAYER_COUNT * EXPECTED_HIDDEN_DIM * 2  # 71,680 bytes
 
 
 class LayerExtractor:
@@ -238,7 +239,7 @@ class LayerExtractor:
         return active_layer_bytes / (1024.0 * 1024.0)
 
     def to_float16_bytes(self, pooled_layers: Sequence[Sequence[float]]) -> bytes:
-        """Packs 7x3584 floats into 50,176 bytes of little-endian float16."""
+        """Packs 7x5120 floats into 71,680 bytes of little-endian float16."""
         flattened = [float(x) for layer in pooled_layers for x in layer]
         return struct.pack(f"<{len(flattened)}e", *flattened)
 

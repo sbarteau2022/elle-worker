@@ -6,7 +6,7 @@ Rigorous adversarial challenge of:
 2. Winding number trajectory edge cases, Nyquist aliasing boundaries, and turn accumulation.
 3. Discrepancy metric monotonicity under cluster transitions and golden sequence scaling.
 4. Lorentz isometry preservation under successive boosts and float64 boundary limits.
-5. High-dimensional projection stability in D = 3584 with tangent scaling.
+5. High-dimensional projection stability in D = 5120 with tangent scaling.
 6. Dual-chart disagreement ranking robustness under extreme configurations.
 """
 
@@ -512,19 +512,19 @@ class TestLorentzIsometrySuccessiveBoosts(unittest.TestCase):
 
 class TestHighDimensionalProjectionStability(unittest.TestCase):
     """
-    Adversarial verification of high-dimensional projection stability in D = 3584,
+    Adversarial verification of high-dimensional projection stability in D = 5120,
     tangent scaling 1/sqrt(D), and dual-chart roundtrip accuracy.
     """
 
-    def test_dimension_3584_tangent_scaling_prevents_saturation(self):
+    def test_dimension_5120_tangent_scaling_prevents_saturation(self):
         """
-        In D = 3584:
-        A raw unit tangent vector has Euclidean norm sqrt(3584) ≈ 59.866.
+        In D = 5120:
+        A raw unit tangent vector has Euclidean norm sqrt(5120) ≈ 59.866.
         Without scaling: exp_0(v) saturates to ball boundary 1.0 - BOUNDARY_EPS (0.99999).
         With scaling (1 / sqrt(D)): norm becomes 1.0, and exp_0(v) lands safely at radius
         tanh(0.5) ≈ 0.462117.
         """
-        D = 3584
+        D = 5120
         v_raw = [1.0] * D
         p_unscaled = exp_map_zero(v_raw, c=1.0)
         norm_unscaled = euclidean_norm(p_unscaled)
@@ -538,14 +538,14 @@ class TestHighDimensionalProjectionStability(unittest.TestCase):
         expected_radius = math.tanh(0.5)
         self.assertAlmostEqual(norm_scaled, expected_radius, places=14)
 
-    def test_dimension_3584_dual_chart_roundtrip_precision(self):
+    def test_dimension_5120_dual_chart_roundtrip_precision(self):
         """
-        In D = 3584:
-        Verify roundtrip Poincaré -> Lorentz -> Poincaré evaluated across 3584 dimensions
+        In D = 5120:
+        Verify roundtrip Poincaré -> Lorentz -> Poincaré evaluated across 5120 dimensions
         achieves machine precision error <= 1e-15.
         """
         random.seed(2026)
-        D = 3584
+        D = 5120
         raw = [random.gauss(0, 1) for _ in range(D)]
         v_tangent = scale_tangent(raw, dim=D)
         p = exp_map_zero(v_tangent, c=1.0)
@@ -561,16 +561,16 @@ class TestHighDimensionalProjectionStability(unittest.TestCase):
         self.assertEqual(len(p_roundtrip), D)
 
         max_err = max(abs(a - b) for a, b in zip(p, p_roundtrip))
-        self.assertLess(max_err, 1e-14, f"D=3584 roundtrip error: {max_err}")
+        self.assertLess(max_err, 1e-14, f"D=5120 roundtrip error: {max_err}")
 
-    def test_dimension_3584_poincare_distance_numerical_stability(self):
+    def test_dimension_5120_poincare_distance_numerical_stability(self):
         """
-        In D = 3584:
+        In D = 5120:
         Compute pairwise Poincaré distance between multiple high-dimensional embeddings.
         Verify distance evaluates without NaN, overflow, or precision loss.
         """
         random.seed(777)
-        D = 3584
+        D = 5120
         points = []
         for _ in range(5):
             raw = [random.gauss(0, 1) for _ in range(D)]
@@ -587,13 +587,13 @@ class TestHighDimensionalProjectionStability(unittest.TestCase):
                 else:
                     self.assertGreater(d, 0.0)
 
-    def test_product_manifold_composite_distance_h3584_t8(self):
+    def test_product_manifold_composite_distance_h5120_t8(self):
         """
-        Compute composite product distance d_P on H^3584 x T^8 with golden ratio weights:
+        Compute composite product distance d_P on H^5120 x T^8 with golden ratio weights:
           d_P^2 = w_h * d_H^2 + w_t * d_T^2.
         """
         random.seed(888)
-        D = 3584
+        D = 5120
         v1 = scale_tangent([random.gauss(0, 1) for _ in range(D)], dim=D)
         v2 = scale_tangent([random.gauss(0, 1) for _ in range(D)], dim=D)
         p1 = exp_map_zero(v1, c=1.0)

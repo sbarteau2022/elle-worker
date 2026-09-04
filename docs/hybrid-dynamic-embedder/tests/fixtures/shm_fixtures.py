@@ -11,11 +11,11 @@ from typing import Dict, Any, Tuple
 # version: u16 (2B)
 # dtype: u16 (2B) - 0x0001 = Float16
 # num_layers: u32 (4B) - 7 layers
-# hidden_dim: u32 (4B) - 3584
+# hidden_dim: u32 (4B) - 5120
 # seq_len: u32 (4B)
 # flags: u32 (4B) - Bit 0: Gated visual fusion, Bit 1: DoRA active
 # payload_offset: u64 (8B)
-# payload_bytes: u64 (8B) - 7 * 3584 * 2 = 50,176
+# payload_bytes: u64 (8B) - 7 * 5120 * 2 = 71,680
 # timestamp_ns: u64 (8B)
 # sequence_id: u64 (8B)
 # reserved / padding: 8 bytes to achieve 64-byte alignment
@@ -25,8 +25,8 @@ MAGIC_DHNG = 0x44484E47  # "DHNG" in ASCII little-endian
 VERSION_V1 = 0x0001
 DTYPE_FLOAT16 = 0x0001
 NUM_LAYERS_DEFAULT = 7
-HIDDEN_DIM_DEFAULT = 3584
-PAYLOAD_BYTES_DEFAULT = NUM_LAYERS_DEFAULT * HIDDEN_DIM_DEFAULT * 2  # 50,176 bytes
+HIDDEN_DIM_DEFAULT = 5120
+PAYLOAD_BYTES_DEFAULT = NUM_LAYERS_DEFAULT * HIDDEN_DIM_DEFAULT * 2  # 71,680 bytes
 
 
 def pack_shm_descriptor(

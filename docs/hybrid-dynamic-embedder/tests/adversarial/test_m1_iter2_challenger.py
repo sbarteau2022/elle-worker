@@ -10,7 +10,7 @@ Empirically challenges and stress-tests:
    - Round-trip recovery ||u - lorentz_to_poincare(poincare_to_lorentz(u, c), c)|| < 1e-12.
    - Geodesic distance equality |d_B(u, v, c) - d_L(lor(u,c), lor(v,c), c)| < 1e-12.
 3. Universal dimension validation across poincare.py and lorentz.py functions.
-4. Edge cases: coincident points, extreme boundary points (1 - 1e-14), D=3584 hidden states.
+4. Edge cases: coincident points, extreme boundary points (1 - 1e-14), D=5120 hidden states.
 """
 
 import math
@@ -119,10 +119,10 @@ class TestCurvatureSpectrumGradientReconciliation:
                 )
 
     @pytest.mark.parametrize("c", [0.001, 0.1, 1.0, 10.0, 1000.0])
-    def test_distance_gradient_high_dimension_d3584(self, c: float):
-        """Test gradient on D=3584 LLM hidden dimension space across curvature extremes."""
+    def test_distance_gradient_high_dimension_d5120(self, c: float):
+        """Test gradient on D=5120 LLM hidden dimension space across curvature extremes."""
         rng = random.Random(42)
-        dim = 3584
+        dim = 5120
         R = 1.0 / math.sqrt(c)
 
         u_dir = generate_unit_vector(dim, rng)
@@ -136,7 +136,7 @@ class TestCurvatureSpectrumGradientReconciliation:
         grad_r = poincare.riemannian_gradient(analytical, u, c=c)
         lam = poincare.conformal_factor(u, c=c)
         norm_r = math.sqrt((lam**2) * poincare.dot_product(grad_r, grad_r))
-        assert abs(norm_r - 1.0) < 1e-12, f"Riemannian norm failed at D=3584, c={c}: {norm_r}"
+        assert abs(norm_r - 1.0) < 1e-12, f"Riemannian norm failed at D=5120, c={c}: {norm_r}"
 
         # Spot-check components against numerical gradient
         h = 1e-5 * min(1.0, R)
@@ -150,7 +150,7 @@ class TestCurvatureSpectrumGradientReconciliation:
                 - poincare.poincare_distance(um, v, c=c)
             ) / (2.0 * h)
             err = abs(analytical[idx] - num)
-            assert err < 1e-7, f"Component {idx} mismatch at D=3584, c={c}: err={err:.2e}"
+            assert err < 1e-7, f"Component {idx} mismatch at D=5120, c={c}: err={err:.2e}"
 
     @pytest.mark.parametrize("c", CURVATURE_SPECTRUM)
     def test_riemannian_gradient_unit_norm_exact(self, c: float):
@@ -314,10 +314,10 @@ class TestLorentzDualChartVariableCurvatureSpectrum:
                 )
 
     @pytest.mark.parametrize("c", [0.001, 1.0, 1000.0])
-    def test_lorentz_dual_chart_high_dimension_d3584(self, c: float):
-        """Test Lorentz conversions and distance equality at D=3584."""
+    def test_lorentz_dual_chart_high_dimension_d5120(self, c: float):
+        """Test Lorentz conversions and distance equality at D=5120."""
         rng = random.Random(2026)
-        dim = 3584
+        dim = 5120
         R = 1.0 / math.sqrt(c)
 
         u = [x * 0.3 * R for x in generate_unit_vector(dim, rng)]

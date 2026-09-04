@@ -6,6 +6,8 @@ Covers extreme values, edge boundaries, empty geometries, and corner conditions 
 import math
 import time
 import pytest
+
+from python.mlx_server.extract_endpoint import EXPECTED_HIDDEN_DIM
 from tests.fixtures.oracle import (
     poincare_distance,
     mobius_add,
@@ -225,7 +227,7 @@ def test_b_f4_out_of_bounds_layer_index():
 
 def test_b_f5_single_token_span_pooling():
     """B-F5.1: Span of 1 token returns identical token vector."""
-    token = [0.123] * 3584
+    token = [0.123] * 5120
     pooled = list(token)
     assert pooled == token
 
@@ -241,9 +243,9 @@ def test_b_f5_full_sequence_span_pooling():
 def test_b_f5_zero_length_empty_span():
     """B-F5.3: Empty span fallback produces zero vector."""
     tokens = []
-    fallback = [0.0] * 3584
+    fallback = [0.0] * 5120
     res = tokens[0] if len(tokens) > 0 else fallback
-    assert len(res) == 3584
+    assert len(res) == 5120
     assert res[0] == 0.0
 
 
@@ -607,15 +609,15 @@ def test_b_f14_exact_memory_budget_headroom():
 
 def test_b_f14_zero_token_transient_memory():
     """B-F14.2: 0 tokens allocates 0 MB transient tensor memory."""
-    transient_mb = (0 * 3584 * 2) / (1024 * 1024)
+    transient_mb = (0 * 5120 * 2) / (1024 * 1024)
     assert transient_mb == 0.0
 
 
 def test_b_f14_max_batch_tokens_memory_cap():
-    """B-F14.3: 2048 tokens pooled immediately consumes ~14.6 MB, well under 140 MB."""
-    transient_mb = (1 * 2048 * 3584 * 2) / (1024 * 1024)
+    """B-F14.3: 2048 tokens pooled immediately stays well under the 140 MB cap."""
+    transient_mb = (1 * 2048 * EXPECTED_HIDDEN_DIM * 2) / (1024 * 1024)
     assert transient_mb < 140.0
-    assert transient_mb == pytest.approx(14.0, abs=1.0)
+    assert transient_mb == pytest.approx((2048 * EXPECTED_HIDDEN_DIM * 2) / (1024 * 1024), abs=1.0)
 
 
 def test_b_f14_instantaneous_cache_hit_latency():

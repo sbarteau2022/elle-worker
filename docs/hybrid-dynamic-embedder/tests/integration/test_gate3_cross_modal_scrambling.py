@@ -19,7 +19,7 @@ from tests.fixtures.oracle import (
 )
 
 
-def make_aligned_embedding_pair(dim: int = 3584, nominal_dist: float = 0.14) -> Tuple[List[float], List[float]]:
+def make_aligned_embedding_pair(dim: int = 5120, nominal_dist: float = 0.14) -> Tuple[List[float], List[float]]:
     """
     Generates an aligned text and visual embedding pair whose geodesic distance is nominal_dist (e.g. 0.14 < 0.35).
     """
@@ -32,7 +32,7 @@ def make_aligned_embedding_pair(dim: int = 3584, nominal_dist: float = 0.14) -> 
     return x_text, x_vis
 
 
-def make_scrambled_embedding_pair(dim: int = 3584, scrambled_dist: float = 0.78) -> Tuple[List[float], List[float]]:
+def make_scrambled_embedding_pair(dim: int = 5120, scrambled_dist: float = 0.78) -> Tuple[List[float], List[float]]:
     """
     Generates a scrambled / misaligned text and visual embedding pair with d_geom >= 0.35 (e.g. 0.78).
     """

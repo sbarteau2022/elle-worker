@@ -81,7 +81,7 @@ class TestFullPipelineE2E:
         assert header.magic == MAGIC_DHNG
         assert header.seq_len == 64
         assert header.num_layers == 7
-        assert header.hidden_dim == 3584
+        assert header.hidden_dim == 5120
 
         buf.close()
 
@@ -188,13 +188,13 @@ class TestFullPipelineE2E:
     def test_patch_merger_output_shape(self):
         """M3: PatchMerger produces correct output dimensions."""
         import numpy as np
-        merger = PatchMerger(in_dim=1152, out_dim=3584, backend="numpy")
+        merger = PatchMerger(in_dim=1152, out_dim=5120, backend="numpy")
         patches = np.random.randn(1, 4, 4, 1152).astype(np.float32)
         out, spatial_meta = merger.merge_and_project(patches)
-        assert out.shape == (1, 2, 2, 3584)
+        assert out.shape == (1, 2, 2, 5120)
         assert spatial_meta["grid_h"] == 2
         assert spatial_meta["grid_w"] == 2
-        assert spatial_meta["out_dim"] == 3584
+        assert spatial_meta["out_dim"] == 5120
 
 
 class TestServerContractE2E:
@@ -226,7 +226,7 @@ class TestServerContractE2E:
         resp = self._get_json("/health")
         assert resp["status"] == "ok"
         assert resp["model"] == "Qwen3.8:27b-mlx"
-        assert resp["hidden_dim"] == 3584
+        assert resp["hidden_dim"] == 5120
         assert resp["layer_count"] == 7
 
     def test_models_endpoint(self):
@@ -244,14 +244,14 @@ class TestServerContractE2E:
             "curvature": 1.0,
         })
         assert resp["model"] == "Qwen3.8:27b-mlx"
-        assert resp["hidden_dim"] == 3584
+        assert resp["hidden_dim"] == 5120
         assert resp["layers_extracted"] == [0, 12, 24, 36, 48, 60, "final"]
         assert "layer_spectrum_summary" in resp
         assert "hyperbolic_coordinates" in resp
         assert len(resp["hyperbolic_coordinates"]) == 8
         assert "shm_descriptor" in resp
         shm = resp["shm_descriptor"]
-        assert shm["shape"] == [7, 3584]
+        assert shm["shape"] == [7, 5120]
         assert shm["dtype"] == "float16"
 
     def test_embed_layers_attention_pooling(self):

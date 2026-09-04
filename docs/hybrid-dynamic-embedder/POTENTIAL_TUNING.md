@@ -29,7 +29,7 @@ We isolate four high-leverage intervention points within the model graph:
            v
 +-------------------------------------------------------------------------+
 | TARGET 1: Vision Patch Merger (MLX Layer)                               |
-| - Projector W_merger: R^{D_vit} -> R^{3584}                             |
+| - Projector W_merger: R^{D_vit} -> R^{5120}                             |
 | - 2D-RoPE spatial coordinate adjustment                                 |
 +-------------------------------------------------------------------------+
            |
@@ -73,7 +73,7 @@ We isolate four high-leverage intervention points within the model graph:
 3. **Target 3: Dynamic Gating & Task Routing Network:**
    - A tiny feed-forward network (~65K parameters) that dynamically assigns task-specific weights across the layer spectrum and gates text vs. visual modality based on input signal quality.
 4. **Target 4: Hyperbolic Projection & Curvature Adapter:**
-   - A linear tangent transform W_proj in R^{3584 x d} followed by a learnable Riemannian manifold scaling parameter c mapping Euclidean vectors into the Poincare ball.
+   - A linear tangent transform W_proj in R^{5120 x d} followed by a learnable Riemannian manifold scaling parameter c mapping Euclidean vectors into the Poincare ball.
 
 ---
 

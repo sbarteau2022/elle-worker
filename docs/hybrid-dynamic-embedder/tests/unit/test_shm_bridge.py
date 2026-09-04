@@ -49,7 +49,7 @@ class TestShmTensorDescriptor:
     def test_roundtrip_pack_unpack(self):
         original = ShmTensorDescriptor(
             num_layers=7,
-            hidden_dim=3584,
+            hidden_dim=5120,
             seq_len=128,
             flags=0x0003,
             sequence_id=42,
@@ -60,7 +60,7 @@ class TestShmTensorDescriptor:
         assert recovered.version == VERSION_V1
         assert recovered.dtype == DTYPE_FLOAT16
         assert recovered.num_layers == 7
-        assert recovered.hidden_dim == 3584
+        assert recovered.hidden_dim == 5120
         assert recovered.seq_len == 128
         assert recovered.flags == 0x0003
         assert recovered.sequence_id == 42
@@ -77,11 +77,11 @@ class TestShmTensorDescriptor:
 
     def test_shape_property(self):
         desc = ShmTensorDescriptor()
-        assert desc.shape == (7, 3584)
+        assert desc.shape == (7, 5120)
 
     def test_strides_property(self):
         desc = ShmTensorDescriptor()
-        assert desc.strides == (3584 * 2, 2)
+        assert desc.strides == (5120 * 2, 2)
 
     def test_to_dict(self):
         desc = ShmTensorDescriptor(seq_len=256, sequence_id=10)
@@ -89,10 +89,10 @@ class TestShmTensorDescriptor:
         assert d["magic"] == "0x44484E47"
         assert d["dtype"] == "float16"
         assert d["num_layers"] == 7
-        assert d["hidden_dim"] == 3584
+        assert d["hidden_dim"] == 5120
         assert d["seq_len"] == 256
         assert d["sequence_id"] == 10
-        assert d["shape"] == [7, 3584]
+        assert d["shape"] == [7, 5120]
 
     def test_invalid_magic_raises(self):
         bad_data = b"\x00" * 64
@@ -105,7 +105,7 @@ class TestShmTensorDescriptor:
 
     def test_payload_bytes_default(self):
         desc = ShmTensorDescriptor()
-        assert desc.payload_bytes == 7 * 3584 * 2  # 50,176
+        assert desc.payload_bytes == 7 * 5120 * 2  # 71,680
 
     def test_timestamp_ns_auto_set(self):
         desc = ShmTensorDescriptor()
@@ -123,16 +123,16 @@ class TestSharedMemoryBuffer:
 
     def test_total_bytes(self):
         buf = SharedMemoryBuffer()
-        expected = 64 + 7 * 3584 * 2  # 50,240 bytes
+        expected = 64 + 7 * 5120 * 2  # 50,240 bytes
         assert buf.total_bytes == expected
 
     def test_write_read_roundtrip(self):
         buf = SharedMemoryBuffer()
         buf.allocate()
 
-        # Create synthetic 7×3584 tensor
+        # Create synthetic 7×5120 tensor
         test_value = 0.125
-        pooled = [[test_value] * 3584 for _ in range(7)]
+        pooled = [[test_value] * 5120 for _ in range(7)]
 
         desc = buf.write_tensor(pooled, seq_len=100)
         assert desc.seq_len == 100
@@ -145,7 +145,7 @@ class TestSharedMemoryBuffer:
 
         recovered_payload = buf.read_payload()
         assert len(recovered_payload) == 7
-        assert len(recovered_payload[0]) == 3584
+        assert len(recovered_payload[0]) == 5120
         # float16 precision: check within tolerance
         for layer in recovered_payload:
             for val in layer[:10]:  # Check first 10 values
@@ -157,11 +157,11 @@ class TestSharedMemoryBuffer:
         buf = SharedMemoryBuffer()
         buf.allocate()
 
-        pooled = [[float(i) * 0.01 + float(j) * 0.001 for j in range(3584)] for i in range(7)]
+        pooled = [[float(i) * 0.01 + float(j) * 0.001 for j in range(5120)] for i in range(7)]
         buf.write_tensor(pooled, seq_len=50)
 
         arr = buf.read_payload_numpy()
-        assert arr.shape == (7, 3584)
+        assert arr.shape == (7, 5120)
         assert arr.dtype == np.float16
 
         buf.close()
@@ -170,7 +170,7 @@ class TestSharedMemoryBuffer:
         buf = SharedMemoryBuffer()
         buf.allocate()
 
-        pooled = [[0.1] * 3584 for _ in range(7)]
+        pooled = [[0.1] * 5120 for _ in range(7)]
         d1 = buf.write_tensor(pooled, seq_len=10)
         d2 = buf.write_tensor(pooled, seq_len=20)
         d3 = buf.write_tensor(pooled, seq_len=30)
@@ -185,7 +185,7 @@ class TestSharedMemoryBuffer:
         buf = SharedMemoryBuffer()
         buf.allocate()
 
-        pooled = [[0.0] * 3584 for _ in range(7)]
+        pooled = [[0.0] * 5120 for _ in range(7)]
         desc = buf.write_tensor(pooled, flags=FLAG_GATED_VISUAL_FUSION)
         assert desc.gated_visual_fusion is True
         assert desc.dora_active is False
@@ -208,13 +208,13 @@ class TestSharedMemoryBuffer:
         buf = SharedMemoryBuffer()
         buf.allocate()
 
-        pooled = [[0.5] * 3584 for _ in range(7)]
+        pooled = [[0.5] * 5120 for _ in range(7)]
         desc = buf.write_tensor(pooled)
 
         assert desc.payload_offset == 64
-        assert desc.payload_bytes == 7 * 3584 * 2
-        assert desc.shape == (7, 3584)
-        assert desc.strides == (7168, 2)  # 3584 * 2 = 7168
+        assert desc.payload_bytes == 7 * 5120 * 2
+        assert desc.shape == (7, 5120)
+        assert desc.strides == (DEFAULT_HIDDEN_DIM * 2, 2)
 
         buf.close()
 

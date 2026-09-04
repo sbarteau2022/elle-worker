@@ -259,8 +259,8 @@ class DoRAPatchMergerAdapter:
     def __init__(
         self,
         merged_dim: int = 4608,
-        intermediate_dim: int = 3584,
-        out_dim: int = 3584,
+        intermediate_dim: int = 5120,
+        out_dim: int = 5120,
         rank: int = 16,
         alpha: Optional[float] = None,
     ) -> None:

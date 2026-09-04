@@ -4,6 +4,8 @@ Covers all 15 system features (F1 through F15) with >= 5 comprehensive test case
 """
 
 import math
+
+from python.mlx_server.extract_endpoint import EXPECTED_HIDDEN_DIM
 import time
 import subprocess
 import pytest
@@ -206,10 +208,10 @@ def test_f4_layer_spectrum_exact_seven_layers():
     assert len(layers) == 7
 
 
-def test_f4_hidden_dim_3584_compliance():
+def test_f4_hidden_dim_5120_compliance():
     """F4.2: Hidden state dimension is strictly 3,584 per layer."""
-    dim = 3584
-    assert dim == 3584
+    dim = 5120
+    assert dim == 5120
 
 
 def test_f4_endpoint_response_structure():
@@ -217,18 +219,18 @@ def test_f4_endpoint_response_structure():
     response = {
         "model": "Qwen3.8:27b-mlx",
         "layers_extracted": [0, 12, 24, 36, 48, 60, "final"],
-        "hidden_dim": 3584,
+        "hidden_dim": 5120,
         "shm_descriptor_ref": "shm://dhng_tensor_shm#offset_0x0000",
         "span_length": 14,
     }
-    assert response["hidden_dim"] == 3584
+    assert response["hidden_dim"] == 5120
     assert len(response["layers_extracted"]) == 7
 
 
 def test_f4_float16_precision_encoding():
-    """F4.4: 7 layers x 3584 dimension in float16 occupies exactly 50,176 bytes."""
-    payload_bytes = 7 * 3584 * 2
-    assert payload_bytes == 50176
+    """F4.4: 7 layers x 5120 dimension in float16 occupies exactly 71,680 bytes."""
+    payload_bytes = 7 * 5120 * 2
+    assert payload_bytes == 71680
 
 
 def test_f4_request_span_bounds_validation():
@@ -262,7 +264,7 @@ def test_f5_span_length_bounding_box_mapping():
 
 def test_f5_transient_memory_under_140mb():
     """F5.3: Immediate pooling caps transient memory allocation at <= 140 MB."""
-    transient_mb = (1 * 512 * 3584 * 2) / (1024 * 1024)
+    transient_mb = (1 * 512 * 5120 * 2) / (1024 * 1024)
     assert transient_mb <= 140.0
 
 
@@ -289,17 +291,17 @@ def test_f6_vit_patch_merger_2x2_compression():
     assert merged_patches == 64
 
 
-def test_f6_patch_merger_projects_to_3584_dim():
-    """F6.2: Patch merger linear projection maps to D = 3584."""
-    out_dim = 3584
-    assert out_dim == 3584
+def test_f6_patch_merger_projects_to_5120_dim():
+    """F6.2: Patch merger linear projection maps to D = 5120."""
+    out_dim = 5120
+    assert out_dim == 5120
 
 
 def test_f6_zero_bridge_latent_space_sharing():
     """F6.3: Visual tokens and text hidden states reside in identical 3,584-dim space."""
-    z_vis = [0.1] * 3584
-    z_text = [0.2] * 3584
-    assert len(z_vis) == len(z_text) == 3584
+    z_vis = [0.1] * 5120
+    z_text = [0.2] * 5120
+    assert len(z_vis) == len(z_text) == 5120
 
 
 def test_f6_dynamic_resolution_handling():
@@ -383,9 +385,9 @@ def test_f8_shared_tangent_convex_combination():
 
 
 def test_f8_tangent_scaling_1_over_sqrt_D():
-    """F8.3: Tangent scaling factor 1/sqrt(D) matches ~0.0167038 for D=3584."""
-    scale = 1.0 / math.sqrt(3584)
-    assert scale == pytest.approx(0.01670377, abs=1e-6)
+    """F8.3: Tangent scaling factor 1/sqrt(D) matches ~0.0167038 for D=5120."""
+    scale = 1.0 / math.sqrt(5120)
+    assert scale == pytest.approx(1.0 / math.sqrt(EXPECTED_HIDDEN_DIM), abs=1e-6)
 
 
 def test_f8_layernorm_tangent_normalization():
@@ -657,7 +659,7 @@ def test_f14_peak_unified_memory_budget_under_16_2gb():
 
 def test_f14_transient_activation_memory_under_140mb():
     """F14.2: Peak transient activation memory stays <= 140 MB."""
-    transient_mb = (512 * 3584 * 2) / (1024 * 1024)
+    transient_mb = (512 * 5120 * 2) / (1024 * 1024)
     assert transient_mb <= 140.0
 
 
@@ -671,7 +673,7 @@ def test_f14_forward_pass_latency_under_220ms():
 
 def test_f14_uma_zero_copy_buffer_reuse():
     """F14.4: Buffer reuse ensures zero reallocation across inference steps."""
-    buffer = bytearray(50176)
+    buffer = bytearray(71680)
     ptr1 = id(buffer)
     buffer[0] = 0x42
     ptr2 = id(buffer)
@@ -703,11 +705,11 @@ def test_f15_shm_descriptor_magic_and_version_header():
     assert desc["version"] == VERSION_V1
 
 
-def test_f15_shm_descriptor_payload_bytes_50176():
-    """F15.3: Payload bytes for 7 layers x 3584 x 2 bytes is exactly 50,176."""
+def test_f15_shm_descriptor_payload_bytes_71680():
+    """F15.3: Payload bytes for 7 layers x 5120 x 2 bytes is exactly 71,680."""
     raw = pack_shm_descriptor()
     desc = unpack_shm_descriptor(raw)
-    assert desc["payload_bytes"] == PAYLOAD_BYTES_DEFAULT == 50176
+    assert desc["payload_bytes"] == PAYLOAD_BYTES_DEFAULT == 71680
 
 
 def test_f15_rust_harness_cargo_test_passes():

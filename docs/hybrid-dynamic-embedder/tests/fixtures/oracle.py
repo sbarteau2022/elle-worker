@@ -262,7 +262,7 @@ def shared_tangent_fusion(
     z_text: List[float],
     z_vis: List[float],
     g: float,
-    D: int = 3584,
+    D: int = 5120,
     c: float = 1.0,
 ) -> Tuple[List[float], List[float]]:
     """

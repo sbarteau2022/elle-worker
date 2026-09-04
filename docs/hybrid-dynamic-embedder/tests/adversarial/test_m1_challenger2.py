@@ -126,12 +126,12 @@ class TestProductManifoldStress:
             expected_sum = (PRODUCT_PHI ** 2) * (1.0 - PRODUCT_PHI ** (-dim))
             assert abs(sum_sq - expected_sum) < 1e-13
 
-        # For high dimension D = 3584, weights taper off monotonically down to float64 underflow
-        weights_3584 = phi_scale_weights(3584)
-        assert len(weights_3584) == 3584
-        assert weights_3584[0] == 1.0
-        assert weights_3584[8] == PRODUCT_PHI ** (-4.0)
-        assert all(weights_3584[k] >= weights_3584[k + 1] for k in range(len(weights_3584) - 1))
+        # For high dimension D = 5120, weights taper off monotonically down to float64 underflow
+        weights_5120 = phi_scale_weights(5120)
+        assert len(weights_5120) == 5120
+        assert weights_5120[0] == 1.0
+        assert weights_5120[8] == PRODUCT_PHI ** (-4.0)
+        assert all(weights_5120[k] >= weights_5120[k + 1] for k in range(len(weights_5120) - 1))
 
     def test_torus_distance_dimension_mismatch_rejection(self):
         """Verify torus_distance strictly raises ValueError on dimension mismatch."""

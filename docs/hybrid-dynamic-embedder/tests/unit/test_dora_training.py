@@ -53,7 +53,7 @@ class TestDoRAAdapter:
 
     def test_compression_ratio_less_than_one(self):
         """Low-rank adapter should use fewer params than full matrix."""
-        adapter = DoRAAdapter(in_dim=3584, out_dim=3584, rank=16)
+        adapter = DoRAAdapter(in_dim=5120, out_dim=5120, rank=16)
         assert adapter.compression_ratio < 0.02  # < 2% of full params
 
     def test_effective_weight_shape(self):
@@ -221,16 +221,16 @@ class TestDoRAPatchMergerAdapter:
     def test_default_dimensions(self):
         adapter = DoRAPatchMergerAdapter()
         assert adapter.merged_dim == 4608
-        assert adapter.intermediate_dim == 3584
-        assert adapter.out_dim == 3584
+        assert adapter.intermediate_dim == 5120
+        assert adapter.out_dim == 5120
         assert adapter.rank == 16
 
     def test_fc1_fc2_shapes(self):
         adapter = DoRAPatchMergerAdapter()
         assert adapter.fc1_adapter.in_dim == 4608
-        assert adapter.fc1_adapter.out_dim == 3584
-        assert adapter.fc2_adapter.in_dim == 3584
-        assert adapter.fc2_adapter.out_dim == 3584
+        assert adapter.fc1_adapter.out_dim == 5120
+        assert adapter.fc2_adapter.in_dim == 5120
+        assert adapter.fc2_adapter.out_dim == 5120
 
     def test_total_trainable_params(self):
         adapter = DoRAPatchMergerAdapter(rank=16)

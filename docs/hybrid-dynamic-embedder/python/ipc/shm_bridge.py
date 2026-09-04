@@ -6,18 +6,18 @@ and mmap-based tensor read/write for the MLX ↔ Rust harness zero-copy boundary
 
 Memory Layout (SPECIFICATION.md § 6.3):
     [0x0000 - 0x003F] 64-byte ShmTensorDescriptor header
-    [0x0040 - ...]     float16 payload: 7 × 3584 × 2 = 50,176 bytes
+    [0x0040 - ...]     float16 payload: 7 × 5120 × 2 = 71,680 bytes
 
 The descriptor is packed as:
     magic:          u32  (0x44484E47 = "DHNG")
     version:        u16  (0x0001)
     dtype:          u16  (0x0001 = float16)
     num_layers:     u32  (7)
-    hidden_dim:     u32  (3584)
+    hidden_dim:     u32  (5120)
     seq_len:        u32  (variable)
     flags:          u32  (Bit 0: Gated visual fusion, Bit 1: DoRA active)
     payload_offset: u64  (64)
-    payload_bytes:  u64  (50176)
+    payload_bytes:  u64  (71680)
     timestamp_ns:   u64  (nanosecond wall clock)
     sequence_id:    u64  (monotonic counter)
     reserved:       8 bytes padding (64-byte total alignment)
@@ -43,8 +43,8 @@ MAGIC_DHNG = 0x44484E47
 VERSION_V1 = 0x0001
 DTYPE_FLOAT16 = 0x0001
 DEFAULT_NUM_LAYERS = 7
-DEFAULT_HIDDEN_DIM = 3584
-DEFAULT_PAYLOAD_BYTES = DEFAULT_NUM_LAYERS * DEFAULT_HIDDEN_DIM * 2  # 50,176 bytes
+DEFAULT_HIDDEN_DIM = 5120
+DEFAULT_PAYLOAD_BYTES = DEFAULT_NUM_LAYERS * DEFAULT_HIDDEN_DIM * 2  # 71,680 bytes
 DESCRIPTOR_SIZE = 64
 DESCRIPTOR_FORMAT = "<IHHI I I I Q Q Q Q 8s"
 
@@ -210,7 +210,7 @@ class SharedMemoryBuffer:
         Writes a multi-layer pooled tensor into the shared memory buffer.
 
         Args:
-            pooled_layers: List of 7 vectors, each of dimension 3584.
+            pooled_layers: List of 7 vectors, each of dimension 5120.
             seq_len: Input sequence length (metadata).
             flags: Bit flags for gated fusion / DoRA status.
 

@@ -19,7 +19,7 @@ MAX_LATENCY_MS = 250.0  # Acceptance criteria bound
 TARGET_LATENCY_MS = 220.0  # Design target bound
 
 
-def simulate_multimodal_extraction_step(dim: int = 3584, seq_len: int = 128) -> float:
+def simulate_multimodal_extraction_step(dim: int = 5120, seq_len: int = 128) -> float:
     """
     Simulates the core extraction pipeline for a receipt line item:
     1. Span-level pooling over extracted layer states
@@ -53,11 +53,11 @@ def test_unified_memory_budget_accounting():
 
 def test_transient_memory_budget_accounting():
     """R2: Immediate step eval caps transient tensor accumulation at <= 140 MB."""
-    # 1 layer float16 tensor for 512 tokens: 1 * 512 * 3584 * 2 = 3.67 MB
-    single_layer_tensor_mb = (1 * 512 * 3584 * 2) / (1024.0 * 1024.0)
+    # 1 layer float16 tensor for 512 tokens: 1 * 512 * 5120 * 2 = 3.67 MB
+    single_layer_tensor_mb = (1 * 512 * 5120 * 2) / (1024.0 * 1024.0)
     assert single_layer_tensor_mb < MAX_TRANSIENT_MEMORY_MB
     # Even 7 active layers pooled immediately stay under 30 MB
-    seven_layers_pooled_mb = (7 * 3584 * 2) / (1024.0 * 1024.0)
+    seven_layers_pooled_mb = (7 * 5120 * 2) / (1024.0 * 1024.0)
     assert seven_layers_pooled_mb < 0.1  # ~50 KB
 
 
@@ -66,11 +66,11 @@ def test_extraction_latency_under_250ms():
     latencies = []
     # Warmup
     for _ in range(3):
-        simulate_multimodal_extraction_step(dim=3584)
+        simulate_multimodal_extraction_step(dim=5120)
 
     # Benchmark 20 iterations
     for _ in range(20):
-        lat = simulate_multimodal_extraction_step(dim=3584)
+        lat = simulate_multimodal_extraction_step(dim=5120)
         latencies.append(lat)
 
     avg_lat = sum(latencies) / len(latencies)
@@ -86,7 +86,7 @@ def test_batch_throughput_scaling():
     """AC3: Evaluates batch throughput across a 40-item receipt."""
     t0 = time.perf_counter()
     for _ in range(40):
-        simulate_multimodal_extraction_step(dim=3584)
+        simulate_multimodal_extraction_step(dim=5120)
     total_elapsed_ms = (time.perf_counter() - t0) * 1000.0
     avg_per_item_ms = total_elapsed_ms / 40.0
 

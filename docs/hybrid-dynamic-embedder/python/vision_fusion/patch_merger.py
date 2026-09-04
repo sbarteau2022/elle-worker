@@ -2,7 +2,7 @@
 Multimodal Projector & 2x2 Spatial Patch Merger Module (R3).
 
 Merges 2x2 spatial patch windows into a single dense visual token and projects
-from 4 * D_vit = 4608 to D = 3584 LLM latent space with LayerNorm and GELU MLP.
+from 4 * D_vit = 4608 to D = 5120 LLM latent space with LayerNorm and GELU MLP.
 Exposes linear layers fc1 and fc2 for DoRA low-rank adaptation (Milestone 3).
 """
 
@@ -24,15 +24,15 @@ except ImportError:
 
 class PatchMerger:
     """
-    Merges 2x2 spatial patch windows and projects directly into LLM latent space D=3584.
+    Merges 2x2 spatial patch windows and projects directly into LLM latent space D=5120.
     Supports MLX (Metal GPU) and NumPy (deterministic CPU) execution.
     """
 
     def __init__(
         self,
         in_dim: int = 1152,
-        out_dim: int = 3584,
-        intermediate_dim: int = 3584,
+        out_dim: int = 5120,
+        intermediate_dim: int = 5120,
         backend: str = "auto",
         seed: int = 42,
     ) -> None:
@@ -77,7 +77,7 @@ class PatchMerger:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Any, Dict[str, Any]]:
         """
-        Merges 2x2 spatial patch windows and projects to D=3584.
+        Merges 2x2 spatial patch windows and projects to D=5120.
 
         Args:
             patches: Tensor of shape (B, Nh, Nw, D_vit)
@@ -85,7 +85,7 @@ class PatchMerger:
 
         Returns:
             (visual_tokens, spatial_metadata)
-            visual_tokens: Shape (B, Mh, Mw, 3584) where Mh = Nh // 2, Mw = Nw // 2.
+            visual_tokens: Shape (B, Mh, Mw, 5120) where Mh = Nh // 2, Mw = Nw // 2.
         """
         Nh, Nw = int(patches.shape[1]), int(patches.shape[2])
         assert Nh % 2 == 0 and Nw % 2 == 0, f"Grid dimensions ({Nh}, {Nw}) must both be even numbers."

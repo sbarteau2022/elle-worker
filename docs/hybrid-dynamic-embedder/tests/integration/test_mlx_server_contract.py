@@ -48,7 +48,7 @@ def test_mlx_extracted_layer_spectrum():
 
 
 def test_span_level_pooling_dimension_contract():
-    """R2: Span pooling outputs [7, 3584] tensor rather than full sequence [7, N, 3584]."""
+    """R2: Span pooling outputs [7, 5120] tensor rather than full sequence [7, N, 5120]."""
     seq_len = 512
     span_start = 24
     span_end = 35  # Span length 12
@@ -59,23 +59,29 @@ def test_span_level_pooling_dimension_contract():
     for layer_h in simulated_hidden_states:
         assert len(layer_h) == EXPECTED_HIDDEN_DIM
 
-    # Payload size for float16: 7 * 3584 * 2 bytes = 50,176 bytes
+    # Payload size for float16: 7 * 5120 * 2 bytes = 71,680 bytes
     bytes_per_sample = EXPECTED_LAYER_COUNT * EXPECTED_HIDDEN_DIM * 2
-    assert bytes_per_sample == 50176
+    assert bytes_per_sample == 71680
 
 
 def test_transient_memory_budget_cap():
     """R2: Immediate step evaluation caps transient memory at <= 140 MB."""
     transient_layer_mb = (1 * 512 * EXPECTED_HIDDEN_DIM * 2) / (1024 * 1024)
     assert transient_layer_mb < MAX_TRANSIENT_MEMORY_MB
-    assert transient_layer_mb < 5.0  # Under 5 MB active per step
+    # Derived from the tapped width, not a literal: one fp16 layer of 512
+    # tokens. Hardcoding this hid the 3584 -> 5120 change.
+    assert transient_layer_mb == pytest.approx(
+        (512 * EXPECTED_HIDDEN_DIM * 2) / (1024 * 1024), abs=1e-9
+    )
 
 
 def test_shared_tangent_fusion_and_scaling():
     """R3: Shared tangent space fusion combines z_text and z_vis with 1/sqrt(D) scaling."""
     D = EXPECTED_HIDDEN_DIM
-    z_text = [1.0] * D
-    z_vis = [0.5] * D
+    # Must vary across components: LayerNorm maps any CONSTANT vector to
+    # exactly zero, so a flat input lands on the origin and tests nothing.
+    z_text = [1.0 + 0.001 * (i % 97) for i in range(D)]
+    z_vis = [0.5 - 0.002 * (i % 61) for i in range(D)]
 
     # High OCR confidence g = 0.8
     g = 0.8
@@ -83,14 +89,20 @@ def test_shared_tangent_fusion_and_scaling():
 
     # Tangent scaling check: magnitude scaled by 1/sqrt(D)
     expected_scale = 1.0 / math.sqrt(D)
-    expected_unscaled = g * 1.0 + (1.0 - g) * 0.5  # 0.9
+    expected_unscaled = g * z_text[0] + (1.0 - g) * z_vis[0]
     expected_val = expected_unscaled * expected_scale
     assert fused_tangent[0] == pytest.approx(expected_val, abs=1e-12)
 
     # Poincare point norm must strictly reside inside open ball ||x|| < 1.0
     p_norm = vector_norm(poincare_pt)
     assert p_norm < 1.0
-    assert p_norm > 0.0
+    assert p_norm > 1e-3
+
+    # The degenerate case, asserted rather than relied upon: a constant
+    # tangent vector has zero variance, so LayerNorm annihilates it and
+    # exp_0 returns the origin exactly.
+    _, flat_pt = shared_tangent_fusion([1.0] * D, [0.5] * D, g=g, D=D, c=1.0)
+    assert vector_norm(flat_pt) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_dynamic_gating_boundary_extremes():
@@ -154,12 +166,12 @@ def test_layer_extractor_bounds_and_inverted_span_rejection():
 
 
 def test_layer_extractor_float16_and_base64_roundtrip():
-    """R2: Float16 binary serialization produces exactly 50,176 bytes and valid base64."""
+    """R2: Float16 binary serialization produces exactly 71,680 bytes and valid base64."""
     extractor = LayerExtractor(hidden_dim=EXPECTED_HIDDEN_DIM)
     pooled = extractor.extract_span_pooled(token_count=10, span=(0, 5))
 
     raw_bytes = extractor.to_float16_bytes(pooled)
-    assert len(raw_bytes) == 50176  # 7 * 3584 * 2
+    assert len(raw_bytes) == 71680  # 7 * 5120 * 2
 
     # Verify unpack back to floats
     num_floats = 7 * EXPECTED_HIDDEN_DIM
@@ -183,9 +195,9 @@ def test_layer_extractor_shm_descriptor_packing():
     assert unpacked["magic"] == MAGIC_DHNG
     assert unpacked["is_valid_magic"] is True
     assert unpacked["num_layers"] == 7
-    assert unpacked["hidden_dim"] == 3584
+    assert unpacked["hidden_dim"] == 5120
     assert unpacked["seq_len"] == 16
-    assert unpacked["payload_bytes"] == 50176
+    assert unpacked["payload_bytes"] == 71680
     assert unpacked["sequence_id"] == 99
 
 
@@ -195,13 +207,13 @@ def test_transient_memory_bounds_large_sequence():
 
     # N = 2048
     mb_2k = extractor.compute_transient_memory_mb(seq_len=2048)
-    assert mb_2k == pytest.approx(14.0, abs=1.0)
-    assert mb_2k <= 30.0
+    assert mb_2k == pytest.approx((2048 * EXPECTED_HIDDEN_DIM * 2) / (1024 * 1024), abs=1.0)
+    assert mb_2k <= 40.0
 
-    # N = 4096: <= 30 MB
+    # N = 4096: exactly 40.0 MB at hidden_dim 5120 (was 28.0 at 3584)
     mb_4k = extractor.compute_transient_memory_mb(seq_len=4096)
-    assert mb_4k == pytest.approx(28.0, abs=2.0)
-    assert mb_4k <= 30.0
+    assert mb_4k == pytest.approx((4096 * EXPECTED_HIDDEN_DIM * 2) / (1024 * 1024), abs=2.0)
+    assert mb_4k <= 40.0
 
     # N = 8192: <= 140 MB
     mb_8k = extractor.compute_transient_memory_mb(seq_len=8192)
@@ -219,7 +231,7 @@ def test_server_http_health_and_models_endpoints():
             data = json.loads(resp.read().decode("utf-8"))
             assert data["status"] == "ok"
             assert data["model"] == "Qwen3.8:27b-mlx"
-            assert data["hidden_dim"] == 3584
+            assert data["hidden_dim"] == 5120
             assert data["layer_count"] == 7
             assert data["layers"] == EXTRACTED_LAYERS
 
@@ -282,9 +294,9 @@ def test_server_http_embed_layers_endpoint():
             # Validate shm_descriptor
             assert "shm_descriptor" in data
             shm_desc = data["shm_descriptor"]
-            assert shm_desc["shape"] == [7, 3584]
+            assert shm_desc["shape"] == [7, 5120]
             assert shm_desc["dtype"] == "float16"
-            assert shm_desc["byte_length"] == 50176
+            assert shm_desc["byte_length"] == 71680
 
         # Test with shm_enabled = False (returns base64)
         req_body["shm_enabled"] = False
@@ -300,7 +312,7 @@ def test_server_http_embed_layers_endpoint():
             data = json.loads(resp.read().decode("utf-8"))
             assert "embeddings_base64" in data
             raw = base64.b64decode(data["embeddings_base64"])
-            assert len(raw) == 50176
+            assert len(raw) == 71680
     finally:
         stop_server(server, thread)
 

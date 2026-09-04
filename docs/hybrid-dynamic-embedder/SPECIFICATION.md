@@ -24,8 +24,8 @@ Operating entirely on Apple Silicon via an optimized **MLX server layer** interf
 +-----------------------------+   +----------------------------+   +--------------------+
 |  Vision Tower (Qwen-VL ViT) |   |  Qwen3.8:27b Transformer   |   | Deterministic Gate |
 |  - Patch extraction (14x14) |   |  - 64 Hidden Layers        |   | - SHA-256 Check    |
-|  - Spatial 2D-RoPE          |   |  - Hidden Dim D = 3584     |   | - Cent Arithmetic  |
-|  - Patch Merger (to D=3584) |   |  - Rotary Position (RoPE)  |   |   Reconciliation   |
+|  - Spatial 2D-RoPE          |   |  - Hidden Dim D = 5120     |   | - Cent Arithmetic  |
+|  - Patch Merger (to D=5120) |   |  - Rotary Position (RoPE)  |   |   Reconciliation   |
 +--------------+--------------+   +-------------+--------------+   +---------+----------+
                |                                |                            |
                v                                v                            |
@@ -219,7 +219,7 @@ Data ingestion adheres to a zero-compromise triple validation gate:
 ### 6.3 Zero-Copy Rust Harness Memory Boundary
 To maintain sub-second performance across the Rust $\leftrightarrow$ MLX boundary, large multi-layer tensors bypass JSON serialization:
 - MLX server writes continuous float16 tensors into an anonymous shared memory segment (`mmap` / POSIX `shm_open`).
-- The response returns a fixed 64-byte descriptor containing `{ shm_id, byte_offset, shape: [7, 3584], stride }`.
+- The response returns a fixed 64-byte descriptor containing `{ shm_id, byte_offset, shape: [7, 5120], stride }`.
 - The Rust harness (`harness-dhng`) maps the descriptor directly into native `ndarray::ArrayView1<f16>` without allocation or data copies.
 
 ---

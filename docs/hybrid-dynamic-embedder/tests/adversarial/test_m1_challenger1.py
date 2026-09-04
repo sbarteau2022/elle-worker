@@ -4,7 +4,7 @@ Adversarial Empirical Stress Test Suite — Challenger 1 (Milestone 1).
 Challenges:
 1. Extreme near-boundary points (||u|| -> 1.0 - eps, down to eps = 1e-15).
 2. Antipodal vectors (exact u = -v and perturbed u ~ -v near boundary).
-3. High-dimensional vectors (D = 3584, matching Qwen3.8:27b hidden dimension).
+3. High-dimensional vectors (D = 5120, matching Qwen3.8:27b hidden dimension).
 4. Curvature variations (c in {0.1, 0.5, 1.0, 2.0, 5.0, 10.0}).
 5. Pathological/fuzzy inputs (NaN, Inf, dimension mismatch, zero vectors).
 """
@@ -161,7 +161,7 @@ class TestExtremeNearBoundaryPoints:
 class TestAntipodalVectors:
     """Stress tests collinear and near-antipodal vector interactions."""
 
-    @pytest.mark.parametrize("dim", [2, 16, 128, 3584])
+    @pytest.mark.parametrize("dim", [2, 16, 128, 5120])
     @pytest.mark.parametrize("c", [0.1, 1.0, 5.0])
     def test_exact_antipodal_additive_property(self, dim: int, c: float):
         """For exact collinear antipodal points u and -u, d(u, -u) == 2 * d(0, u)."""
@@ -235,18 +235,18 @@ class TestAntipodalVectors:
 
 
 # =====================================================================
-# 3. HIGH-DIMENSIONAL VECTORS (D = 3584)
+# 3. HIGH-DIMENSIONAL VECTORS (D = 5120)
 # =====================================================================
 
 
-class TestHighDimensionalD3584:
-    """Stress tests on D = 3584 matching LLM hidden state space."""
+class TestHighDimensionalD5120:
+    """Stress tests on D = 5120 matching LLM hidden state space."""
 
-    D = 3584
+    D = 5120
 
     def test_tangent_scaling_prevents_saturation(self):
         """
-        Standard normal vector in R^3584 has norm ~ sqrt(3584) ~ 60.
+        Standard normal vector in R^5120 has norm ~ sqrt(5120) ~ 60.
         Unscaled exp map saturates to 1.0 (clamped to 0.99999).
         Scaled exp map with 1/sqrt(D) prevents saturation to norm ~ 0.46.
         """
@@ -267,8 +267,8 @@ class TestHighDimensionalD3584:
         norm_p_scaled = euclidean_norm(p_scaled)
         assert 0.40 < norm_p_scaled < 0.52
 
-    def test_exp_log_inversion_precision_d3584(self):
-        """Exp and Log map at origin in D = 3584 must invert with precision < 1e-15."""
+    def test_exp_log_inversion_precision_d5120(self):
+        """Exp and Log map at origin in D = 5120 must invert with precision < 1e-15."""
         rng = random.Random(123)
         v = scale_tangent([rng.gauss(0.0, 1.0) for _ in range(self.D)], dim=self.D)
 
@@ -278,8 +278,8 @@ class TestHighDimensionalD3584:
         max_err = max(abs(a - b) for a, b in zip(v, v_rec))
         assert max_err < 1e-15
 
-    def test_product_distance_h3584_t8_execution(self):
-        """Product distance H^3584 x T^8 must evaluate smoothly without overflow."""
+    def test_product_distance_h5120_t8_execution(self):
+        """Product distance H^5120 x T^8 must evaluate smoothly without overflow."""
         rng = random.Random(456)
         u_h = [x * 0.5 for x in generate_unit_vector(self.D, rng)]
         v_h = [x * 0.5 for x in generate_unit_vector(self.D, rng)]

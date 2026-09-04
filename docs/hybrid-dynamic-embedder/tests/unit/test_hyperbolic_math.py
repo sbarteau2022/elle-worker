@@ -320,9 +320,9 @@ class TestHyperbolicEdgeCasesAndSafeguards(unittest.TestCase):
     def test_tangent_scaling_helper(self):
         """
         Test scale_tangent applies 1 / sqrt(D) scaling.
-        For D = 3584 and unit components, norm becomes 1.0.
+        For D = 5120 and unit components, norm becomes 1.0.
         """
-        dim = 3584
+        dim = 5120
         v = [1.0] * dim
         scaled = scale_tangent(v, dim=dim)
         expected_scale = 1.0 / math.sqrt(dim)

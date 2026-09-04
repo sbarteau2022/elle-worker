@@ -161,7 +161,7 @@ def shared_tangent_fusion(
     z_text: Sequence[float],
     z_vis: Sequence[float],
     g: float = 0.8,
-    D: int = 3584,
+    D: int = 5120,
     c: float = 1.0,
     apply_layernorm: bool = True,
     convention: str = "B",

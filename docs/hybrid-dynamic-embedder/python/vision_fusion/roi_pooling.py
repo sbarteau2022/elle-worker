@@ -233,7 +233,7 @@ def extract_roi_visual_embedding(
     5. Falls back to global page-level pooling if bbox is empty or captures zero tokens.
 
     Returns:
-        3584-dimensional visual embedding vector z_vis.
+        5120-dimensional visual embedding vector z_vis.
     """
     total_tokens = len(visual_tokens)
     if total_tokens == 0:
@@ -320,7 +320,7 @@ class RoIPooler:
     def __init__(
         self,
         grid_shape: Tuple[int, int] = (16, 16),
-        hidden_dim: int = 3584,
+        hidden_dim: int = 5120,
         patch_size: int = 14,
         merger_factor: int = 2,
     ) -> None:
