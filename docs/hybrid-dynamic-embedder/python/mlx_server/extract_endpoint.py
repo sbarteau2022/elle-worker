@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import math
+import os
 import struct
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -24,6 +25,12 @@ except ImportError:
     mx = None
     nn = None
     _HAS_MLX = False
+
+# Where the 4-bit MLX weights live. Override with HDE_MODEL_PATH.
+DEFAULT_MODEL_PATH = os.environ.get(
+    "HDE_MODEL_PATH",
+    os.path.expanduser("~/Desktop/Elle/tools/mlx-serve/weights/Qwen3.8-27B-4bit"),
+)
 
 EXTRACTED_LAYERS: List[Union[int, str]] = [0, 12, 24, 36, 48, 60, "final"]
 EXPECTED_LAYER_COUNT: int = 7
@@ -51,6 +58,65 @@ DTYPE_FLOAT16 = 0x0001
 PAYLOAD_BYTES_DEFAULT = EXPECTED_LAYER_COUNT * EXPECTED_HIDDEN_DIM * 2  # 71,680 bytes
 
 
+def load_qwen_mlx(model_path: str = DEFAULT_MODEL_PATH) -> Tuple[Any, Any]:
+    """
+    Loads the Qwen3.8-27B 4-bit MLX weights and returns (decoder, tokenizer).
+
+    mlx_vlm.load hands back the full multimodal wrapper; the transformer
+    stack this module taps sits at `.language_model.model`, which is where
+    embed_tokens / layers / norm actually live. Returning that inner object
+    keeps _extract_mlx_live's attribute access flat.
+    """
+    if not _HAS_MLX:
+        raise RuntimeError("MLX is not available in this interpreter.")
+    try:
+        from mlx_vlm import load as vlm_load
+    except ImportError as e:
+        raise RuntimeError(
+            "mlx-vlm is required to load the multimodal coordinator: "
+            "pip install mlx-vlm"
+        ) from e
+    if not os.path.isdir(model_path):
+        raise FileNotFoundError(
+            f"MLX weights not found at {model_path}. Fetch them with "
+            "~/Desktop/Elle/tools/mlx-serve/fetch_weights.sh, or set HDE_MODEL_PATH."
+        )
+    wrapper, processor = vlm_load(model_path)
+    decoder = wrapper.language_model.model
+    tokenizer = getattr(processor, "tokenizer", processor)
+
+    measured = decoder.embed_tokens.weight.shape[0] if hasattr(decoder, "embed_tokens") else None
+    n_blocks = len(decoder.layers)
+    max_tap = max(l for l in EXTRACTED_LAYERS if isinstance(l, int))
+    if n_blocks <= max_tap:
+        raise ValueError(
+            f"Model has {n_blocks} blocks but EXTRACTED_LAYERS taps index {max_tap}."
+        )
+    return decoder, tokenizer
+
+
+def make_live_extractor(model_path: str = DEFAULT_MODEL_PATH) -> "LayerExtractor":
+    """Loads the weights and returns an extractor wired for a live forward pass."""
+    from mlx_vlm import load as vlm_load
+
+    wrapper, processor = vlm_load(model_path)
+    decoder = wrapper.language_model.model
+    tokenizer = getattr(processor, "tokenizer", processor)
+    ex = LayerExtractor(model=decoder, tokenizer=tokenizer)
+
+    from mlx_lm.models.cache import make_prompt_cache
+    ex._cache_factory = lambda: make_prompt_cache(wrapper.language_model)
+    try:
+        from mlx_vlm.models.qwen3_5.language import (
+            _create_qwen3_5_attention_mask,
+            _create_qwen3_5_ssm_mask,
+        )
+        ex._mask_fns = (_create_qwen3_5_attention_mask, _create_qwen3_5_ssm_mask)
+    except ImportError:
+        ex._mask_fns = None
+    return ex
+
+
 class LayerExtractor:
     """
     Manages multi-layer hidden state extraction, within-block step evaluation,
@@ -63,8 +129,12 @@ class LayerExtractor:
         hidden_dim: int = EXPECTED_HIDDEN_DIM,
         layers: Optional[Sequence[Union[int, str]]] = None,
         query_vector: Optional[Sequence[float]] = None,
+        tokenizer: Optional[Any] = None,
     ) -> None:
         self.model = model
+        self.tokenizer = tokenizer
+        self._cache_factory: Optional[Any] = None
+        self._mask_fns: Optional[Tuple[Any, Any]] = None
         self.hidden_dim = hidden_dim
         self.layers = list(layers) if layers is not None else list(EXTRACTED_LAYERS)
         self.layer_count = len(self.layers)
@@ -128,9 +198,14 @@ class LayerExtractor:
         span: Tuple[int, int],
         layer_generator: Optional[Sequence[Sequence[float]]] = None,
         pooling: str = "span_mean",
+        input_ids: Optional[Any] = None,
     ) -> List[List[float]]:
         """
         Extracts pooled hidden states across all tapped layers for a specific token span.
+
+        With a model attached, input_ids is required and drives a real forward
+        pass. Without one, returns the deterministic simulation vectors used by
+        the unit and contract suites.
         """
         start_idx, end_idx = span
         if start_idx > end_idx:
@@ -148,7 +223,14 @@ class LayerExtractor:
 
         # If live MLX model is attached, execute actual MLX forward pass
         if _HAS_MLX and self.model is not None:
-            return self._extract_mlx_live(span=(start_idx, end_idx), pooling=pooling)
+            if input_ids is None:
+                raise ValueError(
+                    "A model is attached but no input_ids were supplied; the live "
+                    "path cannot run a forward pass without tokens."
+                )
+            return self._extract_mlx_live(
+                span=(start_idx, end_idx), input_ids=input_ids, pooling=pooling
+            )
 
         # High-fidelity deterministic simulation mode (for unit/integration testing)
         pooled_layers: List[List[float]] = []
@@ -179,47 +261,81 @@ class LayerExtractor:
     def _extract_mlx_live(
         self,
         span: Tuple[int, int],
-        input_ids: Optional[Any] = None,
+        input_ids: Any,
         pooling: str = "span_mean",
     ) -> List[List[float]]:
         """Executes live MLX forward pass with immediate mx.eval(h) within-block evaluation."""
         if not _HAS_MLX or self.model is None:
             raise RuntimeError("MLX is not available or model is not loaded.")
+        if input_ids is None:
+            raise ValueError("_extract_mlx_live requires input_ids.")
 
         start_idx, end_idx = span
-        pooled_layers = []
+        pooled_layers: List[Any] = []
 
-        # Layer 0: Embedding tokens
+        # Qwen3.5 is a hybrid stack: full-attention blocks and linear/SSM
+        # blocks take DIFFERENT masks, and every block needs its own cache
+        # entry (attention reads cache.offset). Reproduce what the model's
+        # own __call__ does, so a tapped pass matches a generated one.
+        cache = self._make_cache()
         h = self.model.embed_tokens(input_ids)
+        fa_mask, ssm_mask = self._make_masks(h, cache)
+
         if 0 in self.layers:
-            span_slice = h[:, start_idx : end_idx + 1, :]
-            pooled = self._pool_mlx_slice(span_slice, pooling)
+            pooled = self._pool_mlx_slice(h[:, start_idx : end_idx + 1, :], pooling)
             mx.eval(pooled)
             pooled_layers.append(pooled)
         mx.eval(h)
 
-        # Iterate transformer blocks 0..63
-        tapped_block_indices = {12: 1, 24: 2, 36: 3, 48: 4, 60: 5}
+        tapped = {l: i for i, l in enumerate(self.layers) if isinstance(l, int) and l != 0}
         for block_idx, block in enumerate(self.model.layers):
-            h_next = block(h)
-            if block_idx in tapped_block_indices:
-                span_slice = h_next[:, start_idx : end_idx + 1, :]
-                pooled = self._pool_mlx_slice(span_slice, pooling)
+            mask = ssm_mask if getattr(block, "is_linear", False) else fa_mask
+            h_next = block(h, mask=mask, cache=cache[block_idx] if cache else None)
+            if isinstance(h_next, tuple):
+                h_next = h_next[0]
+            if block_idx in tapped:
+                pooled = self._pool_mlx_slice(
+                    h_next[:, start_idx : end_idx + 1, :], pooling
+                )
                 mx.eval(pooled)
                 pooled_layers.append(pooled)
             mx.eval(h_next)
             h = h_next
 
-        # Final Layer: RMSNorm decision state
         h_norm = self.model.norm(h)
         if "final" in self.layers:
-            span_slice = h_norm[:, start_idx : end_idx + 1, :]
-            pooled = self._pool_mlx_slice(span_slice, pooling)
+            pooled = self._pool_mlx_slice(
+                h_norm[:, start_idx : end_idx + 1, :], pooling
+            )
             mx.eval(pooled)
             pooled_layers.append(pooled)
 
         # Convert MLX arrays to Python lists
         return [p.tolist()[0] for p in pooled_layers]
+
+    def _make_cache(self) -> Optional[List[Any]]:
+        """One cache entry per block; None if mlx_lm's cache helper is absent."""
+        if self._cache_factory is None:
+            return None
+        return self._cache_factory()
+
+    def _make_masks(self, h: Any, cache: Optional[List[Any]]) -> Tuple[Any, Any]:
+        """The (full-attention, linear/SSM) mask pair the model selects between."""
+        if self._mask_fns is None or cache is None:
+            return None, None
+        fa_fn, ssm_fn = self._mask_fns
+        fa_idx = getattr(self.model, "fa_idx", 0)
+        ssm_idx = getattr(self.model, "ssm_idx", 0)
+        return fa_fn(h, cache[fa_idx]), ssm_fn(h, cache[ssm_idx])
+
+    def encode(self, text: str) -> Any:
+        """Tokenizes text to a [1, N] MLX array of ids."""
+        if self.tokenizer is None:
+            raise RuntimeError("No tokenizer attached to this LayerExtractor.")
+        ids = self.tokenizer.encode(text)
+        if hasattr(ids, "ids"):
+            ids = ids.ids
+        return mx.array([list(ids)])
 
     def _pool_mlx_slice(self, slice_tensor: Any, mode: str) -> Any:
         """Helper for MLX tensor pooling."""

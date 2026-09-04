@@ -15,16 +15,20 @@ import json
 import logging
 import math
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 from python.mlx_server.extract_endpoint import (
+    DEFAULT_MODEL_PATH,
     EXPECTED_HIDDEN_DIM,
     EXPECTED_LAYER_COUNT,
     EXTRACTED_LAYERS,
     MAX_TRANSIENT_MEMORY_MB,
     LayerExtractor,
+    load_qwen_mlx,
+    make_live_extractor,
 )
 
 logger = logging.getLogger("mlx_server")
@@ -47,6 +51,8 @@ class MLXExtractionHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "model": "Qwen3.8:27b-mlx",
+                    "model_loaded": self.extractor.model is not None,
+                    "mode": "live" if self.extractor.model is not None else "simulation",
                     "hidden_dim": EXPECTED_HIDDEN_DIM,
                     "layer_count": EXPECTED_LAYER_COUNT,
                     "layers": EXTRACTED_LAYERS,
@@ -112,7 +118,26 @@ class MLXExtractionHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"Invalid span bounds: start={span_start} > end={span_end}"})
             return
 
-        token_count = max(span_end + 1, tokens_approx)
+        # With a model attached the span is measured in real tokens, so the
+        # whitespace estimate above is replaced by the tokenizer's count.
+        input_ids = None
+        if self.extractor.model is not None:
+            try:
+                input_ids = self.extractor.encode(raw_text)
+            except Exception as e:
+                self._send_json(500, {"error": f"Tokenization failure: {str(e)}"})
+                return
+            token_count = int(input_ids.shape[1])
+            if token_count == 0:
+                self._send_json(400, {"error": "Empty token sequence"})
+                return
+            if span_end >= token_count:
+                span_end = token_count - 1
+            if span_start > span_end:
+                span_start = span_end
+        else:
+            token_count = max(span_end + 1, tokens_approx)
+
         pooling_mode = req.get("pooling", "span_mean")
         if pooling_mode not in ("span_mean", "attention_weighted"):
             pooling_mode = "span_mean"
@@ -122,6 +147,7 @@ class MLXExtractionHandler(BaseHTTPRequestHandler):
                 token_count=token_count,
                 span=(span_start, span_end),
                 pooling=pooling_mode,
+                input_ids=input_ids,
             )
         except ValueError as e:
             self._send_json(400, {"error": str(e)})
@@ -153,9 +179,13 @@ class MLXExtractionHandler(BaseHTTPRequestHandler):
             "image_hash": image_hash,
             "curvature": curvature,
             "norm": round(first_norm, 6),
+            # Gate 3 is Milestone 4 and is not wired into this endpoint yet.
+            # These are fixed placeholders; gate3_wired says so explicitly so a
+            # caller cannot mistake them for a computed cross-modal verdict.
             "gate_weight": 0.582,
             "geometric_distance": 0.1429,
             "gate3_pass": True,
+            "gate3_wired": False,
             "hyperbolic_coordinates": [round(x, 6) for x in pooled[0][:8]],
             "layer_spectrum_summary": spectrum_summary,
             "model": "Qwen3.8:27b-mlx",
@@ -219,3 +249,64 @@ def stop_server(server: ThreadingHTTPServer, thread: Optional[threading.Thread] 
     server.server_close()
     if thread is not None and thread.is_alive():
         thread.join(timeout=2.0)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """CLI entry point: `python -m python.mlx_server.server`."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m python.mlx_server.server",
+        description="MLX multi-layer observer daemon (/v1/embed/layers).",
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--model-path",
+        default=DEFAULT_MODEL_PATH,
+        help="Directory of 4-bit MLX weights (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Skip model loading and serve the deterministic simulation vectors.",
+    )
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    if args.simulate:
+        logger.warning(
+            "SIMULATION MODE: every response is a constant vector, identical "
+            "for all input text. Not a real embedding."
+        )
+    else:
+        logger.info("loading %s ...", args.model_path)
+        t0 = time.time()
+        # make_live_extractor, not a bare LayerExtractor: the live path also
+        # needs the per-block KV cache factory and the hybrid mask pair, and a
+        # LayerExtractor built without them fails at the first attention block.
+        extractor = make_live_extractor(args.model_path)
+        MLXExtractionHandler.extractor = extractor
+        logger.info(
+            "loaded in %.1fs — %d blocks, hidden_dim %d, taps %s",
+            time.time() - t0,
+            len(extractor.model.layers),
+            EXPECTED_HIDDEN_DIM,
+            EXTRACTED_LAYERS,
+        )
+
+    server = create_server(args.host, args.port)
+    host, port = server.server_address[0], server.server_address[1]
+    logger.info("listening on http://%s:%d  (POST /v1/embed/layers)", host, port)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("shutting down")
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

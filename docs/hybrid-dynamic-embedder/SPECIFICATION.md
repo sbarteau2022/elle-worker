@@ -2,7 +2,16 @@
 ## Dynamic Hyperbolic Neural Graph (DHNG) — Local Observer Layer
 
 **Document Status:** Production Architectural Specification  
-**Model Target:** Qwen3.8:27b-mlx (Apple Silicon MLX Unified Memory Architecture)  
+**Model Target:** Qwen3.8:27b-mlx (Apple Silicon MLX Unified Memory Architecture)
+
+> **Verified model facts** (measured from `mlx-community/Qwen3.8-27B-4bit`,
+> not inferred). `hidden_size` **5120**, **64** transformer blocks, multimodal
+> (`vision_config.out_hidden_size` 5120, so the patch merger lands natively in
+> the text latent space). Earlier revisions of this document specified
+> D = 3584, which is Qwen2.5-**7B**'s width and was never correct for the 27B;
+> it was corrected throughout on 2026-09-04 after the first real forward pass.
+> Loading is via `mlx_vlm.load`; the tapped stack is at
+> `wrapper.language_model.model`.  
 **System Layer:** Local Observer / Multimodal Dynamic Vectorizer  
 **Repository Target:** `elle-worker/docs/Hybrid Dynamic Embedder`  
 

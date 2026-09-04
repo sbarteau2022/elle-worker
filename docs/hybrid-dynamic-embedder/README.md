@@ -31,6 +31,29 @@ their unique content committed here. If you find another, it is stale.
 `SPECIFICATION.md` is the architecture of record. `POTENTIAL_TUNING.md`
 covers MLX Q4 surgery, DoRA, and the Metal shaders.
 
+## Status
+
+| Milestone | State | Evidence |
+|---|---|---|
+| M1 hyperbolic math core | done | 600 tests pass; Metal kernel matches CPU to 2.5e-07 |
+| M2 MLX multi-layer observer | **live** | `scratch/pressure_test.sh` → 20/20, `mode=live` |
+| M3 visual fusion | code complete, untested end-to-end against the live tower |
+| M4 Gate 3 cross-modal filter | **not wired** | endpoint returns fixed placeholders with `gate3_wired: false` |
+| M5 DoRA training | scaffolding only, no adapter trained |
+| M6 zero-copy IPC | Python packs the descriptor; **no Rust reader exists yet** |
+
+### Running the server
+
+    uv run python -m python.mlx_server.server            # loads the 4-bit weights
+    uv run python -m python.mlx_server.server --simulate # constant vectors, no model
+
+`--simulate` serves deterministic placeholder vectors that are identical for
+every input. `GET /health` reports `mode` so a caller can tell the two apart.
+
+### Milestone 2 gate
+
+    bash scratch/pressure_test.sh
+
 ## Running the tests
 
     cd "/Users/stewartbarteau/Desktop/elle-worker/docs/hybrid-dynamic-embedder"
