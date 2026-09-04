@@ -2,7 +2,11 @@ node_modules/
 .wrangler/
 dist/
 .dev.vars
-*.local__pycache__/
+*.local
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
 *.pyc
 
 # local protocol harness output (machine-specific measurements, never committed)
