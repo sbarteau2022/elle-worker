@@ -18,6 +18,14 @@ Both were built, run on the same windows of the same live series, and scored
 by the same pre-registered kill-tests (`src/kappa-memory/validate.ts`,
 unchanged). Numbers decided.
 
+> **Status after three splits (2026-09-06, n = 400 rows):** readout B is a replicated
+> **length-of-solution** signal (AUC 0.750 / 0.741 / 0.698, BUILD ×3, controls at chance,
+> preserved on DHNG's map). It is **not** a validated failure signal (never-closed 0.595,
+> wrong 0.577 at n = 300 — above chance, below the 0.65 bar). Readout A is degenerate,
+> A2 is live but blind, the paper's contraction model is falsified. `SEAM.KAPPA_VALIDATED`
+> stays false. Sections below are in the order the work happened; each was pre-registered
+> before its data existed.
+
 Code: `src/seam-wire.ts` · unit: `src/seam-wire.test.ts` (16) · real data:
 `src/seam-wire-real-data.test.ts` (5) · producer:
 `research/seam-wire/tap_series.py` · fixture:
