@@ -986,7 +986,7 @@ export async function runLLM(
     opts.task ?? 'conversation',
     opts.system ?? '',
     [{ role: 'user', content: userPrompt }],
-    opts.maxTokens ?? 4000,
+    opts.maxTokens ?? 32768,
     env,
     { temperature: opts.temperature ?? 0.7, prefer: opts.prefer }
   );
