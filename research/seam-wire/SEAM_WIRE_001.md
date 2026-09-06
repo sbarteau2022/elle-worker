@@ -151,6 +151,34 @@ fixed:
   is there a candidate signal about failure to close, still behind the seam,
   still short of the human-rater Gate 2 the validate.ts report demands.
 
+
+### The regulator's closed form — what ż has to be, and what it is (recorded before the replication is read)
+
+κ̇ = κ(1−κ)·ż integrates exactly: **logit κ(T) = logit κ₀ + ∫ż dt**, i.e. κ(T) = σ(z(T) + c).
+So the regulator is a monotone squash of the accumulated evidence z. Two consequences:
+
+1. **What ż has to be.** For κ to be a probability of settling, ż must be the
+   per-window increment of the *log-odds* of settling — a log-likelihood-ratio
+   increment (sequential probability ratio test). Any feature can play ż only
+   after calibration to log-odds; the regulator adds no discrimination of its own.
+2. **What it is.** Wiring readout B through the regulator with
+   ż_t = a·κ_c,t·(1−p_t) + b/9 gives z(T) = a·S + b with S = Σ_t κ_c,t(1−p_t) —
+   exactly readout B's `reserve`. The ranking, and therefore the AUC, is
+   identical to the reserve cell by construction. Fitted on val (in-sample,
+   100 rows): **a = −0.893, b = 6.054**; 5-fold a ∈ [−1.01, −0.72], b ∈ [4.97, 6.87].
+   κ(T) then spans 0.34–0.99, median 0.67 on OPEN vs 0.85 on SETTLED.
+   d′ = 0.978 (means 5.95 vs 4.84, pooled sd 1.13) → AUC 0.750 for OPEN-high.
+
+What the gate needs, under an equal-variance Gaussian model (AUC = Φ(d′/√2)):
+RESERVE 0.65 ⇒ total d′ ≥ 0.544; VELOCITY 0.70 ⇒ d′ ≥ 0.741. On val the
+coupling evidence has d′ ≈ 0.98, in the direction opposite to the registration.
+
+So "make it work" reduces to one question, not a search: does the coupling
+evidence replicate with that sign on held-out data. That is H1. If it does,
+the wire is κ(T) = σ(a·S + b) with a, b frozen above (or refit on val+test
+under pre-registration); if it does not, no choice of ż built from these
+readouts reaches the bar, because the regulator cannot add what ż lacks.
+
 ## Two things learned about the instruments
 
 - **rip.py's null has a resolution floor of ~1/(slow period).** Circular
