@@ -316,6 +316,41 @@ model" is earned in the narrow sense measured: the coupling trajectories sit on 
 without losing what they know, and the atlas's own metric retrieves length-neighbours as
 well as the raw trace does. No claim beyond that.
 
+
+## Third split — result (train_split rows 0–199, 1024 tokens, read 2026-09-06)
+
+Generation: accuracy 0.63, parse 0.99, **91 ran past 512, 52 past 1024, 74 wrong** of 200.
+Pooled with test (n = 300): 135 / 80 / 111. Fixture `test-fixtures/tap-series-gsm8k-train-n200.jsonl`.
+
+| claim (B / surprisal / RESERVE, inverted) | AUC | lo95 | n | verdict |
+|---|---|---|---|---|
+| **H2 length (ran past 512)** | **0.698** | **0.638** | 135 / 165 | **BUILD — holds, third time** |
+| H3 never closed (past 1024) | 0.595 | 0.520 | 80 / 220 | KILL (below 0.65) |
+| H4 wrong answer | 0.577 | 0.509 | 111 / 189 | KILL (below 0.65) |
+| shuffle controls ×3 | 0.49–0.53 | — | — | KILL, run not void |
+
+Calibration transfer on the 200 fresh rows, coefficients untouched: 200/200 in support,
+**Brier 0.2252 vs settled**, 0.2337 vs correct (0.25 = uninformative). The val-fitted
+κ(T) transfers as a weakly informative probability of a short solution; it is not a
+probability of correctness.
+
+Contraction protocol with all three fixtures: CLOSED n = 242, median NRMSE 1.236, r > 0 in
+61.6% → **FAIL** at full N. Falsified, not under-powered.
+
+**What is validated, and what is not, after three splits (n = 400 total):**
+- Validated: accumulated slow/fast coupling in the model's surprisal over the first 96
+  tokens predicts that the solution will run past 512 tokens. AUC 0.750 / 0.741 / 0.698 on
+  val / test / pooled, every control at chance, Rust and TypeScript agree, and the placement
+  on DHNG's map preserves it. This is a **length-of-solution** signal.
+- Not validated: failure. Never closing at 1024 and wrong answer are above chance at
+  n = 300 (lower bounds 0.52 and 0.51) and below the pre-registered 0.65 bar. A weak
+  failure signal exists and the seam's bar is deliberately higher than it. The right next
+  instrument is a longer horizon (a map at head 384 on the long rows), not a lower bar.
+- Falsified: the contraction model (paper §7) for this trajectory; readout A (degenerate);
+  readout A2 (live, blind to length).
+- The seam stays closed. `KAPPA_VALIDATED` is false; validate.ts's own report calls a BUILD
+  the internal proxy, and the failure claim did not clear it.
+
 ## Two things learned about the instruments
 
 - **rip.py's null has a resolution floor of ~1/(slow period).** Circular
