@@ -4,9 +4,9 @@ set -eo pipefail
 EVAL_PID=11895
 JSON_OUT="/Users/stewartbarteau/Desktop/hybrid-HNPA-active-inference-LLM/runs/control-baseline/test_base_n100_1024.json"
 SPLIT_FILE="/Users/stewartbarteau/Desktop/hybrid-HNPA-active-inference-LLM/benchmarks/gsm8k/test.jsonl"
-FIXTURE_OUT="/Users/stewartbarteau/Desktop/elle-worker/test-fixtures/tap-series-gsm8k-test-n100.jsonl"
-PYTHON_BIN="/Users/stewartbarteau/Desktop/Elle/tools/mlx-serve/.venv/bin/python"
-WORKER_DIR="/Users/stewartbarteau/Desktop/elle-worker"
+FIXTURE_OUT="/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/test-fixtures/tap-series-gsm8k-test-n100.jsonl"
+PYTHON_BIN="/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/tools/mlx-serve/.venv/bin/python"
+WORKER_DIR="/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker"
 
 echo "[runner] $(date '+%Y-%m-%d %H:%M:%S') — Monitoring eval process (PID $EVAL_PID)..."
 

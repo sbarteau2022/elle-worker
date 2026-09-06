@@ -15,7 +15,7 @@ import json, os, sys, time, pathlib, subprocess, math, urllib.request, urllib.er
 
 # ── CONFIG ────────────────────────────────────────────────────────
 DATASET   = "/Users/stewartbarteau/Desktop/hybrid-HNPA-active-inference-LLM/benchmarks/gsm8k/train.jsonl"
-OUT_DIR   = "/Users/stewartbarteau/Desktop/elle-worker/research/cloud-distillation"
+OUT_DIR   = "/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/research/cloud-distillation"
 MAP_DIM   = 21   # hyperbolic torus target dimension
 
 # Models to use as teachers (all free-tier eligible on Gemini API)

@@ -26,7 +26,7 @@ TEACHERS = [
 ]
 
 DATASET = "/Users/stewartbarteau/Desktop/hybrid-HNPA-active-inference-LLM/benchmarks/gsm8k/train.jsonl"
-OUT_FILE = "/Users/stewartbarteau/Desktop/elle-worker/research/cloud-distillation/teacher_embeddings.jsonl"
+OUT_FILE = "/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/research/cloud-distillation/teacher_embeddings.jsonl"
 OLLAMA_URL = "http://localhost:11434"
 
 # Hyperbolic map target dimension
