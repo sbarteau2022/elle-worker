@@ -158,3 +158,17 @@ coordinator) for the two errors to decorrelate. This is the empirical case for t
 specialist tier Stewart asked for: small hyper-specialised workers under a 27B coordinator
 that reviews, not eight instances of the coordinator (ELLE_SWARM_SOVEREIGN=1 forces every
 role onto the coordinator's weights — swarm.cjs status block — which is what 001/002b ran).
+
+### ELLE_GSM8K_003 — pre-registered before the run (2026-09-06 22:39): specialist worker, coordinator reviewer
+
+Sovereign OFF: the roster routes these briefs to the 3B coder (`qwen2.5-coder:3b`, 4-bit,
+num_ctx 16384) as the worker; the 27B `elle` coordinator reviews every submission
+(sign-off on, max 2 send-backs). Held-out rows: GSM8K test 100–199 (seq 1058..1157), never
+used in 001/002b. Same brief v2, same app, 3 agents.
+
+Claims: **C1** the reviewer's catch rate on wrong final submissions (blocked or sent back at
+least once among tasks whose first submission was wrong) ≥ 0.50 — decorrelated weights
+should catch what same-weights review caught 0/2 of. **C2** final accuracy after review
+(approved-and-correct / 100) is reported against 002b's 0.94; no threshold, the 3B is
+expected below the 27B. Reported: first-submission accuracy, send-backs, blocks, approved
+wrong (reviewer false-approves), server errors (>5% ⇒ VOID).
