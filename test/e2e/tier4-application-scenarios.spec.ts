@@ -277,8 +277,8 @@ describe('Scenario 6: Master End-to-End System Invariant Verification', () => {
       expect(toFloat(fixedTanh(fixV))).toBeCloseTo(Math.tanh(v), 4);
     }
 
-    // 3. Seam Gate 0 Validated State: KAPPA_VALIDATED is true and evaluates calibrated kappa
-    expect(SEAM.KAPPA_VALIDATED).toBe(true);
-    expect(kappaOf({} as any, 0)).toBeCloseTo(0.9976, 2);
+    // 3. Seam Gate 0 Invariant: KAPPA_VALIDATED remains strictly false
+    expect(SEAM.KAPPA_VALIDATED).toBe(false);
+    expect(kappaOf({} as any, 0)).toBe(0);
   });
 });

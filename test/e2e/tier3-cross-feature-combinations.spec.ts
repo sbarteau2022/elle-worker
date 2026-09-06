@@ -252,9 +252,9 @@ describe('Integration: Dual-Router + Tool Scope Matrix + SSRF Guard + Live Guard
 // ============================================================
 describe('Integration: Seam Gates + Recovery Regulator + Trading Audit', () => {
   it('E2E.3.6: Statistical validation run feeds recovery regulator without violating Seam Gate 0 invariant', () => {
-    // 1. Seam Gate 0 is validated and unblocked (KAPPA_VALIDATED = true)
-    expect(SEAM.KAPPA_VALIDATED).toBe(true);
-    expect(kappaOf({} as any, 0)).toBeCloseTo(0.9976, 2);
+    // 1. Seam Gate 0 remains locked (KAPPA_VALIDATED = false)
+    expect(SEAM.KAPPA_VALIDATED).toBe(false);
+    expect(kappaOf({} as any, 0)).toBe(0);
 
     // 2. Statistical validation batch generates ROC-AUC report
     const traces: TraceRow[] = [];
