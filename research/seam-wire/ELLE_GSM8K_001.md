@@ -172,3 +172,22 @@ should catch what same-weights review caught 0/2 of. **C2** final accuracy after
 (approved-and-correct / 100) is reported against 002b's 0.94; no threshold, the 3B is
 expected below the 27B. Reported: first-submission accuracy, send-backs, blocks, approved
 wrong (reviewer false-approves), server errors (>5% ⇒ VOID).
+
+### ELLE_GSM8K_003 — VOID (serving defect, not a verdict)
+
+Stopped at 29 finals: 22 "empty reply from qwen2.5-coder:3b" / rambles to the 4096 cap, 2
+coordinator blocks, 1 budget. Diagnosed on an idle server: **Qwen2.5-Coder-3B with kv_bits 4
+on mlx-serve's sequential generation path is garbage** (0/8 trivial sums, "33391" for 17×23,
+long prompts degenerating to "tototo"); the identical requests batched (the batch path does
+not quantise the cache), or at kv_bits 8 / fp16, score 8/8. Two defects fixed on the way:
+the roster's per-role token cap was being ignored (the 3B inherited 32,768 and one step ran
+>300 s, tripping the client header timeout on every other agent), and the small tier's KV
+default is now 8-bit everywhere (server, roster, worker, tests). Remaining 003 briefs
+cancelled. Of the 8 send-backs the 27B reviewer issued before the stop, the one it blocked
+outright was a genuine wrong answer (175 vs 110), so the decorrelated reviewer did fire.
+
+### ELLE_GSM8K_003b — pre-registered before the run
+
+Same claims as 003 (C1 reviewer catch rate on wrong first submissions ≥ 0.50; C2 final
+accuracy reported vs 002b's 0.94), same held-out rows (test 100–199), 3B coder worker at
+kv_bits 8 / 4096-token cap, 27B reviewer, sovereign OFF. VOID if > 5% server/model errors.
