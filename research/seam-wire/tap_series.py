@@ -13,7 +13,11 @@ Per completion token t (prompt tokens are excluded) we emit three streams:
   norm12[t]    = ||h_12[t]||_2                       (hidden state after block 12)
   norm48[t]    = ||h_48[t]||_2                       (hidden state after block 48)
 
-Labels carried through unchanged from the eval JSON: correct, truncated.
+Labels carried through unchanged from the eval JSON: correct, truncated (at the
+eval's own budget). Added here: open_at_512 = the completion's full token count
+is >= 512, i.e. "did not close within 512 tokens" — the SAME event the val
+baseline's `truncated` recorded (its budget was 512), so a fixture generated
+at a larger budget stays label-compatible with SEAM_WIRE_001.
 
 Pre-registered choices (fixed before any readout was run):
   * streams are truncated to the FIRST `--head` completion tokens (default 128)
@@ -140,6 +144,7 @@ def main() -> int:
             p_ids = list(getattr(p_ids, "ids", p_ids))
             c_ids = tok.encode(r["completion"], add_special_tokens=False)
             c_ids = list(getattr(c_ids, "ids", c_ids))
+            n_full = len(c_ids)
             c_ids = c_ids[: args.head]
             short = len(c_ids) < args.head
             ids = mx.array([p_ids + c_ids])
@@ -159,6 +164,8 @@ def main() -> int:
                 "idx": idx,
                 "correct": bool(r["correct"]),
                 "truncated": bool(r["truncated"]),
+                "open_at_512": n_full >= 512,
+                "n_completion_full": n_full,
                 "n_prompt": P,
                 "n_completion": len(c_ids),
                 "short": short,

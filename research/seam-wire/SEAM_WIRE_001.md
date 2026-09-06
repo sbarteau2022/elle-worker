@@ -112,19 +112,34 @@ It is **not** a pass, and it is not being reported as one:
 ## Pre-registered replication (launched, not yet read)
 
 A fresh 100-problem baseline generation on the GSM8K **test** split is
-running (`runs/control-baseline/test_base_n100.json`), same model, same
-prompt, same 512-token budget. Before its numbers are read, the following is
+running (`runs/control-baseline/test_base_n100_1024.json`), same model, same
+prompt, **1024-token budget**. Before its numbers are read, the following is
 fixed:
 
-- **H1 (the only claim).** Readout B, stream `surprisal`, RESERVE test with
-  the **inverted** orientation (reserve high ⇒ OPEN): AUC ≥ 0.65 with 95%
-  lower bound > 0.5, and Gate 1 met (≥ 20 per class).
+- **Why 1024, not 512.** The val baseline ran at 512 and 23% of it truncated,
+  with every wrong answer among the truncated. The HNPA re-checks had already
+  moved to 1024 for that reason. A 512-budget replication would have made
+  "did not close" mostly mean "wrote a long solution". At 1024 the same event
+  is still observable — `open_at_512` = the completion's full length is ≥ 512
+  tokens, which is *exactly* what val's `truncated` recorded — and two more
+  become observable: `truncated` at 1024 (never closed even with double the
+  room) and `!correct` (closed on the wrong number).
+- **H1 (the only claim).** Readout B, stream `surprisal`, RESERVE test with the
+  **inverted** orientation (reserve high ⇒ OPEN), OPEN = `open_at_512`:
+  AUC ≥ 0.65 with 95% lower bound > 0.5, Gate 1 met (≥ 20 per class).
+- **Secondary labels, reported, not claimed:** the same cell against
+  `truncated@1024` and against `!correct`. Both will probably miss the
+  20-per-class floor; INSUFFICIENT is then the honest cell.
 - Every other cell is reported but makes no claim.
 - Same head (96), windows, bands, null, seeds, controls.
-- If H1 fails, the 0.250 was a one-sample artifact and readout B is KILLed
-  outright. If it holds, it earns exactly one thing: a pre-registered
-  place in the next validation round, still behind the seam, still short of
-  the human-rater Gate 2 the validate.ts report itself demands.
+- **What each outcome means.** H1 fails → the 0.250 was a one-sample
+  artifact; readout B is KILLed outright. H1 holds and the secondaries are
+  INSUFFICIENT → readout B predicts *length* of the coming solution from its
+  first 96 tokens; that earns one pre-registered seat in the next round and
+  nothing more — it is not yet evidence about closing or correctness. H1
+  holds and `truncated@1024` or `!correct` also clears → then, and only then,
+  is there a candidate signal about failure to close, still behind the seam,
+  still short of the human-rater Gate 2 the validate.ts report demands.
 
 ## Two things learned about the instruments
 

@@ -237,7 +237,9 @@ export function toTraceRow(t: ReadoutTrace, settledOpen: 0 | 1): TraceRow {
 export interface FixtureRow {
   idx: number;
   correct: boolean;
-  truncated: boolean;
+  truncated: boolean;          // at the generating eval's own token budget
+  open_at_512?: boolean;       // full completion ≥ 512 tokens (val's `truncated` ≡ this)
+  n_completion_full?: number;
   n_completion: number;
   short: boolean;
   streams: Record<string, number[]>;

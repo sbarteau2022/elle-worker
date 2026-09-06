@@ -5,8 +5,18 @@
 // in research/seam-wire/SEAM_WIRE_001.md:
 //
 //   H1 (the only claim): readout B, stream `surprisal`, RESERVE test with the
-//   INVERTED orientation (reserve high ⇒ OPEN/truncated): AUC ≥ 0.65 with the
-//   95% lower bound > 0.5, Gate 1 met. Everything else is reported, claims nothing.
+//   INVERTED orientation (reserve high ⇒ OPEN): AUC ≥ 0.65 with the 95% lower
+//   bound > 0.5, Gate 1 met. Everything else is reported, claims nothing.
+//
+//   OPEN for H1 = `open_at_512` (the completion ran past 512 tokens). This is the
+//   identical event the val fixture's `truncated` recorded, because val was
+//   generated at a 512 budget. The replication is generated at 1024 — the budget
+//   the other HNPA re-checks moved to once 512 was seen to be too tight — so two
+//   secondary labels become available and are REPORTED, not claimed:
+//     truncated   = ran past 1024 (never closed even with double the room)
+//     !correct    = closed on the wrong number
+//   Both will likely fail Gate 1's 20-per-class floor; INSUFFICIENT is the
+//   honest cell then, not a pass or a fail.
 //
 // Inversion is implemented by flipping the label handed to the gate, so the
 // gate's RESERVE cell (positive = settled_open 0) reads "reserve high ⇒
@@ -40,16 +50,27 @@ const d = existsSync(FIXTURE) ? describe : describe.skip;
 
 d('seam-wire · replication on held-out test split (H1 pre-registered)', () => {
   const rows = existsSync(FIXTURE) ? loadRows().filter((r) => !r.short) : [];
-  const open = (r: FixtureRow): 0 | 1 => (r.truncated ? 1 : 0);
-  const inverted = (r: FixtureRow): 0 | 1 => (r.truncated ? 0 : 1);
+  const isOpen = (r: FixtureRow) => r.open_at_512 ?? r.truncated;
+  const open = (r: FixtureRow): 0 | 1 => (isOpen(r) ? 1 : 0);
+  const inverted = (r: FixtureRow): 0 | 1 => (isOpen(r) ? 0 : 1);
+  const secondary: Record<string, (r: FixtureRow) => 0 | 1> = {
+    'truncated@1024·inv': (r) => (r.truncated ? 0 : 1),
+    'wrong·inv': (r) => (r.correct ? 1 : 0),
+  };
 
-  it('fixture: 100 full rows, every stream 96 long', () => {
+  it('fixture: 100 full rows, every stream 96 long, open_at_512 present', () => {
     expect(rows.length).toBe(100);
-    for (const r of rows) for (const s of STREAMS) expect(r.streams[s].length).toBe(96);
+    for (const r of rows) {
+      expect(typeof r.open_at_512).toBe('boolean');
+      for (const s of STREAMS) expect(r.streams[s].length).toBe(96);
+    }
+    const nOpen = rows.filter(isOpen).length;
+    console.log(`open_at_512: ${nOpen} / 100 · truncated@1024: ${rows.filter((r) => r.truncated).length} · wrong: ${rows.filter((r) => !r.correct).length}`);
   });
 
   const asRegistered: ArmReport[] = [];
   const asInverted: ArmReport[] = [];
+  const secondaries: ArmReport[] = [];
   const controls: ArmReport[] = [];
 
   it('runs every arm in both orientations', () => {
@@ -58,6 +79,9 @@ d('seam-wire · replication on held-out test split (H1 pre-registered)', () => {
       const inv = runArm(ro, s, rows, inverted); inv.stream = `${s}·inverted`; asInverted.push(inv);
     }
     expect(asRegistered.length).toBe(6);
+    for (const [name, fn] of Object.entries(secondary)) {
+      const a = runArm('B', 'surprisal', rows, fn); a.stream = `surprisal·${name}`; secondaries.push(a);
+    }
   });
 
   it('controls on the replication fixture must not BUILD (either orientation)', () => {
@@ -83,9 +107,10 @@ d('seam-wire · replication on held-out test split (H1 pre-registered)', () => {
       + `n ${reserve.n_pos} OPEN / ${reserve.n_neg} SETTLED → ${h1Holds ? 'HOLDS' : 'FAILS'}`,
       '', 'as registered (reserve high ⇒ SETTLED)', hdr, sep, ...asRegistered.map(line),
       '', 'inverted (reserve high ⇒ OPEN)', hdr, sep, ...asInverted.map(line),
+      '', 'secondary labels, B/surprisal only, reported not claimed', hdr, sep, ...secondaries.map(line),
       '', 'controls', hdr, sep, ...controls.map(line), ''].join('\n');
     console.log(out);
-    writeFileSync(OUT, JSON.stringify({ h1: { holds: h1Holds, reserve }, asRegistered, asInverted, controls }, null, 2));
+    writeFileSync(OUT, JSON.stringify({ h1: { holds: h1Holds, reserve }, asRegistered, asInverted, secondaries, controls }, null, 2));
     expect(typeof h1Holds).toBe('boolean');
   });
 });
