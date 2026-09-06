@@ -296,6 +296,26 @@ information**: every cell is inside the label-shuffle band. Two conclusions, bot
 (1) the degeneracy of A was real and is fixed; (2) fixing it did not make sense-(b) a ż
 candidate. Readout B remains the only replicated producer.
 
+
+## On the map — the trajectories placed in DHNG's hyperbolic model (2026-09-06)
+
+`Dynanic-Hyperbolic-Neural-Graph/scripts/seam_trajectories.ts` (pre-registered in its header):
+200 rows (val + test) as nodes, kNN graph k = 5 on the 9-window coupling trace, `hyperMap`
+dim 16, 600 epochs, seed 42, labels never shown to the embedding.
+
+| k | purity(open) Euclidean | purity(open) ball geodesic | Δ | purity(correct) Euclid / ball |
+|---|---|---|---|---|
+| 5 | 0.722 | 0.730 | +0.008 | 0.655 / 0.665 |
+| 10 | 0.689 | 0.687 | −0.001 | 0.649 / 0.657 |
+
+P1 (map preserves label information, Δ ≥ −0.02 at both k): **PASS**. Depth (radius) alone:
+AUC 0.535 vs open, 0.485 vs wrong — the radial coordinate carries nothing here; the
+information lives in neighbourhoods, not depth. Pooled S vs open on all 200: AUC 0.768.
+hyperMap loss 13.15, mean edge distance 1.66, depth 1.41–2.13. So "moved into the hyperbolic
+model" is earned in the narrow sense measured: the coupling trajectories sit on the atlas
+without losing what they know, and the atlas's own metric retrieves length-neighbours as
+well as the raw trace does. No claim beyond that.
+
 ## Two things learned about the instruments
 
 - **rip.py's null has a resolution floor of ~1/(slow period).** Circular
