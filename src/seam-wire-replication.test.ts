@@ -27,7 +27,7 @@
 // ============================================================
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { runArm, makeRng, type FixtureRow, type ArmReport } from './seam-wire';
+import { runArm, makeRng, readoutB, toTraceRow, type FixtureRow, type ArmReport } from './seam-wire';
 
 const FIXTURE = 'test-fixtures/tap-series-gsm8k-test-n100.jsonl';
 const OUT = 'research/seam-wire/SEAM_WIRE_001_replication.json';
@@ -93,6 +93,56 @@ d('seam-wire · replication on held-out test split (H1 pre-registered)', () => {
       const cInv = runArm(ro, s, rows, (r) => (1 - shuf[rows.indexOf(r)]) as 0 | 1, 5); cInv.stream = `${s}·shufLabel·inv`; controls.push(cInv);
       expect(cInv.report.overall).not.toBe('BUILD');
     }
+  });
+
+  it('calibration transfer: applies val-fitted κ(T) = σ(a·S + b) to test rows as-is', () => {
+    // Val-fitted coefficients from SEAM_WIRE_001.md:
+    // logit κ(T) = a·S + b, with a = -0.893, b = 6.054 fitted on val.
+    const A_VAL = -0.893;
+    const B_VAL = 6.054;
+    const sigmoid = (z: number) => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
+
+    const testS: number[] = [];
+    const testKappas: number[] = [];
+    const openLabels: number[] = [];
+
+    rows.forEach((r, i) => {
+      const t = readoutB(r.streams.surprisal, i);
+      const trace = toTraceRow(t, open(r));
+      const s = trace.reserve!;
+      testS.push(s);
+      testKappas.push(sigmoid(A_VAL * s + B_VAL));
+      openLabels.push(open(r));
+    });
+
+    const openKappas = testKappas.filter((_, i) => openLabels[i] === 1);
+    const settledKappas = testKappas.filter((_, i) => openLabels[i] === 0);
+
+    const median = (xs: number[]) => {
+      const sorted = xs.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+    };
+    const mean = (xs: number[]) => xs.reduce((acc, v) => acc + v, 0) / xs.length;
+
+    const medOpen = median(openKappas);
+    const medSettled = median(settledKappas);
+    const meanOpen = mean(openKappas);
+    const meanSettled = mean(settledKappas);
+
+    // Directional ordering holds on test without refit:
+    // SETTLED trajectories have higher κ (probability of settling) than OPEN.
+    expect(medSettled).toBeGreaterThan(medOpen);
+    expect(meanSettled).toBeGreaterThan(meanOpen);
+
+    // Brier score against settled (1 - open)
+    const brier = testKappas.reduce((acc, k, i) => acc + Math.pow(k - (1 - openLabels[i]), 2), 0) / testKappas.length;
+    expect(brier).toBeLessThan(0.25); // beats uninformative baseline
+
+    console.log(`\nCalibration transfer (a=${A_VAL}, b=${B_VAL}) on held-out test (44 OPEN / 56 SETTLED):`);
+    console.log(`  κ median: SETTLED ${medSettled.toFixed(3)} vs OPEN ${medOpen.toFixed(3)}`);
+    console.log(`  κ mean:   SETTLED ${meanSettled.toFixed(3)} vs OPEN ${meanOpen.toFixed(3)}`);
+    console.log(`  Brier score (predicting SETTLED): ${brier.toFixed(4)}`);
   });
 
   it('prints H1 and the full table, writes the report', () => {
