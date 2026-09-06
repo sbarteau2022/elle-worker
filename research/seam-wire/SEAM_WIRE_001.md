@@ -233,6 +233,26 @@ truncation against val's 0.86 at 512 with 23% truncation. That is a harder
 draw of problems, not a change in the model, and it is why the class balance
 moved from 23 / 77 to 44 / 56.
 
+
+## Pre-registered third split — the failure label (declared 2026-09-06 before generation)
+
+Generation: plain Qwen3.8-27B, **200** problems from `benchmarks/gsm8k/train_split.jsonl`
+(rows 0–199, never used by any training run in this repo), 1024-token budget, chat-template
+prompt, same producer settings (head 96, 64/4 windows, bands, 200-shift null, seeds).
+Output `runs/control-baseline/train_base_n200_1024.json`, fixture
+`test-fixtures/tap-series-gsm8k-train-n200.jsonl`.
+
+Claims, each scored on the pooled test+train rows (n = 300) with validate.ts unchanged:
+- **H2 (length, confirmatory):** B / surprisal / RESERVE inverted vs `open_at_512`: AUC ≥ 0.65,
+  lo95 > 0.5. Expected to hold (replicates twice already).
+- **H3 (never closes):** same cell vs `truncated` at 1024: AUC ≥ 0.65, lo95 > 0.5.
+- **H4 (wrong answer):** same cell vs `!correct`: AUC ≥ 0.65, lo95 > 0.5.
+- **Calibration transfer:** κ(T) = σ(−0.893·S + 6.054) applied unchanged to the 200 new rows;
+  report Brier vs settled(=!open_at_512) and vs correct. No refit before these are read.
+Controls: label shuffle on every claimed cell. Any BUILD on a control voids the run.
+If H3 and H4 KILL at n = 300, readout B is recorded as a length signal only and the seam
+stays closed on that basis; the evidence floor in `calibratedKappa` still applies.
+
 ## Two things learned about the instruments
 
 - **rip.py's null has a resolution floor of ~1/(slow period).** Circular
