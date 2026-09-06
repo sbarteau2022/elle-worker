@@ -275,6 +275,27 @@ second reason the seam stays closed, independent of the AUC result: readout B ca
 length information as an accumulated level (S), not as a contracting trajectory. The 200
 train-split rows will be added when they land; the verdict is not expected to move.
 
+
+## Readout A2 — the two-observation seam (run 2026-09-06)
+
+Readout A was degenerate by construction (ball chart = a function of the torus chart). A2
+gives the ball factor an independent observation: the block-48 hidden state through a fixed
+random chart (`proj48`, 29-d, seed 29, unit-normalised then tanh-squashed into the ball),
+window-averaged, while the torus factor keeps the surprisal phases. `ProductPredictor(29, 8)`,
+same disagreement score. Pre-registered claim: only that A2 is no longer degenerate.
+
+| fixture | rejected/row | seam events/row | registered VEL / RES | inverted VEL / RES | shuffled VEL / RES |
+|---|---|---|---|---|---|
+| val | 2.00 | 0.34 | 0.617 (0.481) / 0.480 | 0.383 / 0.520 | 0.422 / 0.553 |
+| test | 2.00 | 1.23 | 0.477 / 0.531 | 0.523 / 0.469 | 0.548 / 0.470 |
+
+All KILL. A2 now produces seam events (the paper's per-factor thresholds fire, more on the
+harder test draw), so the construction is live — but the disagreement between the late-tap
+ball chart and the surprisal torus chart over the first 96 tokens carries **no length
+information**: every cell is inside the label-shuffle band. Two conclusions, both recorded:
+(1) the degeneracy of A was real and is fixed; (2) fixing it did not make sense-(b) a ż
+candidate. Readout B remains the only replicated producer.
+
 ## Two things learned about the instruments
 
 - **rip.py's null has a resolution floor of ~1/(slow period).** Circular
