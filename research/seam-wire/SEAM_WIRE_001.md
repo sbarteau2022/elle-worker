@@ -179,6 +179,60 @@ the wire is κ(T) = σ(a·S + b) with a, b frozen above (or refit on val+test
 under pre-registration); if it does not, no choice of ż built from these
 readouts reaches the bar, because the regulator cannot add what ż lacks.
 
+
+## Replication result (held-out GSM8K test split, read 2026-09-06)
+
+Generation: plain Qwen3.8-27B, 100 test problems, 1024-token budget —
+accuracy 0.63, parse 0.98, **44 ran past 512 tokens, 28 past 1024, 37 wrong**.
+All three labels clear Gate 1 (≥ 20 per class). Fixture:
+`test-fixtures/tap-series-gsm8k-test-n100.jsonl`; raw:
+`research/seam-wire/SEAM_WIRE_001_replication.json`.
+
+**H1 HOLDS.** Readout B / `surprisal` / RESERVE, inverted (reserve high ⇒ ran
+past 512): **AUC 0.741, 95% lower bound 0.641, n = 44 / 56 → BUILD** at the
+pre-registered 0.65 bar. Val gave 0.750 on 23 / 77. Same sign, same
+magnitude, fresh problems, coefficients untouched. The Rust gate on the
+identical rows: 0.7411 / 0.6414 BUILD.
+
+| arm (inverted) | RESERVE auc (lo95) | verdict |
+|---|---|---|
+| **B / surprisal** | **0.741 (0.641)** | **BUILD** |
+| B / norm12 | 0.631 (0.520) | KILL (below 0.65) |
+| B / norm48 | 0.456 (0.343) | KILL |
+| A / any stream | 0.42–0.56 | KILL |
+
+Secondary labels, same cell, reported not claimed:
+
+| label | RESERVE auc (lo95) | verdict |
+|---|---|---|
+| ran past 1024 (never closed) | 0.610 (0.483) | KILL — bound straddles 0.5 |
+| wrong answer | 0.613 (0.496) | KILL — bound straddles 0.5 |
+
+All 12 label-shuffle controls on the replication fixture: KILL, AUCs 0.42–0.58.
+Readout A is at chance in every orientation on both fixtures.
+
+**What this licenses, exactly as pre-registered.** Accumulated slow/fast
+coupling in the model's own surprisal over the first 96 tokens predicts that
+the solution ahead will run past 512 tokens, on held-out problems, at the
+gate's bar. It does *not* yet predict failure to close at 1024 or a wrong
+answer: both secondaries are above chance but their lower bounds do not clear
+0.5 at n = 28 / 72 and 37 / 63. Readout B has earned one seat in the next
+round as a **length-of-solution** signal. The seam stays closed:
+`KAPPA_VALIDATED` is unchanged, and validate.ts's own report says a BUILD
+here is the internal proxy, necessary not sufficient, ahead of a human-rater
+Gate 2.
+
+**The wire, now with a replicated input.** κ(T) = σ(a·S + b), S = Σ_t
+κ_c,t(1−p_t) over the nine windows, a = −0.893, b = 6.054 fitted on val.
+Applying the val coefficients to the test rows is the next pre-registrable
+step (calibration transfer), and refitting on val+test is allowed only if
+declared before a third split is generated.
+
+**Note on the base model.** The test split at 1024 tokens scored 0.63 with 28%
+truncation against val's 0.86 at 512 with 23% truncation. That is a harder
+draw of problems, not a change in the model, and it is why the class balance
+moved from 23 / 77 to 44 / 56.
+
 ## Two things learned about the instruments
 
 - **rip.py's null has a resolution floor of ~1/(slow period).** Circular

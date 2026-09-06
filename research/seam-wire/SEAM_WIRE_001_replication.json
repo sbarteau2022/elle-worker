@@ -1,0 +1,1326 @@
+{
+  "h1": {
+    "holds": true,
+    "reserve": {
+      "gate": "RESERVE_CONSOLIDATION",
+      "predictor": "reserve",
+      "positive_class": "settled_open = 0 (SETTLED)",
+      "threshold": 0.65,
+      "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+      "auc": 0.7411,
+      "auc_lower95": 0.6413,
+      "n_pos": 44,
+      "n_neg": 56,
+      "verdict": "BUILD",
+      "reason": "AUC 0.741 ≥ 0.65 and the 95% lower bound 0.641 clears chance. Clears the INTERNAL proxy — necessary, not sufficient; escalate to a blind human-rater Gate 2 before the manual seam flip."
+    }
+  },
+  "asRegistered": [
+    {
+      "readout": "A",
+      "stream": "surprisal",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 3.89,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.58,
+            "auc_lower95": 0.4665,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.580 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5576,
+            "auc_lower95": 0.4445,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.558 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "surprisal",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5215,
+            "auc_lower95": 0.4069,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.522 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.2589,
+            "auc_lower95": 0.1592,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.259 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm12",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.22,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.6179,
+            "auc_lower95": 0.5062,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.618 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4365,
+            "auc_lower95": 0.3225,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.436 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm12",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5365,
+            "auc_lower95": 0.422,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.537 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.3693,
+            "auc_lower95": 0.2584,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.369 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm48",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.52,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5191,
+            "auc_lower95": 0.4045,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.519 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5775,
+            "auc_lower95": 0.4653,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.578 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm48",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4379,
+            "auc_lower95": 0.325,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.438 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5438,
+            "auc_lower95": 0.4302,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.544 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    }
+  ],
+  "asInverted": [
+    {
+      "readout": "A",
+      "stream": "surprisal·inverted",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 3.89,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.42,
+            "auc_lower95": 0.3066,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.420 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4424,
+            "auc_lower95": 0.3293,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.442 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "surprisal·inverted",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4785,
+            "auc_lower95": 0.3639,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.478 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.7411,
+            "auc_lower95": 0.6413,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "BUILD",
+            "reason": "AUC 0.741 ≥ 0.65 and the 95% lower bound 0.641 clears chance. Clears the INTERNAL proxy — necessary, not sufficient; escalate to a blind human-rater Gate 2 before the manual seam flip."
+          }
+        ],
+        "overall": "BUILD",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "A kill-test cleared the INTERNAL proxy. Do NOT flip the seam on this alone: stand up a blind multi-rater human coherence label (Gate 2), re-run against it, and only then make the one-line manual seam edit."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm12·inverted",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.22,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.3821,
+            "auc_lower95": 0.2704,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.382 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5635,
+            "auc_lower95": 0.4495,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.564 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm12·inverted",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4635,
+            "auc_lower95": 0.349,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.463 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.6307,
+            "auc_lower95": 0.5198,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.631 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm48·inverted",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.52,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4809,
+            "auc_lower95": 0.3663,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.481 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4225,
+            "auc_lower95": 0.3103,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.422 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm48·inverted",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5621,
+            "auc_lower95": 0.4492,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.562 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4562,
+            "auc_lower95": 0.3425,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.456 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    }
+  ],
+  "secondaries": [
+    {
+      "readout": "B",
+      "stream": "surprisal·truncated@1024·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5273,
+            "auc_lower95": 0.4019,
+            "n_pos": 72,
+            "n_neg": 28,
+            "verdict": "KILL",
+            "reason": "AUC 0.527 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.6101,
+            "auc_lower95": 0.4833,
+            "n_pos": 28,
+            "n_neg": 72,
+            "verdict": "KILL",
+            "reason": "AUC 0.610 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "surprisal·wrong·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5453,
+            "auc_lower95": 0.429,
+            "n_pos": 63,
+            "n_neg": 37,
+            "verdict": "KILL",
+            "reason": "AUC 0.545 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.6126,
+            "auc_lower95": 0.4963,
+            "n_pos": 37,
+            "n_neg": 63,
+            "verdict": "KILL",
+            "reason": "AUC 0.613 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    }
+  ],
+  "controls": [
+    {
+      "readout": "A",
+      "stream": "surprisal·shufLabel",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 3.89,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4383,
+            "auc_lower95": 0.3254,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.438 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.528,
+            "auc_lower95": 0.4139,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.528 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "surprisal·shufLabel·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 3.89,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5617,
+            "auc_lower95": 0.4488,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.562 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.472,
+            "auc_lower95": 0.3579,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.472 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "surprisal·shufLabel",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5422,
+            "auc_lower95": 0.4278,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.542 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5605,
+            "auc_lower95": 0.4475,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.560 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "surprisal·shufLabel·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4578,
+            "auc_lower95": 0.3434,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.458 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4395,
+            "auc_lower95": 0.3265,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.440 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm12·shufLabel",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.22,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5205,
+            "auc_lower95": 0.4059,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.520 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5254,
+            "auc_lower95": 0.4112,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.525 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm12·shufLabel·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.22,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4795,
+            "auc_lower95": 0.3649,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.480 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4746,
+            "auc_lower95": 0.3605,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.475 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm12·shufLabel",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.515,
+            "auc_lower95": 0.4004,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.515 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5337,
+            "auc_lower95": 0.4198,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.534 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm12·shufLabel·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.485,
+            "auc_lower95": 0.3704,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.485 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4663,
+            "auc_lower95": 0.3524,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.466 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm48·shufLabel",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.52,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5832,
+            "auc_lower95": 0.4698,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.583 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4265,
+            "auc_lower95": 0.3128,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.427 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "A",
+      "stream": "norm48·shufLabel·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 2,
+      "meanSeamEvents": 2.52,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4168,
+            "auc_lower95": 0.3034,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.417 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5735,
+            "auc_lower95": 0.4598,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.573 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm48·shufLabel",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4505,
+            "auc_lower95": 0.3371,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.450 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.4322,
+            "auc_lower95": 0.3183,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.432 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    },
+    {
+      "readout": "B",
+      "stream": "norm48·shufLabel·inv",
+      "n": 100,
+      "nNullRows": 0,
+      "meanRejected": 0,
+      "meanSeamEvents": 0,
+      "report": {
+        "ran_at": 0,
+        "n_total": 100,
+        "n_labeled": 100,
+        "master_gate": {
+          "flag": "KAPPA_VALIDATED",
+          "validatable": false,
+          "blocked_by": "Gate 0 (§10) — no κ(T,t) definition is committed; validatedKappa() throws. The master gate cannot be validated until a definition exists to score."
+        },
+        "kill_tests": [
+          {
+            "gate": "VELOCITY_BOUNDARY",
+            "predictor": "velocity_peak",
+            "positive_class": "settled_open = 1 (OPEN)",
+            "threshold": 0.7,
+            "seam_edit_if_build": "set VELOCITY_BOUNDARY: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5495,
+            "auc_lower95": 0.4361,
+            "n_pos": 56,
+            "n_neg": 44,
+            "verdict": "KILL",
+            "reason": "AUC 0.550 < 0.7. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          },
+          {
+            "gate": "RESERVE_CONSOLIDATION",
+            "predictor": "reserve",
+            "positive_class": "settled_open = 0 (SETTLED)",
+            "threshold": 0.65,
+            "seam_edit_if_build": "set RESERVE_CONSOLIDATION: true in src/kappa-memory/seam.ts (manual commit — never by the runner)",
+            "auc": 0.5678,
+            "auc_lower95": 0.4539,
+            "n_pos": 44,
+            "n_neg": 56,
+            "verdict": "KILL",
+            "reason": "AUC 0.568 < 0.65. The signal does not discriminate the label at the pre-registered bar. Decisive: keep the gate closed."
+          }
+        ],
+        "overall": "KILL",
+        "seam_written": false,
+        "independence_caveat": "Label is settled_open — a lexical readout of the response tail (write_path.extractSettling), independent of the κ-series-derived predictors but still an INTERNAL proxy. A BUILD clears this bar only; the human-rater Gate 2 (§10) is the real one.",
+        "next_action": "At least one kill-test failed at the pre-registered bar. Keep every gate closed — this is working as intended, not a bug."
+      }
+    }
+  ]
+}
