@@ -79,3 +79,15 @@ the verify step), and how many refusals remain and why.
 Falsifier: R1 fails → the grounding rule does not accept a tool-printed number as
 grounding for the claim, and the rule itself (atlas-state `claimsOf`/grounding) is the
 next thing to open, not the brief.
+
+### ELLE_GSM8K_002 — VOID (server failure, not a verdict)
+
+Ran 2026-09-06 19:07. 84 / 100 briefs died with `ollama HTTP 500: RuntimeError: [METAL]
+Command buffer execution failed: Insufficient Memory` (66 such failures in the server log);
+only 16 produced an answer. The machine was 8 GB into swap after the 400-run: the prompt
+cache store had logged 1,034 stores and 0 evictions. The 16 that did answer were all
+correct; 6 were accepted, 10 refused — and the refusals showed the real rule defect:
+intermediate numbers and formatting (`200,000` vs a tool's `200000.0`) counted as
+ungrounded claims. **Fix landed (Elle 045b212):** `groundClaims` now compares numbers by
+value and treats the brief's own numbers as given. R1/R2 are re-run as 002b after the
+server is restarted with a bounded cache; nothing about the 002 numbers is a result.
