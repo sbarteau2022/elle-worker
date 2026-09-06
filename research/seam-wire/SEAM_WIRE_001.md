@@ -86,6 +86,16 @@ logged 2–3 "seam events" per row (a factor residual past the paper's
 on any live stream, discriminates the label at the gate's bar. The seam
 stays closed. Nothing in `seam.ts` changes.
 
+### Cross-implementation parity (Rust gate)
+
+The identical 600 TraceRows (`research/seam-wire/trace_rows.json`, dumped by
+`dump_trace_rows.ts`) were run through the Rust port of the gate,
+`Elle/elle_rust_harness/crates/harness-dhng/src/swarm_eval.rs`
+(`run_validate_kappa`), via the example `seam_wire_parity.rs`. Every AUC,
+lower bound and verdict agrees with the TypeScript gate to four decimals
+(e.g. B/surprisal RESERVE 0.2496 / 0.1254 KILL; A/surprisal VELOCITY
+0.5954 / 0.4588 KILL). Two independent implementations, one answer.
+
 ## The one number that is not chance — and why it is not a pass
 
 Readout B on `surprisal`, RESERVE test: AUC **0.250**, 95% interval roughly
