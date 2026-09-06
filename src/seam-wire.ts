@@ -279,3 +279,50 @@ export function runArm(
     report: runValidateKappa(traces, 0),
   };
 }
+
+// ── The wire: calibrated κ(T) with an evidence floor ─────────────────────────
+// κ̇ = κ(1−κ)·ż integrates to logit κ(T) = logit κ₀ + ∫ż, so the regulator is a
+// sigmoid of accumulated evidence. With readout B the evidence is
+// S = Σ_t κ_c,t·(1−p_t) over the head's windows and κ(T) = σ(A·S + B).
+// A, B were fitted on the val fixture (n=100) and replicated unchanged on the
+// held-out test fixture (SEAM_WIRE_001.md). They are PRE-REGISTERED constants:
+// do not refit here.
+//
+// Evidence floor: σ(B) alone is 0.9977, i.e. "no evidence" would read as
+// near-certain settling. That is the zero-evidence defect (SEAM_WIRE_001.md,
+// 2026-09-06). κ is therefore only emitted when the head is complete
+// (WIRE.WINDOW + (N_WINDOWS−1)·STRIDE tokens → N_WINDOWS scored windows) and S
+// lies inside the calibration support seen on real data (1.6–8.1 on both
+// fixtures, widened to [1, 9]). Outside that, the honest value is null.
+export const KAPPA_CALIBRATION = {
+  A: -0.893,
+  B: 6.054,
+  N_WINDOWS: 9,           // head 96 = 64 + 8·4
+  S_SUPPORT: [1.0, 9.0] as const,
+} as const;
+
+export interface CalibratedKappa {
+  kappa: number | null;   // P(settled) — null when the evidence floor is not met
+  S: number;              // accumulated precision-weighted coupling
+  nWindows: number;
+  reason: 'ok' | 'head-incomplete' | 'out-of-support' | 'non-finite';
+}
+
+export function evidenceS(t: ReadoutTrace): number {
+  let s = 0;
+  for (let k = 0; k < t.score.length; k++) s += t.score[k] * t.precision[k];
+  return s;
+}
+
+export function calibratedKappa(series: number[], seed = 0): CalibratedKappa {
+  const need = WIRE.WINDOW + (KAPPA_CALIBRATION.N_WINDOWS - 1) * WIRE.STRIDE;
+  if (series.length < need) return { kappa: null, S: 0, nWindows: 0, reason: 'head-incomplete' };
+  const t = readoutB(series.slice(0, need), seed);
+  const S = evidenceS(t);
+  if (!Number.isFinite(S)) return { kappa: null, S, nWindows: t.nWindows, reason: 'non-finite' };
+  if (t.nWindows < KAPPA_CALIBRATION.N_WINDOWS) return { kappa: null, S, nWindows: t.nWindows, reason: 'head-incomplete' };
+  const [lo, hi] = KAPPA_CALIBRATION.S_SUPPORT;
+  if (S < lo || S > hi) return { kappa: null, S, nWindows: t.nWindows, reason: 'out-of-support' };
+  const z = KAPPA_CALIBRATION.A * S + KAPPA_CALIBRATION.B;
+  return { kappa: 1 / (1 + Math.exp(-z)), S, nWindows: t.nWindows, reason: 'ok' };
+}
