@@ -1,20 +1,6 @@
 import { defineConfig } from 'vitest/config';
-
-// Wrangler bundles **/*.md as Text modules ([[rules]] in wrangler.toml), so
-// worker source imports markdown as strings (corpus-seed.ts, education/).
-// Vitest runs on vite, which has no such rule — this plugin mirrors it so
-// any test that pulls in an .md-importing module loads the same way it
-// deploys.
+// Keep stray checkouts (session worktrees under .claude/) out of the suite —
+// they duplicated every test in a full run on 2026-09-06.
 export default defineConfig({
-  plugins: [
-    {
-      name: 'markdown-as-text',
-      enforce: 'pre',
-      transform(code, id) {
-        if (id.endsWith('.md')) {
-          return { code: `export default ${JSON.stringify(code)};`, map: null };
-        }
-      },
-    },
-  ],
+  test: { exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', '**/salvage/**'] },
 });
