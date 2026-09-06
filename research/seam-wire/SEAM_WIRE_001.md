@@ -253,6 +253,28 @@ Controls: label shuffle on every claimed cell. Any BUILD on a control voids the 
 If H3 and H4 KILL at n = 300, readout B is recorded as a length signal only and the seam
 stays closed on that basis; the evidence floor in `calibratedKappa` still applies.
 
+
+## Contraction protocol (paper §7) — run 2026-09-06, FAIL
+
+`research/seam-wire/contraction_protocol.ts`, definitions fixed in its header before the run:
+per-window κ_c with stride 1 (33 samples per head), target = mean of the last 5 windows,
+u_t = |κ_c,t − target|, OLS of ln u_t on the first 60%, held-out NRMSE on the last 40%,
+PASS = median NRMSE < 0.15 and r > 0 in ≥ 90% over ≥ 200 closed trajectories.
+
+| rows | n | median held-out NRMSE | r > 0 | median r | verdict |
+|---|---|---|---|---|---|
+| CLOSED (val+test) | 133 | 1.191 | 63.2% | 0.018 | UNDER-N, and far from the bar |
+| OPEN | 67 | 1.150 | 62.7% | 0.028 | — |
+| ALL | 200 | 1.191 | 63.0% | 0.021 | **FAIL** |
+
+The coupling trajectory over the first 96 tokens is not an exponential relaxation toward a
+settled value: prediction error on the held-out tail is larger than the tail itself, and the
+sign of r is near a coin flip. Under the paper's own criterion the `r_estimate` contraction
+model is **falsified for this signal as defined** and must stay descriptive-only. This is the
+second reason the seam stays closed, independent of the AUC result: readout B carries
+length information as an accumulated level (S), not as a contracting trajectory. The 200
+train-split rows will be added when they land; the verdict is not expected to move.
+
 ## Two things learned about the instruments
 
 - **rip.py's null has a resolution floor of ~1/(slow period).** Circular
