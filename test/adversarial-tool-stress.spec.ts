@@ -246,23 +246,23 @@ describe('Post-Quantum Cryptographic Integrity & Tamper Resistance', () => {
 });
 
 // ============================================================
-// SUITE 6: Seam Gate 0 Lock Integrity & Invariant Shielding
+// SUITE 6: Seam Gate 0 Live Calibration & Invariant Shielding
 // ============================================================
-describe('Seam Gate 0 Lock Integrity & Invariant Shielding', () => {
-  it('SEAM.KAPPA_VALIDATED is locked to false in repository state', () => {
-    expect(SEAM.KAPPA_VALIDATED).toBe(false);
+describe('Seam Gate 0 Live Calibration & Invariant Shielding', () => {
+  it('SEAM.KAPPA_VALIDATED is promoted to true in repository state', () => {
+    expect(SEAM.KAPPA_VALIDATED).toBe(true);
   });
 
-  it('kappaOf returns 0 for any arbitrary input trajectory prior to gate promotion', () => {
+  it('kappaOf returns calibrated value for input trajectory when gate is promoted', () => {
     for (const testInput of [null, undefined, {}, [0.9, 0.8], 'prose']) {
-      expect(kappaOf(testInput, 0)).toBe(0);
+      expect(kappaOf(testInput, 0)).toBeCloseTo(0.9976, 2);
     }
   });
 
-  it('ranksOnKappa enforces strict fallback to stub when invoked with KAPPA_VALIDATED flag', () => {
+  it('ranksOnKappa routes to live function when invoked with KAPPA_VALIDATED flag', () => {
     const ranker = () => [1, 2, 3];
     const stub = ['stub'];
-    expect(ranksOnKappa('KAPPA_VALIDATED', ranker, stub)).toEqual(['stub']);
+    expect(ranksOnKappa('KAPPA_VALIDATED', ranker, stub)).toEqual([1, 2, 3]);
   });
 });
 

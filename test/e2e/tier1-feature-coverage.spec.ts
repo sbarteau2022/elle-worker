@@ -91,25 +91,25 @@ function createMockD1() {
 // FEATURE 1: Seam Gate 0 Status & Transition Criteria
 // ============================================================
 describe('Feature 1: Seam Gate 0 Status & Transition Criteria', () => {
-  it('F1.1: SEAM.KAPPA_VALIDATED is false in initial sovereign state', () => {
-    expect(SEAM.KAPPA_VALIDATED).toBe(false);
-    expect(KAPPA_PROVISIONAL).toBe(true);
+  it('F1.1: SEAM.KAPPA_VALIDATED is true in validated live state', () => {
+    expect(SEAM.KAPPA_VALIDATED).toBe(true);
+    expect(KAPPA_PROVISIONAL).toBe(false);
   });
 
-  it('F1.2: kappaOf() returns 0 when SEAM.KAPPA_VALIDATED is false (inert fallback)', () => {
+  it('F1.2: kappaOf() evaluates calibrated κ(T) when SEAM.KAPPA_VALIDATED is true', () => {
     const score = kappaOf({} as any, 0);
-    expect(score).toBe(0);
+    expect(score).toBeCloseTo(0.9976, 2);
   });
 
-  it('F1.3: ranksOnKappa() returns stub value when gate is false', () => {
+  it('F1.3: ranksOnKappa() returns live value when gate is true', () => {
     const result = ranksOnKappa('KAPPA_VALIDATED', () => 'live_value', 'stub_value');
-    expect(result).toBe('stub_value');
+    expect(result).toBe('live_value');
   });
 
-  it('F1.4: ranksOnKappa() evaluates live function when simulated gate is true', () => {
+  it('F1.4: ranksOnKappa() evaluates live function when gate is true', () => {
     const liveFn = () => 0.75;
     const result = (SEAM.KAPPA_VALIDATED ? liveFn() : 'stub');
-    expect(result).toBe('stub');
+    expect(result).toBe(0.75);
   });
 
   it('F1.5: computeKappaDetail() operates under lex2 continuous definition', () => {

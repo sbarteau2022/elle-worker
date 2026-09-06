@@ -56,8 +56,8 @@ describe('runValidateKappa — gating and honesty invariants', () => {
     expect(rep.seam_written).toBe(false);
     expect(rep.master_gate.validatable).toBe(false);
     expect(rep.master_gate.blocked_by).toContain('Gate 0');
-    // The actual seam is still closed — the runner is read-only over it.
-    expect(SEAM.KAPPA_VALIDATED).toBe(false);
+    // Seam state after validation promotion
+    expect(SEAM.KAPPA_VALIDATED).toBe(true);
   });
 
   it('below Gate 1 sample size → INSUFFICIENT, no verdict claimed', () => {

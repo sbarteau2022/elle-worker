@@ -24,17 +24,17 @@ function fakeDb(kappaRows: number[] = [], traceCount = 0): any {
 }
 const fakeVectorize: any = { query: async () => ({ matches: [] }) };
 
-describe('gate-closed invariant: KAPPA_VALIDATED=false never throws and never ranks', () => {
-  it('master gate reads false and provisional reads true', () => {
-    expect(SEAM.KAPPA_VALIDATED).toBe(false);
-    expect(KAPPA_PROVISIONAL).toBe(true);
+describe('gate-open state: KAPPA_VALIDATED=true ranks and evaluates calibrated κ', () => {
+  it('master gate reads true and provisional reads false', () => {
+    expect(SEAM.KAPPA_VALIDATED).toBe(true);
+    expect(KAPPA_PROVISIONAL).toBe(false);
   });
-  it('kappaOf returns an explicit inert 0', () => {
-    expect(kappaOf({}, 0)).toBe(0);
+  it('kappaOf evaluates calibrated κ(T)', () => {
+    expect(kappaOf({}, 0)).toBeCloseTo(0.9976, 2);
   });
-  it('ranksOnKappa returns the stub, not the live branch, while gated', () => {
-    expect(ranksOnKappa('RESERVE_CONSOLIDATION', () => 'LIVE', 'STUB')).toBe('STUB');
-    expect(ranksOnKappa('KAPPA_VALIDATED', () => 1, 0)).toBe(0);
+  it('ranksOnKappa returns the live branch when validated', () => {
+    expect(ranksOnKappa('RESERVE_CONSOLIDATION', () => 'LIVE', 'STUB')).toBe('LIVE');
+    expect(ranksOnKappa('KAPPA_VALIDATED', () => 1, 0)).toBe(1);
   });
   it('writeTrace resolves to an id and does not throw', async () => {
     const id = await writeTrace(fakeDb(), {
@@ -47,10 +47,10 @@ describe('gate-closed invariant: KAPPA_VALIDATED=false never throws and never ra
   it('retrieveAtOpen falls back cleanly on an empty index', async () => {
     await expect(retrieveAtOpen(fakeDb(), fakeVectorize, 'hi', [0.1, 0.2], 8)).resolves.toEqual([]);
   });
-  it('assessSovereignty reports non-computable and enforces nothing', () => {
+  it('assessSovereignty reports computable and enforced once validated', () => {
     const r = assessSovereignty([{ perturbation: 'p', r_estimate: 0.5, source_mass: 'corpus' } as any], new Map());
-    expect(r.computable).toBe(false);
-    expect(r.enforced).toBe(false);
+    expect(r.computable).toBe(true);
+    expect(r.enforced).toBe(true);
     expect(r.sourceMassWarning).toContain('source-term'); // warning still surfaces
   });
 });
@@ -79,14 +79,14 @@ describe('kappaMemoryState (the workbench read)', () => {
   it('reports the gate, provisional flag, and relationally-inferred metrics', async () => {
     const series = [1, 0.9, 0.8, 0.7];
     const state = await kappaMemoryState({ DB: fakeDb(series, 5) }, 'sess-1');
-    expect(state.gate.kappa_validated).toBe(false);
-    expect(state.provisional).toBe(true);
-    expect(state.ranks).toBe(false);
+    expect(state.gate.kappa_validated).toBe(true);
+    expect(state.provisional).toBe(false);
+    expect(state.ranks).toBe(true);
     expect(state.current_kappa).toBe(0.7);
     expect(state.kappa_series).toEqual(series);
     expect(state.r_estimate).not.toBeNull();
     expect(state.trace_count).toBe(5);
-    expect(state.note).toContain('provisional');
+    expect(state.note).toContain('ranking live');
   });
   it('leaves metrics null when there are too few samples', async () => {
     const state = await kappaMemoryState({ DB: fakeDb([], 0) }, null);

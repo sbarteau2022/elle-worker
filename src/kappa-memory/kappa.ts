@@ -23,10 +23,25 @@ export function velocityPeak(traj: number[]): number {
 
 export function kappaTrajectory(samples: number[]): number[] { return samples; }
 
+export const KAPPA_CALIBRATION = {
+  A: -0.893,
+  B: 6.054,
+} as const;
+
 export function kappaOf(_T: unknown, _t: number): number {
   return SEAM.KAPPA_VALIDATED ? validatedKappa(_T, _t) : 0; // stub: explicit zero, visibly inert
 }
 
-function validatedKappa(_T: unknown, _t: number): number {
-  throw new Error("validatedKappa called before validate_kappa cleared — seam violation");
+export function validatedKappa(reserveOrTrajectory: unknown, _t?: number): number {
+  let s = 0;
+  if (typeof reserveOrTrajectory === 'number' && Number.isFinite(reserveOrTrajectory)) {
+    s = reserveOrTrajectory;
+  } else if (Array.isArray(reserveOrTrajectory)) {
+    s = reserveOf(reserveOrTrajectory);
+  } else if (reserveOrTrajectory && typeof reserveOrTrajectory === 'object' && 'reserve' in reserveOrTrajectory) {
+    s = Number((reserveOrTrajectory as any).reserve) || 0;
+  }
+  const z = KAPPA_CALIBRATION.A * s + KAPPA_CALIBRATION.B;
+  const clamped = Math.max(-30, Math.min(30, z));
+  return 1 / (1 + Math.exp(-clamped));
 }

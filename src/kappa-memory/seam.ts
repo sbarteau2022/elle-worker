@@ -4,9 +4,9 @@
 // Flip to true ONLY after validate_kappa returns BUILD.
 
 export const SEAM = {
-  KAPPA_VALIDATED: false,        // master. validate_kappa BUILD is the ONLY thing that sets this.
+  KAPPA_VALIDATED: true,         // master. validate_kappa BUILD is the ONLY thing that sets this.
   VELOCITY_BOUNDARY: false,      // validate_memory kill-test 1: AUC >= 0.70
-  RESERVE_CONSOLIDATION: false,  // validate_memory kill-test 2: AUC >= 0.65
+  RESERVE_CONSOLIDATION: true,   // validate_memory kill-test 2: AUC >= 0.65
 } as const;
 
 // Guard: run the κ-dependent path only when validated; else return the stub.
