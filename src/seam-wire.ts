@@ -326,3 +326,35 @@ export function calibratedKappa(series: number[], seed = 0): CalibratedKappa {
   const z = KAPPA_CALIBRATION.A * S + KAPPA_CALIBRATION.B;
   return { kappa: 1 / (1 + Math.exp(-z)), S, nWindows: t.nWindows, reason: 'ok' };
 }
+
+// ── Readout A2: seam sense (b) with an INDEPENDENT ball observation ──────────
+// Readout A was degenerate by construction: pamiBridgeVector builds the ball
+// chart from the same PAMI phases as the torus chart, so the two factor
+// residuals co-move and their disagreement cancels the shared signal. A2 gives
+// the ball factor its own observation — the late-tap hidden state (block 48)
+// through a fixed random chart (producer stream `proj48`, 29-d, seed 29) —
+// while the torus factor keeps the surprisal phases. Two observations of the
+// same 64-token window, glued at the seam. Everything else is identical to A.
+export function readoutA2(surprisal: number[], proj48: number[][]): ReadoutTrace {
+  const ws = windows(surprisal);
+  const pp = new ProductPredictor(29, PAMI_PHASE_COUNT);
+  const score: number[] = [], precision: number[] = [];
+  let rejected = 0, seamEvents = 0;
+  ws.forEach((w, i) => {
+    const s = i * WIRE.STRIDE;
+    const idx: PamiIndex | null = pamiIndex(w);
+    const toks = proj48.slice(s, s + WIRE.WINDOW);
+    if (!idx || toks.length < WIRE.WINDOW) { rejected++; score.push(Number.NaN); precision.push(Number.NaN); return; }
+    const mean = new Array(29).fill(0);
+    for (const v of toks) for (let d = 0; d < 29; d++) mean[d] += v[d] / toks.length;
+    const n = Math.sqrt(mean.reduce((a, x) => a + x * x, 0));
+    const ball = n > 0 ? mean.map((x) => (Math.tanh(n) / n) * x) : mean;   // strictly inside the unit ball
+    const st = pp.step(ball, idx.phases);
+    const zh = st.zHyper, zt = st.zTorus;
+    if (zh === null || zt === null || Number.isNaN(zh) || Number.isNaN(zt)) { rejected++; score.push(Number.NaN); precision.push(Number.NaN); return; }
+    if ((st.residualHyper ?? 0) > WIRE.SEAM_B_BALL || (st.residualTorus ?? 0) > WIRE.SEAM_B_TORUS) seamEvents++;
+    score.push(Math.abs(surpriseToUnit(zh) - surpriseToUnit(zt)));
+    precision.push(1);
+  });
+  return finish(score, precision, ws.length, rejected, seamEvents);
+}
