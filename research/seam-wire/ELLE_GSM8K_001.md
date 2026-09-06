@@ -191,3 +191,31 @@ outright was a genuine wrong answer (175 vs 110), so the decorrelated reviewer d
 Same claims as 003 (C1 reviewer catch rate on wrong first submissions ≥ 0.50; C2 final
 accuracy reported vs 002b's 0.94), same held-out rows (test 100–199), 3B coder worker at
 kv_bits 8 / 4096-token cap, 27B reviewer, sovereign OFF. VOID if > 5% server/model errors.
+
+### Design change (2026-09-06, late): no stock small models — specialists are carved from the coordinator; the atlas13 region handoff
+
+Stewart: delete Qwen2.5-Coder-3B and Phi-4-mini from disk; the 3B-equivalent must come from the
+coordinator's own weights, without extra disk or GPU, materialised per agent and dissolved after;
+the coordinator reads the goal, takes the floats from the 13-level map and assigns them to the
+worker to stay in that area. Done: both models deleted (3.8 GB), retired from mlx-serve's roster
+(it would have re-downloaded them) and from the Electron roster (elle-coder / elle-reasoner /
+elle-math, coordinator fallback until a carved tag is served). **003b abandoned at 8 finals**
+(stock 3B worker): 9 first submissions, 9 wrong/unformatted, the 27B reviewer caught 7 — the
+decorrelated reviewer fires, on a sample too small to be a verdict.
+
+Built (Elle, atlas13 commit): `atlas13.cjs` carves the live map into level 0 (central) + 12
+regions (spherical k-means with restarts on the task nodes' 16-d tangent directions; centre =
+probe point of the centroid, radius = 90th-pct member distance; labels from region words minus
+corpus-frequent instruction words). The watcher embeds every open brief, assigns its region and
+posts `REGION {level,label,radius,d,centre}` as an architect directive before it is claimable; the
+worker anchors to the centre, recalls only inside the radius (hyper-map `within`), tells the model
+its level, is nudged when its turns land beyond 1.25 radii (`atlas-state.outOfRegion`), and the
+task node is written back with its level. First build of the real map: 1022 task nodes → 12
+regions (four GSM8K sub-families 221/158/135/127, then shell/eval, prime, sha256, fizzbuzz,
+count, fibonacci, search), 59 ms.
+
+What the floats do and do not do: they bound where the worker thinks (anchor, recall, nudge) and
+name which per-region adapter it runs under; they do not by themselves reduce compute. The
+"3B-equivalent" is the next build: a depth-carved view over the coordinator's loaded layers
+(64 = 48 GatedDeltaNet + 16 attention, dense, no experts) with a per-region DoRA heal, depth
+chosen by measurement, served as elle-<role> tags sharing the coordinator's tensors.
