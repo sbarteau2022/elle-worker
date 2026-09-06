@@ -64,7 +64,7 @@ def test_rust_harness_cargo_test_execution_and_zero_leaks():
     }
     result = subprocess.run(
         cmd,
-        cwd="/Users/stewartbarteau/Desktop/Elle/elle_rust_harness",
+        cwd="/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/elle_rust_harness",
         env=env,
         capture_output=True,
         text=True,

@@ -19,7 +19,7 @@ SUITES = [
     ("Unit: Analytical Controls & Manifold Axioms", "tests/unit/", 47),
 ]
 
-RUST_CRATE_DIR = "/Users/stewartbarteau/Desktop/Elle/elle_rust_harness"
+RUST_CRATE_DIR = "/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/elle_rust_harness"
 RUST_ENV = {
     "PATH": "/Users/stewartbarteau/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin",
     "HOME": "/Users/stewartbarteau",

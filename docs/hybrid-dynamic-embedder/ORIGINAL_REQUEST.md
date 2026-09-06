@@ -4,15 +4,15 @@
 
 Build the complete reference architecture, integration test suites, and MLX Q4 tuning harness for the Qwen3.8:27b multimodal local observer, extracting dynamic multi-layer hidden states and visual patch embeddings for native projection into the Dynamic Hyperbolic Neural Graph (DHNG).
 
-Working directory: `/Users/stewartbarteau/Desktop/elle-worker/docs/Hybrid Dynamic Embedder`  
+Working directory: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/Hybrid Dynamic Embedder`  
 Integrity mode: `development`
 
 ## Reference Material
 - Research Index: `/Users/stewartbarteau/Desktop/DEEP RESEARCH FOR LLM UPGRADES/hybrid dynamic embedder/INDEX.md`
-- Architecture Specification: `/Users/stewartbarteau/Desktop/elle-worker/docs/Hybrid Dynamic Embedder/SPECIFICATION.md`
-- MLX Q4 Tuning & Manipulation: `/Users/stewartbarteau/Desktop/elle-worker/docs/Hybrid Dynamic Embedder/POTENTIAL_TUNING.md`
-- Dynamic Hyperbolic Neural Graph Repository: `/Users/stewartbarteau/Desktop/Dynanic-Hyperbolic-Neural-Graph`
-- Rust Polyglot Harness: `/Users/stewartbarteau/Desktop/Elle/elle_rust_harness`
+- Architecture Specification: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/Hybrid Dynamic Embedder/SPECIFICATION.md`
+- MLX Q4 Tuning & Manipulation: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/Hybrid Dynamic Embedder/POTENTIAL_TUNING.md`
+- Dynamic Hyperbolic Neural Graph Repository: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Dynanic-Hyperbolic-Neural-Graph`
+- Rust Polyglot Harness: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/elle_rust_harness`
 
 ## Requirements
 
@@ -57,15 +57,15 @@ Implement the zero-copy shared memory descriptor bridge in `harness-dhng` (`elle
 
 Build the complete reference architecture, integration test suites, and MLX Q4 tuning harness for the Qwen3.8:27b multimodal local observer, extracting dynamic multi-layer hidden states and visual patch embeddings for native projection into the Dynamic Hyperbolic Neural Graph (DHNG).
 
-Working directory: `/Users/stewartbarteau/Desktop/elle-worker/docs/Hybrid Dynamic Embedder`  
+Working directory: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/Hybrid Dynamic Embedder`  
 Integrity mode: `development`
 
 ## Reference Material
 - Research Index: `/Users/stewartbarteau/Desktop/DEEP RESEARCH FOR LLM UPGRADES/hybrid dynamic embedder/INDEX.md`
-- Architecture Specification: `/Users/stewartbarteau/Desktop/elle-worker/docs/Hybrid Dynamic Embedder/SPECIFICATION.md`
-- MLX Q4 Tuning & Manipulation: `/Users/stewartbarteau/Desktop/elle-worker/docs/Hybrid Dynamic Embedder/POTENTIAL_TUNING.md`
-- Dynamic Hyperbolic Neural Graph Repository: `/Users/stewartbarteau/Desktop/Dynanic-Hyperbolic-Neural-Graph`
-- Rust Polyglot Harness: `/Users/stewartbarteau/Desktop/Elle/elle_rust_harness`
+- Architecture Specification: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/Hybrid Dynamic Embedder/SPECIFICATION.md`
+- MLX Q4 Tuning & Manipulation: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/Hybrid Dynamic Embedder/POTENTIAL_TUNING.md`
+- Dynamic Hyperbolic Neural Graph Repository: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Dynanic-Hyperbolic-Neural-Graph`
+- Rust Polyglot Harness: `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/elle_rust_harness`
 - Atlas & TIT Repository: `/Users/stewartbarteau/Desktop/hybrid-HNPA-active-inference-LLM`
 
 ## Requirements

@@ -716,7 +716,7 @@ def test_f15_rust_harness_cargo_test_passes():
     """F15.4: Executes cargo test -p harness-dhng cleanly."""
     res = subprocess.run(
         ["cargo", "test", "-p", "harness-dhng"],
-        cwd="/Users/stewartbarteau/Desktop/Elle/elle_rust_harness",
+        cwd="/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/elle_rust_harness",
         env={"PATH": "/Users/stewartbarteau/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin", "HOME": "/Users/stewartbarteau"},
         capture_output=True,
         text=True,
@@ -728,7 +728,7 @@ def test_f15_rust_harness_zero_memory_leaks():
     """F15.5: Verified zero memory leaks in Rust harness test execution."""
     res = subprocess.run(
         ["cargo", "test", "-p", "harness-dhng", "--", "test_poincare_dist_properties"],
-        cwd="/Users/stewartbarteau/Desktop/Elle/elle_rust_harness",
+        cwd="/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/elle_rust_harness",
         env={"PATH": "/Users/stewartbarteau/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin", "HOME": "/Users/stewartbarteau"},
         capture_output=True,
         text=True,

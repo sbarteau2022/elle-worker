@@ -7,7 +7,7 @@ product manifold, ℍⁿ × 𝕋ᵈ.
 
 ## Canonical location
 
-    /Users/stewartbarteau/Desktop/elle-worker/docs/hybrid-dynamic-embedder
+    /Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/hybrid-dynamic-embedder
 
 This is the **only** copy. Earlier sessions produced several near-empty
 look-alikes at `~/Desktop/Hybrid Dynamic Embedder/` and at a variant of
@@ -56,7 +56,7 @@ every input. `GET /health` reports `mode` so a caller can tell the two apart.
 
 ## Running the tests
 
-    cd "/Users/stewartbarteau/Desktop/elle-worker/docs/hybrid-dynamic-embedder"
+    cd "/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/docs/hybrid-dynamic-embedder"
     uv run --with pytest --with numpy --with mlx python -m pytest -q
 
 ## Model weights
