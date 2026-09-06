@@ -99,3 +99,44 @@ Server restarted with bounded caches (`MLX_CACHE_MAX_GB=3`, `APC_NUM_BLOCKS=512`
 intermediate she cites. Same 100 test rows, same app, 3 agents. Claims unchanged:
 **R1** refused-but-correct < 10%; **R2** recall on wrong ≥ 0.70. Reported: accuracy,
 generations and tokens per task, any server errors (a run with > 5% server errors is VOID).
+
+### ELLE_GSM8K_002b — RESULT (2026-09-06, run completed after a laptop-transport pause)
+
+Run: test split rows 0–99, seq 952..1051, 3 agents, Elle in the Electron harness on
+mlx-serve (num_predict 32768 / num_ctx 262144, bounded caches). The pause reopened 2
+claimed briefs; nothing was re-posted. Server errors: **0** (not VOID). All 100 tasks
+mapped (map 1818 → 2192 nodes) and all 100 have sidecar rows (218 generations, mean
+277 gen tokens/task — brief v2 makes her print intermediates, so longer than 001's ~150).
+
+| | 001 (400, old rule) | 002b (100, rule 045b212 + brief v2) |
+|---|---|---|
+| accuracy | 0.9175 | **0.94** |
+| refused | 276 (69%) | **6** |
+| refused-but-correct / correct | 250/367 = 0.68 | 5/94 = **0.053** |
+| recall on wrong (R2) | 0.79 | **1/6 = 0.17** |
+| precision of refusal | 0.094 | 0.17 |
+
+**R1 PASSES** (0.053 < 0.10). **R2 FAILS** (0.17 < 0.70).
+
+Why R2 fails — read the six wrong answers (`runs/elle_gsm8k_002b_report.json`,
+`wrong_rows`): five are self-consistent arithmetic on a wrong reading of the problem
+(inclusive vs exclusive year count, a pension bonus applied to the wrong base, an
+off-by-one). She ran the code, the code printed her numbers, every claim in the summary
+was in an observation. The grounding gate is a citation check: it verifies that what
+she says matches what she saw, and it cannot see that what she computed answers the
+wrong question. 001's recall of 0.79 was not detection; it was a rule that refused
+almost everything (precision 0.09). **R2 as pre-registered is not reachable by a
+grounding gate; a correctness gate needs an independent second solve or a checker,
+which is a different instrument. Recorded as a falsification of the claim that κ
+grounding detects wrong answers.**
+
+Why 5 correct answers were still refused (`refused_rows`, board events): two came from
+possessive apostrophes read as a quoted string (`Suzy's … Ben's` → claim); fixed after
+the run (atlas-state.cjs, negative word-boundary on the `'…'` branch, test added). Two
+were factors she used but did not print (1.25, 0.9, 0.5) despite the brief; one cited
+earlier task seqs (#919/#619) — genuinely unprinted numbers, the rule is right. The
+apostrophe fix was applied AFTER 002b and is not reflected in its numbers.
+
+Not trained on. The map/ledger now hold 001's 250 wrongful strain nodes plus 002b's
+clean 100; training data for the DoRA step is 002b's 89 grounded-correct completions
+only, until a larger clean run exists.
