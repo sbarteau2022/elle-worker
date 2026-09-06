@@ -91,3 +91,11 @@ intermediate numbers and formatting (`200,000` vs a tool's `200000.0`) counted a
 ungrounded claims. **Fix landed (Elle 045b212):** `groundClaims` now compares numbers by
 value and treats the brief's own numbers as given. R1/R2 are re-run as 002b after the
 server is restarted with a bounded cache; nothing about the 002 numbers is a result.
+
+### ELLE_GSM8K_002b — pre-registered before the run (2026-09-06)
+
+Server restarted with bounded caches (`MLX_CACHE_MAX_GB=3`, `APC_NUM_BLOCKS=512`); rule fix
+045b212 live in the app's workers; brief v2 asks her to print the final number and every
+intermediate she cites. Same 100 test rows, same app, 3 agents. Claims unchanged:
+**R1** refused-but-correct < 10%; **R2** recall on wrong ≥ 0.70. Reported: accuracy,
+generations and tokens per task, any server errors (a run with > 5% server errors is VOID).
