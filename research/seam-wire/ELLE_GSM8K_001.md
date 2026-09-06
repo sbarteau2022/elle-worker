@@ -140,3 +140,21 @@ apostrophe fix was applied AFTER 002b and is not reflected in its numbers.
 Not trained on. The map/ledger now hold 001's 250 wrongful strain nodes plus 002b's
 clean 100; training data for the DoRA step is 002b's 89 grounded-correct completions
 only, until a larger clean run exists.
+
+### Coordinator sign-off — first live result (2026-09-06, Elle 0a674a3)
+
+Built after 002b: a worker's `done` is a submission; the coordinator (`elle` tag, same
+27B weights) solves independently and approves or sends back (max 2, then blocked); workers
+also pick up architect directives every step (the nudge). Live: honest tasks approved with
+correct notes; a directive posted mid-run was acted on 3 s later.
+
+Retest on the two 002b wrong problems (test #62 pension, gold 25000; test #85 quilt, gold
+44): worker answered 75000 and 48 again, and the coordinator **approved both**, reproducing
+the identical misreading in its own notes ("$50,000 + $25,000 = $75,000"; "23 to 34
+inclusive is 12 years"). **Same weights, same prior, same error: a second solve by the same
+model is not an independent check.** The sign-off loop is the right shape, but its reviewer
+must be a different model from the worker (or the worker must be a different model from the
+coordinator) for the two errors to decorrelate. This is the empirical case for the
+specialist tier Stewart asked for: small hyper-specialised workers under a 27B coordinator
+that reviews, not eight instances of the coordinator (ELLE_SWARM_SOVEREIGN=1 forces every
+role onto the coordinator's weights — swarm.cjs status block — which is what 001/002b ran).
