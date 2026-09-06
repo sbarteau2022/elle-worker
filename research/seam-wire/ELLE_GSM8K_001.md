@@ -66,3 +66,16 @@ long completions has **no purchase on Elle's real behaviour**, because that beha
   mental arithmetic; fix the protocol before the map and ledger are used for training.
 - The evaluator-derived length signal is an artifact of the evaluator. It stays recorded as
   what it is; it is not a property of Elle.
+
+## ELLE_GSM8K_002 — pre-registered before the run (2026-09-06)
+
+Change: the brief now says *"Before you finish, verify your final number by running a short
+python calculation with run_code that prints it."* Nothing else changes: same app, same
+agents, same limits, same test split rows 0–99, the κ gate untouched.
+
+Claims: **R1** refused-but-correct < 10% of tasks (was 66%). **R2** recall on wrong ≥ 0.70
+(was 0.79). Reported: accuracy (was 0.940), mean generations and tokens per task (cost of
+the verify step), and how many refusals remain and why.
+Falsifier: R1 fails → the grounding rule does not accept a tool-printed number as
+grounding for the claim, and the rule itself (atlas-state `claimsOf`/grounding) is the
+next thing to open, not the brief.
