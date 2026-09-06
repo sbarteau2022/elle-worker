@@ -12,6 +12,9 @@ Per completion token t (prompt tokens are excluded) we emit three streams:
   surprisal[t] = -log p(token_t | prefix)           (nats, from the final logits)
   norm12[t]    = ||h_12[t]||_2                       (hidden state after block 12)
   norm48[t]    = ||h_48[t]||_2                       (hidden state after block 48)
+  proj48[t]    = (h_48[t]/||h_48[t]||) @ R / sqrt(29)  R ~ N(0,1) [5120x29], seed 29 — a fixed
+                 random chart of the late hidden state, INDEPENDENT of the surprisal stream, so
+                 readout A can have a ball observation the torus chart did not already produce.
 
 Labels carried through unchanged from the eval JSON: correct, truncated (at the
 eval's own budget). Added here: open_at_512 = the completion's full token count
@@ -27,7 +30,7 @@ Pre-registered choices (fixed before any readout was run):
     pre-whitens would be doing the operator's job for it.
 
 Usage (mlx-serve must NOT be holding the weights — 51 GB box, 16 GB each):
-  ~/Desktop/Elle/tools/mlx-serve/.venv/bin/python research/seam-wire/tap_series.py \
+  ~/Desktop/ELLE_STACK__CURRENT_WORK/Elle/tools/mlx-serve/.venv/bin/python research/seam-wire/tap_series.py \
       --eval ~/Desktop/hybrid-HNPA-active-inference-LLM/runs/control-baseline/val_base_n100.json \
       --split ~/Desktop/hybrid-HNPA-active-inference-LLM/benchmarks/gsm8k/val_split.jsonl \
       --out test-fixtures/tap-series-gsm8k-n100.jsonl
@@ -158,8 +161,16 @@ def main() -> int:
             streams = {"surprisal": [float(x) for x in surprisal]}
             for tap in TAPS:
                 hs = tapped[tap][0, P : P + len(c_ids), :].astype(mx.float32)
-                nrm = mx.sqrt(mx.sum(hs * hs, axis=-1)).tolist()
-                streams[f"norm{tap}"] = [float(x) for x in nrm]
+                nrm = mx.sqrt(mx.sum(hs * hs, axis=-1))
+                streams[f"norm{tap}"] = [float(x) for x in nrm.tolist()]
+                if tap == 48:
+                    global _R29
+                    if "_R29" not in globals():
+                        import numpy as _np
+                        _R29 = mx.array(_np.random.default_rng(29).standard_normal((hs.shape[-1], 29)).astype("float32") / (29 ** 0.5))
+                    unit = hs / (nrm[:, None] + 1e-6)
+                    proj = (unit @ _R29).tolist()
+                    streams["proj48"] = [[round(float(x), 5) for x in v] for v in proj]
             row = {
                 "idx": idx,
                 "correct": bool(r["correct"]),

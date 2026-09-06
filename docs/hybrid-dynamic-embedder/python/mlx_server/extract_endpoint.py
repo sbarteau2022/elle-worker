@@ -29,7 +29,7 @@ except ImportError:
 # Where the 4-bit MLX weights live. Override with HDE_MODEL_PATH.
 DEFAULT_MODEL_PATH = os.environ.get(
     "HDE_MODEL_PATH",
-    os.path.expanduser("~/Desktop/Elle/tools/mlx-serve/weights/Qwen3.8-27B-4bit"),
+    os.path.expanduser("~/Desktop/ELLE_STACK__CURRENT_WORK/Elle/tools/mlx-serve/weights/Qwen3.8-27B-4bit"),
 )
 
 EXTRACTED_LAYERS: List[Union[int, str]] = [0, 12, 24, 36, 48, 60, "final"]
@@ -79,7 +79,7 @@ def load_qwen_mlx(model_path: str = DEFAULT_MODEL_PATH) -> Tuple[Any, Any]:
     if not os.path.isdir(model_path):
         raise FileNotFoundError(
             f"MLX weights not found at {model_path}. Fetch them with "
-            "~/Desktop/Elle/tools/mlx-serve/fetch_weights.sh, or set HDE_MODEL_PATH."
+            "~/Desktop/ELLE_STACK__CURRENT_WORK/Elle/tools/mlx-serve/fetch_weights.sh, or set HDE_MODEL_PATH."
         )
     wrapper, processor = vlm_load(model_path)
     decoder = wrapper.language_model.model

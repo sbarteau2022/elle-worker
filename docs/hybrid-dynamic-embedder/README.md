@@ -63,13 +63,13 @@ every input. `GET /health` reports `mode` so a caller can tell the two apart.
 
 `mlx-community/Qwen3.8-27B-4bit`, already on disk (~15 GB):
 
-    ~/Desktop/Elle/tools/mlx-serve/weights/Qwen3.8-27B-4bit
+    ~/Desktop/ELLE_STACK__CURRENT_WORK/Elle/tools/mlx-serve/weights/Qwen3.8-27B-4bit
 
 hidden_size **5120**, 64 transformer blocks, multimodal. Re-fetch with
-`~/Desktop/Elle/tools/mlx-serve/fetch_weights.sh` if it ever goes missing.
+`~/Desktop/ELLE_STACK__CURRENT_WORK/Elle/tools/mlx-serve/fetch_weights.sh` if it ever goes missing.
 
 ## Related repositories
 
 - `~/Desktop/hybrid-HNPA-active-inference-LLM` — Atlas / TIT (branch `proof-of-golden-ratio-emergence-8afc0`)
-- `~/Desktop/Dynanic-Hyperbolic-Neural-Graph` — DHNG manifold substrate
-- `~/Desktop/Elle/elle_rust_harness` — Rust harness, `crates/harness-dhng`
+- `~/Desktop/ELLE_STACK__CURRENT_WORK/Dynanic-Hyperbolic-Neural-Graph` — DHNG manifold substrate
+- `~/Desktop/ELLE_STACK__CURRENT_WORK/Elle/elle_rust_harness` — Rust harness, `crates/harness-dhng`
