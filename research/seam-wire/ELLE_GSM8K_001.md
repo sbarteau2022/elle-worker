@@ -319,3 +319,32 @@ depth has to come from. HEAL_001 next: DoRA on elle-k16 (48 layers, spec `0-21,2
 from the full coordinator on sphere 1's 85 clean GSM8K rows (002b-clean + approved), 300
 steps, rank 16, CE + KL(top-32); before/after on 16 sums + 4 valid rows; then served as
 elle-s1 and delegated to through the app.
+
+### HEAL_001 — the first sphere specialist (2026-09-07)
+
+Student: the k16 carve (48 of 64 layers, spec `0-21,23,27,31,35,39,43-63`) of the coordinator,
+LoRA rank 16 on the attention and recurrent projections of every kept layer (24.1M params;
+DoRA was tried first and costs >100 s/step on the 27B because it re-norms every dequantised
+4-bit matrix). Teacher: the same weights at full depth, top-32 targets cached. Data: 85
+sphere-1 rows (002b-clean + approved GSM8K). 200 steps at 4 s/step, CE + KL: loss 2.10 → 0.44.
+Trained on the mlx_vlm classes in train mode (the GatedDeltaNet kernel has no gradient; train
+mode routes the differentiable chunked path, within 2.5e-4 of the kernel). Served as a view +
+adapter (`{"repo": coordinator, "layers": spec, "adapter": dir}`), applied to the view only.
+
+Server-path probe, rows 300–309 (the hard half), greedy, 512-token cap:
+
+| tag | layers | sums | GSM8K | tok/s | mean gen |
+|---|---|---|---|---|---|
+| elle (full) | 64 | 16/16 | 5/10 | 18.0 | 347 |
+| elle-k16 (unhealed) | 48 | 12/16 | 1/10 | 23.6 | 311 |
+| elle-s1 (healed) | 48 | 6/16* | **4/10** | 19.8 | 242 |
+
+\* the sums probe concatenated digits, so the specialist's "17*23 = 391 </think>" scored as
+1723391; fixed after the run (last number, think tags stripped). The row score is the real one.
+The heal recovered most of the cut (1/10 → 4/10, n=10) from 85 rows and thirteen minutes of
+training, and the specialist answers shorter (242 vs 347 tokens). Observed on the way: the
+served prompt ends inside an open `<think>` block (default template); the student learned to
+close it and answer, which is the served behaviour anyway.
+
+DELEGATE_001 next: elle-s1 served as sphere 7 (convergent logic) in the faculty atlas; the
+coordinator delegates held-out GSM8K test 320–339 to it through the app; reviewer on.
