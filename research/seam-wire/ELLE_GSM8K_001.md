@@ -561,3 +561,21 @@ have approved exchanges. Without C3 this is a single-setting result and must be 
 
 Standing judgement, recorded so it is not revised after the fact: HEAL_003 alone (A vs B, n=1
 setting) is NOT a paper. C1 + C2 + one more setting is a short, honest, replicable one.
+
+### HEAL_002 — RESULT (2026-09-07 10:05)
+Loop distillation of the coordinator's own protocol into the k16 carved view. 52 multi-turn
+exchanges (mean 1,809 tokens, 251 trained positions each), teacher = the full coordinator's top-32
+targets at every assistant position, LoRA rank 16 on all 48 kept layers, 3,072-token window,
+gradient checkpointing, 200 steps at ~196 s/step, **11h 02m** wall.
+
+| | unhealed k16 view | healed |
+|---|---|---|
+| in-script sums | 10/16 | **12/16** |
+| held-out valid rows | 0/2 | **2/2** |
+| train loss | 1.564 (it 1) | 0.094 (it 200), best 0.064 |
+
+Loss fell 17× and both evaluations improved. Read it narrowly: sums is 16 items and valid is 2 rows
+— this is evidence the distillation took, not a measurement of the specialist. The measurement is
+DELEGATE_005 (20 held-out GSM8K rows through the full board loop), pre-registered above and now
+queued. Adapter: `adapters/sphere7-loop-k16` (96 MB, git-ignored; heal.json tracked, data sha
+fe708c5d). HEAL_002 carries NO NoRA and stands as the un-normalised baseline for HEAL_003.
