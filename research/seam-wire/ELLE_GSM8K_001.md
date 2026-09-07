@@ -524,3 +524,16 @@ Same data as HEAL_002 (sphere7-loop, 52 exchanges), same k16 view, same 3,072 wi
 520–579 are G7's) on each arm, H1/H2/H3 as HEAL_002's. **Claim:** B ≥ A on approved-and-correct at
 equal or lower protocol-block rate. VOID above 5% server errors; a step time over 2× A's voids B on
 cost grounds (the point of the cheap norm is that it is not slower).
+
+### NoRA read; HEAL_003 amended before the run (2026-09-07 02:5x)
+Kang, Yue, Zhan, Huang, Liu, "Normalized Low-Rank Adaptation" (arXiv 2608.31036, saved to
+research-refs/adapters/). The method: normalise LoRA's down-projection along the rank dimension so
+every input coordinate's latent vector has unit norm, Δy = αB·Norm(A)·x; a training constraint
+(NoRA) or once at init (NoRA-init). Their argument: with B = 0 the early gradient is αG(A⁽⁰⁾)ᵀ, so
+A's column scale sets the early dynamics; their Table 3 shows the rank-dimension norm is the one
+that matters (row norm does nothing); Table 5 on Llama-3.2-3B SFT: NoRA average 42.1 vs DoRA 38.3,
+and NoRA composed with DoRA lifts DoRA to 41.4; no inference cost. Built as `--nora init|on` for
+every adapter type (rosen_adapters.nora_fn; the cheap norm identity is unchanged). **Amendment to
+HEAL_003, recorded before it runs:** both arms get `--nora init` so the A/B stays a comparison of the
+geometry (LoRA vs Rosen-HypDoRA) with the same normalised start. HEAL_002 (running) has no NoRA and
+remains the un-normalised baseline. NoRA "on" (the constraint) is a later arm if init shows a gap.

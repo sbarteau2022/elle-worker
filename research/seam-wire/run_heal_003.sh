@@ -16,8 +16,8 @@ heal() {  # name, extra args…
   echo "== HEAL_003 $name $(date '+%H:%M:%S')" | tee -a $RUNS/heal_003.log
   MLX_CACHE_SECRET_FILE=/tmp/elle-heal-kv-secret .venv/bin/python specialists/heal_carve.py --data specialists/data/sphere7-loop --layers "$SPEC" --name "$name" --iters $STEPS --max-seq 3072 --eval-rows 6 --lora-layers 21 "$@" 2>&1 | tee $RUNS/heal_$name.log | grep -E "\[heal\]" | tee -a $RUNS/heal_003.log
 }
-case "$ARMS" in *A*) heal sphere7-loop-k16-A-lora21 --adapter lora ;; esac
-case "$ARMS" in *B*) heal sphere7-loop-k16-B-rosen21 --adapter rosen-hypdora --bridge-layers gap ;; esac
+case "$ARMS" in *A*) heal sphere7-loop-k16-A-lora21 --adapter lora --nora init ;; esac
+case "$ARMS" in *B*) heal sphere7-loop-k16-B-rosen21 --adapter rosen-hypdora --bridge-layers gap --nora init ;; esac
 case "$ARMS" in *A*) bash $W/research/seam-wire/run_delegate.sh sphere7-loop-k16-A-lora21 DELEGATE_006A 20 540 ;; esac
 case "$ARMS" in *B*) bash $W/research/seam-wire/run_delegate.sh sphere7-loop-k16-B-rosen21 DELEGATE_006B 20 540 ;; esac
 echo "HEAL_003 done $(date '+%H:%M:%S')" | tee -a $RUNS/heal_003.log
