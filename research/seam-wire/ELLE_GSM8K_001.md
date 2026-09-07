@@ -371,3 +371,15 @@ training`) — harmless on 100-token probes, fatal on 2,000-token agent prompts.
 and heal probe above was therefore measured on the chunked path; the identity view matched
 the full model on that same path, so the comparisons stand, but they will be re-run on the
 kernel path (DELEGATE_002) before any number is quoted as the serving number.
+
+**Kernel-path re-measurement (server in eval mode, 2026-09-07 02:2x):** full 16/16 · 5/10 ·
+347 mean gen; healed elle-s7 4/10 · 242; unhealed elle-k16 12/16 · 1/10 · 311 — identical to
+the chunked-path numbers, token for token on the full model. The carve and heal results
+above stand as serving numbers. The specialist's 6/16 on the sums item is the probe's
+24-token cap: on ten of sixteen it opened with "The user is asking for…" and was cut before
+the number; every direct answer was right.
+
+### DELEGATE_002 — pre-registered (server eval mode, caches 2 GB / 256 blocks)
+
+Same claims as DELEGATE_001 (D1 runs on elle-s7; D2 approved-correct vs 0.94; D3 send-backs
+and escalations), rows test 360–379. VOID if > 5% server errors.
