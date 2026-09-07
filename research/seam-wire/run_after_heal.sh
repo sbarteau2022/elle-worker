@@ -13,7 +13,9 @@ cp /tmp/heal_sphere7-loop-k16.log $RUNS/heal_sphere7-loop-k16.log 2>/dev/null ||
 tail -3 $RUNS/heal_sphere7-loop-k16.log
 test -f $E/tools/mlx-serve/adapters/sphere7-loop-k16/adapters.safetensors || { echo "HEAL_002 left no adapter — stopping"; exit 1; }
 echo "== G7 $(date '+%H:%M:%S')"
-( sleep 240; for f in $S/briefs/*.jsonl; do [ -f "$f" ] && node $E/electron/native/faculty-briefs.cjs post "$f" 2>&1 | tee -a $RUNS/briefs.post.out; done ) &
+# only the first batch (66 = 6 per sphere) rides the G7 window: the routing check needs placement, not completion,
+# and 990 briefs ahead of DELEGATE_005 on the board would starve it; the rest are posted in their own run later
+( sleep 240; node $E/electron/native/faculty-briefs.cjs post $S/briefs/gemini-batch-01.jsonl 2>&1 | tee -a $RUNS/briefs.post.out ) &
 bash $S/run_g7_chain.sh 10 520 6 2>&1 | tee $RUNS/g7.run.log | tail -20
 for p in "$HOME/Library/Application Support/elle/swarm-eval/"faculty-briefs-posted-*.json; do [ -f "$p" ] && node $E/electron/native/faculty-briefs.cjs check "$p" 2>&1 | tee -a $RUNS/briefs.check.out | head -12; done
 echo "== DELEGATE_005 $(date '+%H:%M:%S')"
