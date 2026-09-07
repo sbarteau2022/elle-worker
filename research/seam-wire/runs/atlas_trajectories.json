@@ -1,0 +1,1163 @@
+{
+ "at": "2026-09-07T04:16:02.730Z",
+ "n": 55,
+ "oddities": [
+  {
+   "kind": "no-anchor",
+   "detail": "task-1366"
+  },
+  {
+   "kind": "no-region",
+   "detail": "task-1366"
+  }
+ ],
+ "tasks": [
+  {
+   "seq": 1366,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": null,
+   "regionRadius": null,
+   "turns": 1,
+   "kappaFirst": 0.727,
+   "kappaLast": 0.727,
+   "driftFirst": 0.715,
+   "driftLast": 0.715,
+   "lastDMin": 0.6773,
+   "lastDMax": 0.6773,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": null,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1367,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.784,
+   "driftLast": 0.752,
+   "lastDMin": 0.5746,
+   "lastDMax": 0.7837,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1368,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.742,
+   "driftLast": 0.712,
+   "lastDMin": 0.5381,
+   "lastDMax": 0.7423,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1369,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.795,
+   "driftLast": 0.784,
+   "lastDMin": 0.7229,
+   "lastDMax": 0.7949,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1370,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.695,
+   "driftLast": 0.686,
+   "lastDMin": 0.6309,
+   "lastDMax": 0.6951,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1371,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.695,
+   "driftLast": 0.71,
+   "lastDMin": 0.6949,
+   "lastDMax": 0.7934,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1372,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.706,
+   "driftLast": 0.702,
+   "lastDMin": 0.6793,
+   "lastDMax": 0.7062,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1373,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.764,
+   "driftLast": 0.732,
+   "lastDMin": 0.5513,
+   "lastDMax": 0.7642,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1374,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.662,
+   "driftLast": 0.654,
+   "lastDMin": 0.6062,
+   "lastDMax": 0.6624,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1375,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.708,
+   "driftLast": 0.717,
+   "lastDMin": 0.7082,
+   "lastDMax": 0.7673,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1376,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 7,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.916,
+   "driftFirst": 0.743,
+   "driftLast": 0.758,
+   "lastDMin": 0.7425,
+   "lastDMax": 0.7814,
+   "maxStrain": 1,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1377,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.783,
+   "driftLast": 0.748,
+   "lastDMin": 0.5479,
+   "lastDMax": 0.783,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1378,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.607,
+   "driftLast": 0.592,
+   "lastDMin": 0.5076,
+   "lastDMax": 0.6069,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1379,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.81,
+   "driftLast": 0.782,
+   "lastDMin": 0.6276,
+   "lastDMax": 0.8097,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1380,
+   "status": "blocked",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.735,
+   "driftLast": 0.717,
+   "lastDMin": 0.6113,
+   "lastDMax": 0.7352,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1381,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.772,
+   "driftLast": 0.759,
+   "lastDMin": 0.6853,
+   "lastDMax": 0.7724,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1382,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.792,
+   "driftLast": 0.756,
+   "lastDMin": 0.5551,
+   "lastDMax": 0.7917,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1383,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.68,
+   "driftLast": 0.675,
+   "lastDMin": 0.644,
+   "lastDMax": 0.68,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1384,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.714,
+   "driftLast": 0.711,
+   "lastDMin": 0.6951,
+   "lastDMax": 0.7141,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1385,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 3,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.874,
+   "driftFirst": 0.521,
+   "driftLast": 0.515,
+   "lastDMin": 0.4889,
+   "lastDMax": 0.5208,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1386,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.71,
+   "driftLast": 0.684,
+   "lastDMin": 0.5419,
+   "lastDMax": 0.7095,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1387,
+   "status": "blocked",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.815,
+   "driftLast": 0.798,
+   "lastDMin": 0.6977,
+   "lastDMax": 0.8154,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1388,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.829,
+   "driftLast": 0.817,
+   "lastDMin": 0.7488,
+   "lastDMax": 0.8287,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1389,
+   "status": "blocked",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.811,
+   "driftLast": 0.786,
+   "lastDMin": 0.6393,
+   "lastDMax": 0.8115,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1390,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.724,
+   "driftLast": 0.708,
+   "lastDMin": 0.6163,
+   "lastDMax": 0.7238,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1391,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.812,
+   "driftLast": 0.802,
+   "lastDMin": 0.7443,
+   "lastDMax": 0.8125,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1392,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.66,
+   "driftLast": 0.652,
+   "lastDMin": 0.6018,
+   "lastDMax": 0.6604,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1393,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.567,
+   "driftLast": 0.572,
+   "lastDMin": 0.5671,
+   "lastDMax": 0.6003,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1394,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.808,
+   "driftLast": 0.787,
+   "lastDMin": 0.6672,
+   "lastDMax": 0.808,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1395,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.64,
+   "driftLast": 0.636,
+   "lastDMin": 0.6136,
+   "lastDMax": 0.6404,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1396,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.702,
+   "driftLast": 0.694,
+   "lastDMin": 0.6534,
+   "lastDMax": 0.7015,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1397,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.721,
+   "driftLast": 0.706,
+   "lastDMin": 0.6215,
+   "lastDMax": 0.7207,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1398,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.531,
+   "driftLast": 0.526,
+   "lastDMin": 0.4976,
+   "lastDMax": 0.5306,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1399,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.685,
+   "driftLast": 0.658,
+   "lastDMin": 0.5007,
+   "lastDMax": 0.6853,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1400,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.569,
+   "driftLast": 0.59,
+   "lastDMin": 0.5685,
+   "lastDMax": 0.7126,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1401,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.708,
+   "driftLast": 0.689,
+   "lastDMin": 0.5837,
+   "lastDMax": 0.7079,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1402,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.771,
+   "driftLast": 0.746,
+   "lastDMin": 0.6038,
+   "lastDMax": 0.771,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1403,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.667,
+   "driftLast": 0.662,
+   "lastDMin": 0.6351,
+   "lastDMax": 0.6671,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1404,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.774,
+   "driftLast": 0.753,
+   "lastDMin": 0.6337,
+   "lastDMax": 0.7738,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1405,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.647,
+   "driftLast": 0.65,
+   "lastDMin": 0.6467,
+   "lastDMax": 0.668,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1406,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.769,
+   "driftLast": 0.768,
+   "lastDMin": 0.762,
+   "lastDMax": 0.7689,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1407,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.744,
+   "driftLast": 0.716,
+   "lastDMin": 0.558,
+   "lastDMax": 0.7437,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1408,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.582,
+   "driftLast": 0.59,
+   "lastDMin": 0.5824,
+   "lastDMax": 0.6308,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1409,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.783,
+   "driftLast": 0.769,
+   "lastDMin": 0.693,
+   "lastDMax": 0.783,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1410,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.674,
+   "driftLast": 0.66,
+   "lastDMin": 0.5804,
+   "lastDMax": 0.6742,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1411,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.683,
+   "driftLast": 0.681,
+   "lastDMin": 0.6693,
+   "lastDMax": 0.683,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1412,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.696,
+   "driftLast": 0.685,
+   "lastDMin": 0.6234,
+   "lastDMax": 0.6956,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1413,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.588,
+   "driftLast": 0.604,
+   "lastDMin": 0.5884,
+   "lastDMax": 0.6905,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1414,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.812,
+   "driftLast": 0.794,
+   "lastDMin": 0.6933,
+   "lastDMax": 0.8123,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1415,
+   "status": "blocked",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.697,
+   "driftLast": 0.679,
+   "lastDMin": 0.5768,
+   "lastDMax": 0.6974,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1416,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.75,
+   "driftLast": 0.726,
+   "lastDMin": 0.5913,
+   "lastDMax": 0.7498,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1417,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.681,
+   "driftLast": 0.665,
+   "lastDMin": 0.5718,
+   "lastDMax": 0.6813,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1418,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.804,
+   "driftLast": 0.792,
+   "lastDMin": 0.7206,
+   "lastDMax": 0.8043,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1419,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.779,
+   "driftLast": 0.765,
+   "lastDMin": 0.6857,
+   "lastDMax": 0.7787,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  },
+  {
+   "seq": 1420,
+   "status": "approved",
+   "hasRegionDirective": true,
+   "regionLevel": 7,
+   "regionRadius": 1.195916,
+   "turns": 2,
+   "kappaFirst": 0.5,
+   "kappaLast": 0.727,
+   "driftFirst": 0.671,
+   "driftLast": 0.667,
+   "lastDMin": 0.6463,
+   "lastDMax": 0.6708,
+   "maxStrain": 0,
+   "nonLockedTurns": 0,
+   "outOfRegionTurns": 0,
+   "coherenceSequence": [
+    "locked"
+   ]
+  }
+ ],
+ "aggregates": {
+  "byStatus": {
+   "approved": 51,
+   "blocked": 4
+  },
+  "meanTurns": 2.090909090909091,
+  "anyOutOfRegionShare": 0,
+  "anyNonLockedShare": 0,
+  "byRegionLevel": {
+   "7": 54,
+   "null": 1
+  },
+  "approvedMeans": {
+   "n": 51,
+   "kappaLast": 0.7335882352941174,
+   "driftLast": 0.6994901960784313,
+   "maxStrain": 0.0196078431372549
+  },
+  "blockedMeans": {
+   "n": 4,
+   "kappaLast": 0.727,
+   "driftLast": 0.7450000000000001,
+   "maxStrain": 0
+  },
+  "longest": [
+   {
+    "seq": 1376,
+    "turns": 7
+   },
+   {
+    "seq": 1385,
+    "turns": 3
+   },
+   {
+    "seq": 1367,
+    "turns": 2
+   },
+   {
+    "seq": 1368,
+    "turns": 2
+   },
+   {
+    "seq": 1369,
+    "turns": 2
+   }
+  ]
+ }
+}

@@ -81,11 +81,19 @@ No drift-time experiment exists. `readiness.cjs` reports G7 as *pending* and wil
 Until an experiment compares settling time on the atlas against a Euclidean baseline, this
 is a conjecture, and "certified ≥ 38.196%" should not appear.
 
-## §4.2 Distributed Rosen bridge — BUILT as a channel, NOT YET the inter-sphere transport
-The envelope, ML-KEM-768 + X25519 hybrid and ratchet exist and have their own tests. Tonight's
-delegation is in-process: the coordinator posts a REGION directive on the board; nothing
-crosses an envelope. The multi-point extension and the 384·q·2⁻¹²⁸ bound are not exercised
-here. State the channel as implemented and the multi-agent mesh as the next build.
+## §4.2 Distributed Rosen bridge — the channel is now the transport (in-process, live pending)
+The envelope, ML-KEM-768 + X25519 hybrid and ratchet exist and have their own tests. As of
+2026-09-07 (Elle d07e082) the geodesic lane envelope is the atlas's transport:
+`sphere-lanes.cjs` derives one lane per directed hop of the hull (12 spokes both ways + 24
+kissing edges both ways = 72), a REGION handoff is sealed on the lane of its hop and posted as
+`LANE {from,to,tick,path,wire}`, and it opens only on that lane at that tick — a hop that is not
+an edge has no lane (lateralDecision routes it via the centre). Child atlases derive their root
+from the parent's root and the sphere, so the same construction recurs one level down and a
+child's wire never opens on a parent's lane. Eight unit tests plus a worker round-trip with a
+forged wire; readiness G8 (static hull check + live round trip). What is NOT yet shown: the mesh
+across processes/machines, the multi-point extension and the 384·q·2⁻¹²⁸ bound; and no live
+task has yet ridden a lane (the stack was training when it landed). State the transport as
+in-process and unit-tested; the distributed mesh remains the next build.
 
 ## Table 1 — what the gates are now
 `node electron/native/readiness.cjs static` runs G1 (frame), G2 (transport isometry, 1e-15),

@@ -119,8 +119,10 @@ rate, approved-correct rate, server-error rate and reviewer activity. Ready is e
 
 ### 8. Conjectures and next builds (stated as such)
 - Settling-time speedup of φ⁻¹ over a Euclidean baseline: no drift-time experiment yet (G7 pending).
-- Inter-sphere transport over the Rosen bridge (the ML-KEM-768 + X25519 lane envelope exists
-  and is tested as a channel; delegation is in-process today). The lateral web is the 24 edges.
+- Inter-sphere transport over the Rosen bridge: WIRED 2026-09-07 — the 24 kissing edges and 12
+  spokes are geodesic lanes, handoffs are sealed on the lane of their hop (`LANE` directives),
+  child atlases derive their roots per sphere. In-process and unit-tested (readiness G8); the
+  cross-machine mesh and a first live task over a lane are still to come.
 - Recursion: each sphere as the same architecture one level down.
 - A shared compute pool partitioned across agents.
 

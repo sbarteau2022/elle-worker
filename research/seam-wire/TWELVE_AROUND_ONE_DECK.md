@@ -43,10 +43,12 @@ S_C/S_R = φ² and sup L < e−1: built, gated (G4, G6; measured sup 0.0098). Th
 T_atlas ≤ φ⁻¹ T_euclid: **conjecture**. No drift-time experiment exists; the gate reports it
 pending. "Certified > 38.196%" must go until measured.
 
-## 7 · Rosen bridge (COROS-MA) — built as a channel, not yet the mesh
-ML-KEM-768 + X25519 hybrid, HKDF ratchet, lane envelope: in code with tests. Delegation today is
-in-process (a board directive); no envelope crosses between spheres. The 384·q·2⁻¹²⁸ bound is a
-proof statement, not exercised here.
+## 7 · Rosen bridge (COROS-MA) — the lanes ARE the hull's edges now
+ML-KEM-768 + X25519 hybrid, HKDF ratchet, lane envelope: in code with tests. Since 2026-09-07
+every region handoff rides the geodesic lane of its hop: 72 directed lanes (spokes + kissing
+edges), `LANE` directives on the board, opens only on its own hop and tick, no lane for a
+non-edge, child roots per sphere (recursion). In-process and unit-tested (G8); not yet a
+cross-machine mesh, and the 384·q·2⁻¹²⁸ bound is still a proof statement.
 
 ## 8 · The gates — with status
 | Gate | Invariant | Status |
@@ -109,7 +111,7 @@ approved action transcripts, every assistant turn.
 | G7 speedup | drift-time experiment: consensus distance vs turns on recorded trajectories, atlas vs Euclidean baseline; report the measured factor, whatever it is | 1 session |
 | G1 overlap radius | derive r_p from chart geometry, check the inequality in the gate | hours |
 | Compute partition / G9 as stated | shared pool, softmax over κ·affinity, gate on Cᵢ > 0 | 1 session |
-| Rosen-bridge mesh / G8 wired | sphere-to-sphere handoff over lane envelopes, in-process first; the 24 edges as the lateral web | 1–2 sessions |
+| Rosen-bridge mesh / G8 wired | DONE in-process 2026-09-07 (sphere-lanes.cjs, G8 static+live); remaining: first live task over a lane, cross-machine mesh | hours (live) / 1 session (mesh) |
 | HEAL_002 (protocol) | 100-task coordinator batch → approved exchanges → multi-turn heal → DELEGATE_005 | 1 session (GPU-bound) |
 | Falcon "fire" verb | fan-out to all spheres, validation, synthesis last | 1–2 sessions |
 | Recursion | a sphere as the same architecture one level down | 2–3 sessions |
