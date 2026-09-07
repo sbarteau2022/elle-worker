@@ -689,3 +689,15 @@ mlx-serve's 16 GB (wired 34.5 of 48 GB). Unloaded (wired → 4.1 GB), the four a
 note, bridge restarted, app relaunched with the supervisor off. No row ran a model step before the
 reopen, so the 20-row measurement stands as posted. Both runners now unload anything Ollama holds
 before serving.
+
+### DELEGATE_005 — second attempt VOID at 4 rows; third attempt running (2026-09-07 14:0x)
+With Ollama unloaded the rows still OOM'd, and a single 48-token request against elle-s7 with the
+app STOPPED also OOM'd while the serving process sat at 40 GB wired. The process itself was holding
+~24 GB of dead allocations left by the earlier failed requests (MLX never released them after the
+Metal OOMs). Restarted mlx-serve fresh: wired 3.5 GB → one request to the healed view answers in
+4.5 s, wired 17.7 GB (weights + caches, normal). Also new in the healed view's log: "batch_generate
+failed (division by zero); falling back to sequential" — the unhealed view (DELEGATE_004) never fell
+back, so the adapter-bearing view takes the sequential path; not yet explained, logged as open.
+Rows 1498–1501 reopened a second time (no model step ran on any of them), app relaunched with ONE
+worker on the fresh server. Rule for every serve step from now: fresh server process, Ollama
+empty, one worker on an adapter-bearing view until the batch path is fixed.
