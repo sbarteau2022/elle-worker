@@ -1,0 +1,503 @@
+{
+ "at": "2026-09-07T03:43:22.493Z",
+ "tau": 0.1,
+ "n": 54,
+ "skipped": [
+  {
+   "task": "task-1366",
+   "why": "no anchor"
+  }
+ ],
+ "median_ratio": 1,
+ "mean_ratio": 0.9907407407407407,
+ "frac_meeting_phi_inv": 0.018518518518518517,
+ "phi_inv": 0.6180339887498948,
+ "tasks": [
+  {
+   "task": "task-1367",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1368",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1369",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1370",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1371",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1372",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1373",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1374",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1375",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1376",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.916,
+   "region": 7
+  },
+  {
+   "task": "task-1377",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1378",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1379",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1380",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1381",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1382",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1383",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1384",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1385",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.874,
+   "region": 7
+  },
+  {
+   "task": "task-1386",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1387",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1388",
+   "turns": 2,
+   "tL": 1,
+   "tE": 2,
+   "ratio": 0.5,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1389",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1390",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1391",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1392",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1393",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1394",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1395",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1396",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1397",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1398",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1399",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1400",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1401",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1402",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1403",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1404",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1405",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1406",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1407",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1408",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1409",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1410",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1411",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1412",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1413",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1414",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1415",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1416",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1417",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1418",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1419",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1420",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  }
+ ]
+}

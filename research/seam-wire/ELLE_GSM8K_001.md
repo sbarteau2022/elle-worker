@@ -433,3 +433,23 @@ the coordinator finishes these tasks in two or three turns, and on a two- or thr
 series both metrics settle at the last point. The settling-time claim needs trajectories of
 eight or more turns (long multi-step tasks) before it can be measured either way. Recorded so
 the number is not mistaken for a result.
+
+### HEAL_002 data batch — RESULT (2026-09-07 04:0x)
+60 held-out rows (test 440–499) run by the coordinator, three agents, reviewer on, zero server
+errors: **56 approved, 54 of them correct (0.90 of 60; 0.96 of approved), 4 blocked**, 60 raw
+exchanges captured (mean 5.2 messages), 128 generations. The reviewer sent one back. This is
+the coordinator's own protocol on record: the loop-distillation set. Export: 56 rows, none
+skipped (`specialists/data/sphere7-loop`, sha fe708c5d).
+
+**G7 second interim (n = 54):** T_lorentz / T_euclid median 1.000, mean 0.991, 2% ≤ φ⁻¹. Still
+not a test: two-to-five-turn tasks settle at the last point under both metrics. The claim needs
+long-horizon tasks; recorded to keep the number honest.
+
+### HEAL_002 — pre-registered (2026-09-07 04:1x)
+Loop distillation: LoRA rank 16 (attention + recurrent projections) on the k16 view, teacher =
+the full coordinator's top-32 targets over EVERY assistant turn of the 52 training exchanges
+(mean 1,809 tokens, 251 trained positions each; a first attempt at a 1,024-token window trained
+one position per row and was killed), 200 steps. Served as elle-s7; DELEGATE_005 = 20 rows
+(test 500–519), two agents. Claims: **H1** delegated tasks that end in budget/κ blocks < 40%
+(DELEGATE_004: 5/5); **H2** approved-and-correct reported against the coordinator's 0.90;
+**H3** server errors ≤ 5%. VOID above 5% errors.
