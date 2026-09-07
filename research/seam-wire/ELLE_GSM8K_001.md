@@ -362,3 +362,12 @@ reviewer send-backs and escalations to the centre reported. Faculty routing on 4
 re-embedded real tasks before the run: 20/20 GSM8K → convergent logic; code tasks held (motor
 praxis ≈ convergent logic). The six operational profile coordinates are small in this space
 (|c| < 0.03) so the knobs sit near neutral (temperature 0.49); noted, not yet a claim.
+
+**DELEGATE_001 — VOID.** 9 of 9 finals were `[METAL] Insufficient Memory` from the server. D1
+held on the way down (21 requests served by elle-s7, zero by the coordinator aliases): the
+coordinator delegated and the workers drove on the specialist. Cause: mlx-serve never called
+`eval()`, so every GatedDeltaNet layer ran the chunked reference path (`use_kernel = not
+training`) — harmless on 100-token probes, fatal on 2,000-token agent prompts. Every carve
+and heal probe above was therefore measured on the chunked path; the identity view matched
+the full model on that same path, so the comparisons stand, but they will be re-run on the
+kernel path (DELEGATE_002) before any number is quoted as the serving number.
