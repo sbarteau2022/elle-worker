@@ -537,3 +537,27 @@ every adapter type (rosen_adapters.nora_fn; the cheap norm identity is unchanged
 HEAL_003, recorded before it runs:** both arms get `--nora init` so the A/B stays a comparison of the
 geometry (LoRA vs Rosen-HypDoRA) with the same normalised start. HEAL_002 (running) has no NoRA and
 remains the un-normalised baseline. NoRA "on" (the constraint) is a later arm if init shows a gap.
+
+### What Rosen-HypDoRA still needs to be a result, not a build (2026-09-07 09:2x)
+Three claims, three measurements. Only the first is scheduled; the other two are pre-registered here.
+
+**C1 — cost.** "DoRA's magnitude split without DoRA's price." `specialists/bench_adapters.py`
+(4 steps, seq 1024, same carve, same rank, grad checkpointing, the same forward the heal trains
+through) reports s/step, peak GB and trainable params for lora / cheap-dora / rosen-hypdora /
+mlx_lm dora. **Claim:** cheap-dora ≤ 1.15× lora, rosen-hypdora ≤ 1.3× lora, mlx_lm dora ≥ 3× lora.
+Runs first in the queue, before the app takes the GPU. Refuted if cheap-dora exceeds 1.3× lora.
+
+**C2 — placement.** The bridge is claimed to belong AT the carve gaps (the throat across the
+missing depth). That is an architectural claim and it needs the ablation: `--bridge-layers gap`
+vs `all` vs `none` (= cheap-dora alone), same steps, same data. **Claim:** gap ≥ all and gap > none
+on held-out valid pass and on the delegated protocol rate. If `all` ≥ `gap`, the gap story is wrong
+and the honest finding is "a hyperbolic residual on the MLP helps, position immaterial". If `none`
+≥ `gap`, the bridge does nothing and only cheap DoRA survives. ~5.6 h GPU per arm at 100 steps;
+scheduled after HEAL_003 reports.
+
+**C3 — generality.** One carve (k16), one dataset (52 loop exchanges), one base. A second carve
+depth (k8) at minimum; ideally a second task family from the faculty briefs once those spheres
+have approved exchanges. Without C3 this is a single-setting result and must be written as one.
+
+Standing judgement, recorded so it is not revised after the fact: HEAL_003 alone (A vs B, n=1
+setting) is NOT a paper. C1 + C2 + one more setting is a short, honest, replicable one.

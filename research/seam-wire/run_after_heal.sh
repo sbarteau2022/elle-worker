@@ -12,6 +12,9 @@ while pgrep -f "heal_carve.py" >/dev/null; do sleep 120; done
 cp /tmp/heal_sphere7-loop-k16.log $RUNS/heal_sphere7-loop-k16.log 2>/dev/null || true
 tail -3 $RUNS/heal_sphere7-loop-k16.log
 test -f $E/tools/mlx-serve/adapters/sphere7-loop-k16/adapters.safetensors || { echo "HEAL_002 left no adapter — stopping"; exit 1; }
+# the COST claim first: minutes, and it needs the GPU free — before the app takes it
+echo "== BENCH adapters $(date '+%H:%M:%S')"
+( cd $E/tools/mlx-serve && .venv/bin/python specialists/bench_adapters.py --steps 4 --seq 1024 --arms lora,cheap-dora,rosen-hypdora,dora 2>&1 | tail -20 ) | tee $RUNS/bench_adapters.log || echo "bench failed (non-fatal)"
 echo "== G7 $(date '+%H:%M:%S')"
 # only the first batch (66 = 6 per sphere) rides the G7 window: the routing check needs placement, not completion,
 # and 990 briefs ahead of DELEGATE_005 on the board would starve it; the rest are posted in their own run later
