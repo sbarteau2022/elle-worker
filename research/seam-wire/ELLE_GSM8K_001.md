@@ -701,3 +701,17 @@ back, so the adapter-bearing view takes the sequential path; not yet explained, 
 Rows 1498–1501 reopened a second time (no model step ran on any of them), app relaunched with ONE
 worker on the fresh server. Rule for every serve step from now: fresh server process, Ollama
 empty, one worker on an adapter-bearing view until the batch path is fixed.
+
+### DELEGATE_005 direct + the batch path fixed (2026-09-07 15:1x)
+**Direct eval of the healed elle-s7 on the DELEGATE_005 rows (test 500–519), no board:** 15/20 =
+**0.75**, 0 server errors, 0 no-number, mean 457 reply tokens, 23.8 s/row (~28 tok/s: the 12 GB
+of kept weights per token at this machine's bandwidth). H2's comparator is the coordinator's 0.90
+on the same protocol; the unhealed k16 view was 5/10 on sums. The board-loop run (protocol
+dimension) restarts on top of this.
+
+**The batch path.** mlx_lm's BatchGenerator.stats() divides prompt_tokens by prompt_time in its
+`finally`; a fully prefix-cached prompt has prompt_time 0 → ZeroDivisionError AFTER generation →
+mlx-serve dropped the batch and fell back to sequential (the "division by zero" line on every
+adapter-view run). Guarded (patches/mlx_lm_batch_tps_guard.py, re-applied by run.sh). Measured on
+elle-s7, 200-token replies: 1 stream 10.6 s, 4 concurrent 13.4 s → **3.2× throughput**. Two workers
+are back on for the board loop; the direct eval will use concurrency next.
