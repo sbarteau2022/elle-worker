@@ -492,3 +492,35 @@ ATLAS.jsonl files. **Claim under test:** median T_lorentz / T_euclid ≤ φ⁻¹
 ≥ 8 turns. **VOID** if fewer than 6 tasks reach 8 turns, or if chain accuracy (all six right)
 is below 0.5 (the model was not working the chain). Recorded before the run. Blocked on the GPU
 until HEAL_002 finishes.
+
+### Free energy made explicit per sphere; Rosen-HypDoRA built (2026-09-07 00:3x)
+**F per sphere.** atlas-state.cjs now computes, every turn a worker has a region, F = KL[q‖p] + ½κε²:
+ε = D_k / r_l (Lorentz distance from the sphere centre over its radius), precision π = κ, q = N(m, σ²)
+over the recent D_k window (the worker's belief), p = N(0, r_l²) (the sphere prior); KL = ln(r/σ) +
+(σ²+m²)/(2r²) − ½. Logged per turn in ATLAS.jsonl and on the worker's final `atlas:` line (Elle,
+tests in atlas-state.test.cjs). It measures; it changes nothing yet. The claim to test once chain
+tasks run: F falls along a trajectory (F_last < F_first) in most approved tasks and not in blocked
+ones. atlas_trajectories.cjs aggregates it per sphere.
+
+**Rosen-HypDoRA (specialists/rosen_adapters.py, `--adapter rosen-hypdora`, served by carve_view
+under fine_tune_type rosen-hypdora).** Intra-blanket: Euclidean DoRA on attention q/k/v/o and the
+DeltaNet projections with the row norms from the identity ‖w_i + s c_i‖² = n0_i² + 2s⟨w_i,c_i⟩ +
+s²‖c_i‖² — one quantized matmul with r columns per step, no per-step dequantisation (the >100 s/step
+that killed DoRA in HEAL_001; verified against the dequantised brute force to 2e-3). Bridge: Lorentz
+HypDoRA on mlp.gate_proj/down_proj of the first kept layer after each carve gap (the throat across
+the missing depth): exp_o → low-rank map on the space-like part → log_o, times a learned per-feature
+throat width m_throat (init 1, B = 0 ⇒ exact at step 0). Finding while building it: the per-token
+Lorentz normalisation in the formulation (u/‖u‖_L at the origin anchor) collapses exactly to the
+Euclidean LoRA direction — asinh cancels — so the magnitude lives per output feature; per-token
+geometry needs the v2 radial anchors and boost. Tests: 6 (identity, exactness, gradients incl. the
+NaN at B = 0 fixed with a smooth norm, nonlinearity, folding, placement).
+
+### HEAL_003 — pre-registered (2026-09-07 00:3x)
+Same data as HEAL_002 (sphere7-loop, 52 exchanges), same k16 view, same 3,072 window and teacher,
+100 steps each, two arms trained back to back after HEAL_002 finishes: **A** LoRA rank 16 on the top
+21 kept layers (43–63, `--lora-layers 21`); **B** rosen-hypdora rank 16 on the same 21 layers
+(bridges on the post-gap layers among them). Report: final train loss, held-out valid pass, sums
+16, and — the one that matters — DELEGATE_006 = 20 rows (test 520–539… no: rows 540–559, since
+520–579 are G7's) on each arm, H1/H2/H3 as HEAL_002's. **Claim:** B ≥ A on approved-and-correct at
+equal or lower protocol-block rate. VOID above 5% server errors; a step time over 2× A's voids B on
+cost grounds (the point of the cheap norm is that it is not slower).
