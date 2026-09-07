@@ -624,3 +624,57 @@ score 0/6 live and are the ones dragging the ceiling. Next, in order, all offlin
 explain live vs offline; (2) per-faculty embeddings of description+keywords scored directly instead
 of a signed projection onto six axes; (3) if the ceiling moves above ~0.75, re-run on batch 02 as a
 held-out set before believing it.
+
+### AUDIT of the Opus stretch (2026-09-07 13:5x) — three findings stand, two entries corrected
+Audited: bench_adapters.py (fb4ded2, 8bc4782), routing-diagnose.cjs (b6f8e07), the HEAL_002 RESULT,
+C1 VOID and ROUTING_001 entries, the queue edits. Verified against the code and by reproduction.
+
+**A1 — the C1 "fix" would have errored on every arm (HIGH, caught before it ran).** The rewritten
+bench chose `inner = view if hasattr(view, 'layers')` and then did `inner.layers = copies`. On the
+mlx_vlm Qwen3.5 top-level Model, `layers` is a read-only @property forwarding to
+language_model.model.layers, and mlx.nn.Module.__setattr__ raises "property has no deleter" when
+you assign through it (reproduced). Every arm would have hit the arm-level except and reported an
+error; the queue would have logged "bench failed (non-fatal)" and moved on with C1 still unmeasured.
+Fixed (4696777): the copies are assigned on the DECODER, with an assert that the forward path's
+layers ARE the copies. Rerun still queued at the top of HEAL_003.
+
+**A2 — the "live 0.23 vs offline 0.41" discrepancy in ROUTING_001 had a cause, and the entry
+guessed the wrong one (HIGH for the record).** faculty-briefs.cjs appends "Self-check before you
+finish: <verify>" to every brief before posting; the live coordinator embeds title+brief AS POSTED
+(swarm.cjs:358); the diagnose embedded the RAW brief. Re-run with `--posted` (the exact posted
+text): **15/66 = 0.227 — identical to live.** So the two numbers were two experiments, and the
+appended sentence is what separates them: with it, intended-ranked-first falls 38 → 28 (ceiling
+0.58 → 0.42), held rises 28 → 36, wrong-sphere 11 → 15, and one antipode confusion appears. The
+verify sentence's verbs (run, check, verify, count, compute) feed the keyword vote toward
+motor_praxis / metacognitive / convergent_logic — the three "well-routed" faculties in the live
+table are partly that artefact. ROUTING_001's attribution to "the budget partition and a staler
+atlas" is withdrawn. **Corrected reading of ROUTING_001:** directions ceiling 0.58 on the task text
+alone; 0.42 on what was actually routed. Fix in flight: post the raw brief and deliver the verify
+sentence as the coordinator's first directive (the nudge path), so routing sees only the task.
+
+**A3 — DELEGATE_005 stalled for 3 h (HIGH, operational).** The 20 tasks were posted and placed
+(LANE directives) at 10:48 and none was claimed. The app's own mlx-serve supervisor, finding the
+external server on the port, logged "server exited (1) → external server active → healthy →
+down — ELLE_OLLAMA_URL restored to Ollama" and the app then died; the server released every hold.
+Relaunched at 13:5x with ELLE_MLX_SERVE=0 (supervisor off; ELLE_OLLAMA_URL fixed) and
+run_delegate.sh patched the same way for DELEGATE_006A/B. Not Opus's edit — it was my runner —
+but it is what the queue was actually doing while the audit ran.
+
+Minor: the first (void) bench wrote to Elle/elle-worker/… (wrong --out); moved to
+runs/bench_adapters.void1.json and the stray tree removed. adapter_config.json for HEAL_002 was
+untracked while heal.json was committed — committed. runs/*.log is git-ignored, so the copied heal
+log is on disk but not in git; heal.json carries the full history, which is the record. The
+routing-diagnose `ensure({})` call CAN rebuild and save the atlas under a running app if the map
+has grown ≥ REBUILD_GROWTH since the build — it did not this time (atlas mtime unchanged), but the
+diagnose should take a read-only path; noted, not yet changed. Everything else in the three
+entries checked out against heal.json, the void bench JSON and the board.
+
+### G7 — chain battery RESULT (2026-09-07 10:47): VOID on accuracy, and negative on settling
+10 chain tasks × 6 problems from test 520. done 10, whole-chain correct 4 (0.40), refused 3;
+individual problems 35/60. Pre-registration: VOID below 0.5 chain accuracy — **VOID**. And on the
+65 trajectories it did produce, T_lorentz/T_euclid median 1.000, mean 0.992, 2% ≤ φ⁻¹: **no Lorentz
+settling speedup is visible on 6-problem chains** either. Read both together: the chains were too
+hard for the coordinator at max 8 steps (3 refusals, budget blocks) AND, on the trajectories that
+exist, the settling claim is flat. A cleaner G7 needs longer step budgets so the chains complete,
+and then the settling number stands on its own. Not scheduled yet; it competes with HEAL_003 for
+the GPU.
