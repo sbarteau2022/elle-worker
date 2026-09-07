@@ -414,3 +414,5 @@ the client's 300 s header timeout — thousands of thinking tokens per step at 2
 second agent and the reviewer). Five non-error finals: all step-budget/κ blocks, no arithmetic
 error. Fixes: a delegated step is capped at 2,048 tokens; the profile's step budget is
 1,024–4,096 (was up to 8,192); next, the client streams generations so headers arrive at once.
+
+**DELEGATE_004** pre-registered: http client without the 300 s header limit, delegated steps capped at 2,048 tokens, two agents, only the s7 view; rows test 420–439; same D1–D3; VOID if > 5% server errors.
