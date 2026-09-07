@@ -288,3 +288,13 @@ a sphere's served specialist (`elle-s<k>`) gets it; an empty or unserved sphere 
 coordinator itself but the task is still stamped with the sphere (seeding its distillation
 set); a delegated task the reviewer sends back is escalated to the centre. `export_board.py
 --sphere k` selects a sphere's stamped, approved tasks for its adapter.
+
+### CARVE_SCAN_001 — every layer removed alone (2026-09-07)
+
+64 views, each missing one layer, 16 trivial sums each (full model 16/16). Cost = sums lost:
+layer 0 → 16 (all), 51 (attention) → 7, 52 → 3, 54 → 2, 55 (attention) → 2, 58 → 1; every
+other layer, attention or linear, costs 0 on its own. Read: single-layer removal is nearly
+free everywhere except the input layer and the block 51–58 (the diagnostic's 48–55 result was
+this block). The flat middle means the scan cannot rank layers 12–47 against each other; joint
+removal must be validated directly. CARVE_VALIDATE_001 runs next: drop k = 8/12/16/20/24/32
+free linear layers, middle-first, every attention layer kept; 16 sums + GSM8K 300–309.
