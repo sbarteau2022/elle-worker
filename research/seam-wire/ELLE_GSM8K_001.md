@@ -383,3 +383,11 @@ the number; every direct answer was right.
 
 Same claims as DELEGATE_001 (D1 runs on elle-s7; D2 approved-correct vs 0.94; D3 send-backs
 and escalations), rows test 360–379. VOID if > 5% server errors.
+
+**DELEGATE_002 — VOID** (6 Metal OOM in 12 finals with three agents and three view slots
+resident). Partial, for the record: of the tasks that finished without error, the healed
+specialist's approved answers were checked below; the three non-error blocks were the 8-step
+budget running out without `done` — the specialist knows the arithmetic and not the protocol
+(HEAL_001 trained on answers). Loop-distillation data is now captured (CONVO.jsonl per task,
+Elle commit) for HEAL_002. **DELEGATE_003** pre-registered: two agents, 1 GB caches, only the
+s7 view resident; rows test 380–399; same D1–D3; VOID if > 5% server errors.
