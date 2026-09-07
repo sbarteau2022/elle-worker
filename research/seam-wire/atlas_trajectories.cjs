@@ -52,6 +52,23 @@ function firstLast(nums) {
   return { first: nums[0], last: nums[nums.length - 1] };
 }
 
+// F_settled: true when F is non-increasing over the last 3 observed F values
+// (F[n-3] >= F[n-2] >= F[n-1]); null when fewer than 3 F values exist.
+function fSettled(Fs) {
+  if (Fs.length < 3) return null;
+  const last3 = Fs.slice(-3);
+  return last3[0] >= last3[1] && last3[1] >= last3[2];
+}
+
+// d0 = acosh(anchor[0]) — the horospheric "depth" of the task's anchor along
+// the Lorentz time coordinate; exp(-d0) is the horospheric scale at that
+// depth. anchor[0] < 1 (numeric noise) is clamped to 1 so acosh stays real.
+function acoshSafe(x) {
+  if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+  const v = Math.max(1, x);
+  return Math.log(v + Math.sqrt(v * v - 1));
+}
+
 const results = [];
 let dirs;
 try { dirs = fs.readdirSync(WS); } catch (e) {
@@ -93,6 +110,21 @@ for (const d of dirs.sort()) {
   const strains = rows.filter((r) => typeof r.strain === 'number').map((r) => r.strain);
   const coherences = rows.map((r) => (r.coherence === undefined ? null : r.coherence));
 
+  // free-energy per-turn fields (new; absent on older rows -> null/undefined)
+  const Fs = rows.filter((r) => typeof r.F === 'number').map((r) => r.F);
+  const surpriseRows = rows.filter((r) => typeof r.surprise === 'number').map((r) => r.surprise);
+  const complexityRows = rows.filter((r) => typeof r.complexity === 'number').map((r) => r.complexity);
+  const F_first = Fs.length ? Fs[0] : null;
+  const F_last = Fs.length ? Fs[Fs.length - 1] : null;
+  const F_min = Fs.length ? Math.min(...Fs) : null;
+  const F_mean = mean(Fs);
+  const surprise_last = surpriseRows.length ? surpriseRows[surpriseRows.length - 1] : null;
+  const complexity_last = complexityRows.length ? complexityRows[complexityRows.length - 1] : null;
+  const F_settled = fSettled(Fs);
+
+  const d0 = acoshSafe(anchorFull && anchorFull.length ? anchorFull[0] : null);
+  const horoScale = d0 === null ? null : Math.exp(-d0);
+
   const nonLockedTurns = coherences.filter((c) => c !== 'locked').length;
 
   let outOfRegionTurns = null;
@@ -125,6 +157,15 @@ for (const d of dirs.sort()) {
     nonLockedTurns,
     outOfRegionTurns,
     coherenceSequence: distinctSequence(coherences),
+    F_first,
+    F_last,
+    F_min,
+    F_mean,
+    surprise_last,
+    complexity_last,
+    F_settled,
+    anchorD0: d0,
+    horoScale,
   });
 }
 
@@ -146,12 +187,44 @@ function statusMeans(status) {
   const rows = results.filter((r) => r.status === status);
   return { n: rows.length, kappaLast: mean(rows.map((r) => r.kappaLast)), driftLast: mean(rows.map((r) => r.driftLast)), maxStrain: mean(rows.map((r) => r.maxStrain)) };
 }
+
+// ---- free-energy aggregates (per sphere level, per approved/blocked status) ----
+const tasksWithF = results.filter((r) => r.F_last !== null).length;
+
+function feByLevel(levelKey) {
+  const rows = results.filter((r) => (r.regionLevel === null ? 'null' : String(r.regionLevel)) === levelKey);
+  const withF = rows.filter((r) => r.F_last !== null);
+  const d0s = rows.map((r) => r.anchorD0).filter((x) => typeof x === 'number' && Number.isFinite(x));
+  const meanD0 = d0s.length ? mean(d0s) : null;
+  const fFellCount = withF.filter((r) => r.F_last < r.F_first).length;
+  return {
+    n: rows.length,
+    nWithF: withF.length,
+    meanFLast: mean(withF.map((r) => r.F_last)),
+    meanSurpriseLast: mean(withF.map((r) => r.surprise_last)),
+    meanComplexityLast: mean(withF.map((r) => r.complexity_last)),
+    shareFFell: withF.length ? fFellCount / withF.length : null,
+    meanD0,
+    horoScale: meanD0 === null ? null : Math.exp(-meanD0),
+  };
+}
+const freeEnergyByLevel = {};
+for (const k of Object.keys(byRegionLevel)) freeEnergyByLevel[k] = feByLevel(k);
+
+function feStatusMeans(status) {
+  const rows = results.filter((r) => r.status === status);
+  const withF = rows.filter((r) => r.F_last !== null);
+  return { n: rows.length, nWithF: withF.length, meanFLast: mean(withF.map((r) => r.F_last)) };
+}
+const freeEnergyByStatus = { approved: feStatusMeans('approved'), blocked: feStatusMeans('blocked') };
+const free_energy = { tasksWithF, n, byLevel: freeEnergyByLevel, byStatus: freeEnergyByStatus };
+
 const approvedMeans = statusMeans('approved');
 const blockedMeans = statusMeans('blocked');
 
 const longest = [...results].sort((a, b) => b.turns - a.turns).slice(0, 5).map((r) => ({ seq: r.seq, turns: r.turns }));
 
-const report = { at: new Date().toISOString(), n, oddities, tasks: results, aggregates: { byStatus, meanTurns, anyOutOfRegionShare, anyNonLockedShare, byRegionLevel, approvedMeans, blockedMeans, longest } };
+const report = { at: new Date().toISOString(), n, oddities, tasks: results, aggregates: { byStatus, meanTurns, anyOutOfRegionShare, anyNonLockedShare, byRegionLevel, approvedMeans, blockedMeans, longest }, free_energy };
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(report, null, 1));
 
@@ -180,4 +253,20 @@ console.log(`approved (n=${approvedMeans.n}): mean kappaLast=${fmt(approvedMeans
 console.log(`blocked  (n=${blockedMeans.n}): mean kappaLast=${fmt(blockedMeans.kappaLast)} driftLast=${fmt(blockedMeans.driftLast)} maxStrain=${fmt(blockedMeans.maxStrain)}`);
 console.log(`5 longest trajectories (seq: turns): ${longest.map((l) => `${l.seq}:${l.turns}`).join(', ')}`);
 console.log(`oddities: ${oddities.length} (${[...new Set(oddities.map((o) => o.kind))].join('; ') || 'none'})`);
+
+// ---- free energy ----
+if (tasksWithF === 0) {
+  console.log(`free energy: no rows carry F yet (0/${n} tasks)`);
+} else {
+  console.log(`free energy: ${tasksWithF}/${n} tasks carry F`);
+  for (const [level, fe] of Object.entries(freeEnergyByLevel)) {
+    if (fe.nWithF === 0) {
+      console.log(`  level ${level} (n=${fe.n}): no rows carry F yet; meanD0=${fmt(fe.meanD0)} horoScale=${fmt(fe.horoScale)}`);
+    } else {
+      console.log(`  level ${level} (n=${fe.n}, withF=${fe.nWithF}): meanFLast=${fmt(fe.meanFLast)} meanSurpriseLast=${fmt(fe.meanSurpriseLast)} meanComplexityLast=${fmt(fe.meanComplexityLast)} shareFFell=${fe.shareFFell === null ? 'n/a' : (fe.shareFFell * 100).toFixed(1) + '%'} meanD0=${fmt(fe.meanD0)} horoScale=${fmt(fe.horoScale)}`);
+    }
+  }
+  console.log(`  approved (n=${freeEnergyByStatus.approved.n}, withF=${freeEnergyByStatus.approved.nWithF}): meanFLast=${fmt(freeEnergyByStatus.approved.meanFLast)}`);
+  console.log(`  blocked  (n=${freeEnergyByStatus.blocked.n}, withF=${freeEnergyByStatus.blocked.nWithF}): meanFLast=${fmt(freeEnergyByStatus.blocked.meanFLast)}`);
+}
 console.log(`-> ${OUT}`);
