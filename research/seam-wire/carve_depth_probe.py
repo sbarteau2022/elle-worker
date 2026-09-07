@@ -35,15 +35,18 @@ def gold_of(row):
     return float(re.sub(r"[^\d.\-]", "", t.strip()) or "nan")
 
 rows = [json.loads(l) for l in open(DATA) if l.strip()][A:B]
-SUMS = [("17*23", 391), ("19*21", 399), ("12*12", 144), ("45+78", 123), ("1000-357", 643), ("9*9*9", 729), ("144/12", 12), ("250*4", 1000)]
+SUMS = [("17*23", 391), ("19*21", 399), ("12*12", 144), ("45+78", 123), ("1000-357", 643), ("9*9*9", 729), ("144/12", 12), ("250*4", 1000),
+        ("36+47", 83), ("81-29", 52), ("15*15", 225), ("7*8", 56), ("500/25", 20), ("123+456", 579), ("64*3", 192), ("1000/8", 125)]
+SUMS = SUMS[:int(os.environ.get("N_SUMS", len(SUMS)))]
 results = {}
 for tag in TAGS:
     print(f"=== {tag}", flush=True)
     ok = 0; outs = []
     for q, g in SUMS:
         txt, ec, ed, wall = chat(tag, [{"role": "system", "content": "You are a terse calculator. Reply with the number only."}, {"role": "user", "content": f"What is {q}?"}], 24)
-        v = final_number(txt); ok += int(v is not None and abs(v - g) < 1e-6); outs.append(txt.strip()[:20])
-    print(f"  sums {ok}/8 {outs}", flush=True)
+        clean = re.sub(r"</?think>", " ", txt)
+        v = final_number(clean); ok += int(v is not None and abs(v - g) < 1e-6); outs.append(txt.strip()[:20])
+    print(f"  sums {ok}/{len(SUMS)} {outs}", flush=True)
     correct = 0; toks = 0; secs = 0.0; walls = 0.0; per = []
     for i, row in enumerate(rows):
         prompt = row["question"].strip() + "\n\nSolve step by step, then give the final answer on its own line in exactly this form: #### <number>"
@@ -55,7 +58,7 @@ for tag in TAGS:
         correct += int(c); toks += ec; secs += ed; walls += wall
         per.append({"idx": A + i, "gold": g, "pred": v, "correct": c, "gen": ec, "s": round(wall, 1)})
         print(f"  row {A+i}: {'OK ' if c else 'XX '} gold={g:g} pred={v} gen={ec} {ec/ed if ed else 0:.1f} tok/s", flush=True)
-    results[tag] = {"sums": ok, "gsm8k_correct": correct, "gsm8k_n": len(rows), "gen_tokens": toks, "tok_per_s": round(toks / secs, 2) if secs else None, "wall_s": round(walls, 1), "rows": per}
-    print(f"RESULT {tag}: sums {ok}/8, gsm8k {correct}/{len(rows)}, {results[tag]['tok_per_s']} tok/s, mean gen {toks/max(1,len(rows)):.0f}", flush=True)
+    results[tag] = {"sums": ok, "sums_n": len(SUMS), "gsm8k_correct": correct, "gsm8k_n": len(rows), "gen_tokens": toks, "tok_per_s": round(toks / secs, 2) if secs else None, "wall_s": round(walls, 1), "rows": per}
+    print(f"RESULT {tag}: sums {ok}/{len(SUMS)}, gsm8k {correct}/{len(rows)}, {results[tag]['tok_per_s']} tok/s, mean gen {toks/max(1,len(rows)):.0f}", flush=True)
     json.dump({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rows": [A, B], "tags": results}, open(OUT, "w"), indent=1)
 print("DONE", OUT, flush=True)
