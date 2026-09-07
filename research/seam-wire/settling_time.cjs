@@ -16,19 +16,19 @@ const WS = process.env.ELLE_SWARM_WORKSPACE || path.join(os.homedir(), 'Library'
 const OUT = path.join(__dirname, 'runs', 'settling_time.json');
 
 function settle(series) {
-  if (series.length < 3) return null;
+  if (series.length < 2) return null;
   const last = series[series.length - 1]; const scale = Math.max(1e-9, ...series.map(Math.abs));
   for (let t = 0; t < series.length; t++) { if (series.slice(t).every((v) => Math.abs(v - last) <= TAU * scale)) return t + 1; }
   return series.length;
 }
 const euclid = (a, b) => Math.sqrt(a.reduce((s, x, i) => s + (x - b[i]) ** 2, 0));
 
-const tasks = [];
+const tasks = []; const skipped = [];
 for (const d of fs.readdirSync(WS)) {
   const f = path.join(WS, d, 'ATLAS.jsonl'); if (!fs.existsSync(f)) continue;
   const lines = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const head = lines[0]; const rows = lines.slice(1).filter((r) => Array.isArray(r.dir) && head && Array.isArray(head.anchor));
-  if (!head || !head.anchor || rows.length < 3) continue;
+  if (!head || !head.anchor || rows.length < 2) { skipped.push({ task: d, why: !head ? 'empty' : !head.anchor ? 'no anchor' : `${rows.length} turn(s) with a direction` }); continue; }
   const anchorB = H.toPoincare(head.anchor);
   const dL = rows.map((r) => H.dist(head.anchor, H.probePoint(r.dir)));
   const dE = rows.map((r) => euclid(anchorB, H.toPoincare(H.probePoint(r.dir))));
@@ -39,6 +39,6 @@ const ratios = tasks.map((t) => t.ratio).filter((x) => Number.isFinite(x)).sort(
 const median = ratios.length ? ratios[Math.floor(ratios.length / 2)] : null;
 const mean = ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null;
 const claim = ratios.length ? ratios.filter((r) => r <= PHI_INV).length / ratios.length : null;
-const report = { at: new Date().toISOString(), tau: TAU, n: tasks.length, median_ratio: median, mean_ratio: mean, frac_meeting_phi_inv: claim, phi_inv: PHI_INV, tasks };
+const report = { at: new Date().toISOString(), tau: TAU, n: tasks.length, skipped, median_ratio: median, mean_ratio: mean, frac_meeting_phi_inv: claim, phi_inv: PHI_INV, tasks };
 fs.mkdirSync(path.dirname(OUT), { recursive: true }); fs.writeFileSync(OUT, JSON.stringify(report, null, 1));
-console.log(`G7 settling: n=${tasks.length} trajectories; T_lorentz/T_euclid median=${median === null ? 'n/a' : median.toFixed(3)} mean=${mean === null ? 'n/a' : mean.toFixed(3)}; fraction ≤ φ⁻¹ (${PHI_INV.toFixed(3)}): ${claim === null ? 'n/a' : (claim * 100).toFixed(0) + '%'} → ${OUT}`);
+console.log(`G7 settling: n=${tasks.length} trajectories (${skipped.length} skipped: ${[...new Set(skipped.map((x) => x.why))].join('; ')}); T_lorentz/T_euclid median=${median === null ? 'n/a' : median.toFixed(3)} mean=${mean === null ? 'n/a' : mean.toFixed(3)}; fraction ≤ φ⁻¹ (${PHI_INV.toFixed(3)}): ${claim === null ? 'n/a' : (claim * 100).toFixed(0) + '%'} → ${OUT}`);
