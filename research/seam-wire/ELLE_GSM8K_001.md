@@ -250,3 +250,41 @@ removal than plain transformers, in which case the 3B-equivalent needs a healing
 at any depth. CARVE_DIAG_001 runs next: elle-v64 (identity), elle-d30 (drop layer 30),
 elle-d4 (drop 28–31), elle-b56 (drop 48–55), elle-b48 (drop 40–55), elle-a48 (drop 16 linear
 layers, keep all 16 attention layers), sums + rows 300–309.
+
+### CARVE_DIAG_001 — is it the view or the architecture? (2026-09-07)
+
+Same probe, rows 300–309 (the harder half). `elle-v64` is the identity view (all 64 layers
+through the view code path); the rest drop specific layers.
+
+| tag | what | sums | GSM8K | hit cap | tok/s | mean gen |
+|---|---|---|---|---|---|---|
+|  elle full | 8/8 | 5/10 | 3 | 15.4 | 347 |
+|  v64 identity view | 8/8 | 5/10 | 3 | 15.64 | 347 |
+|  d30 drop linear layer 30 | 8/8 | 5/10 | 3 | 15.68 | 348 |
+|  d4 drop 28–31 | 8/8 | 7/10 | 2 | 15.8 | 311 |
+|  b56 drop 48–55 | 2/8 | 0/10 | 10 | 15.6 | 512 |
+|  b48 drop 40–55 | 0/8 | 0/10 | 10 | 17.34 | 512 |
+|  a48 drop 16 linear, keep all 16 attention | 6/8 | 3/10 | 3 | 16.91 | 282 |
+
+Verdicts. **The view is exact**: v64 reproduces the full model token for token (same 5/10,
+same 347 mean generation). **The architecture tolerates removal, but not everywhere**: one
+linear layer costs nothing; four contiguous layers around 28–31 cost nothing; the eight
+layers 48–55 are load-bearing (2/8 sums, 0/10, every answer to the cap) and 40–55 kills it.
+**Attention layers are the expensive ones**: removing 16 linear layers while keeping all 16
+attention layers keeps 6/8 sums and 3/10 GSM8K unhealed, where the evenly spread 48 (four
+attention layers gone) had 2/8 and 0/20. Carve rule from this: keep every full-attention
+layer; drop linear layers; choose which by measurement. CARVE_SCAN_001 runs next: 64 views,
+each missing exactly one layer, 16 sums each, to rank every layer's removal cost.
+
+### The 13-sphere atlas (Elle ee69d86, a181848)
+
+atlas13 now defaults to the kissing design: twelve fixed spheres at the icosahedron vertices
+in the map's top-3 principal directions, the frame fitted to the data (Kabsch), slot identity
+matched to the previous build in 16-d so a sphere keeps its adapter and record. On the live
+map (1025 task nodes) four spheres are populated — GSM8K 644, shell/eval 230, hashing/
+fizzbuzz 76, primes/fibonacci 75 — and eight are empty; the frame's neighbour cosine is
+exactly 1/√5. Delegation from the centre: per goal the coordinator decides the executor —
+a sphere's served specialist (`elle-s<k>`) gets it; an empty or unserved sphere is run by the
+coordinator itself but the task is still stamped with the sphere (seeding its distillation
+set); a delegated task the reviewer sends back is escalated to the centre. `export_board.py
+--sphere k` selects a sphere's stamped, approved tasks for its adapter.
