@@ -480,3 +480,15 @@ opened → level 7, model elle-s7, via {0→7, tick 0}; task cancelled. The mach
 exists (`~/.elle/hyper-map/lane-root`, 0600) and lanes.json shows `0->7: 1`. First task to ride a
 lane under a real worker: DELEGATE_005 (`run_delegate_005.sh` ends with a transport check that
 counts LANE vs plain REGION on the posted tasks).
+
+### G7 — pre-registered (2026-09-07 05:0x)
+The settling-time claim has been unmeasurable because every recorded trajectory is two to five
+turns (atlas_trajectories.cjs: 55 tasks, mean 2.1 turns, all sphere 7, all locked). New battery:
+`gsm8k-in-app.cjs post test N OFFSET K` bundles K consecutive problems into one task worked in
+order, one run_code verification per problem, so a trajectory has ≥ K+1 turns. Run
+(`run_g7_chain.sh`): 10 tasks × 6 problems, test rows 520–579, worker step cap raised to 24,
+coordinator weights (no specialist), reviewer on. Then `settling_time.cjs` over the new
+ATLAS.jsonl files. **Claim under test:** median T_lorentz / T_euclid ≤ φ⁻¹ (0.618) on tasks with
+≥ 8 turns. **VOID** if fewer than 6 tasks reach 8 turns, or if chain accuracy (all six right)
+is below 0.5 (the model was not working the chain). Recorded before the run. Blocked on the GPU
+until HEAL_002 finishes.
