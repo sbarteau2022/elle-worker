@@ -591,3 +591,36 @@ checkpointing). Everything else is void. Fixed: the bench now copies each kept l
 sub-blocks per arm (the same copy the server does when it applies an adapter to a view) and
 asserts the base carries no adapter modules before each arm. Rerun is queued at the top of
 run_heal_003.sh, where the GPU is free. C1's pre-registered thresholds are unchanged.
+
+### ROUTING_001 — the twelve-faculty routing, measured (2026-09-07 10:4x)
+66 briefs written per faculty (gemini-batch-01, 6 each × 11 faculties, sphere 7 excluded — it is the
+only sphere with real history) posted to the board while the app was up; then re-assigned offline
+with `electron/native/routing-diagnose.cjs`, which ranks all twelve faculties by the same signed
+axis coordinate the collapse uses and reports the rank of the intended one.
+
+| | |
+|---|---|
+| on the board (coordinator, live) | 15/66 = **0.23** |
+| offline re-assignment | 27/66 = **0.41** |
+| intended faculty ranked FIRST | 38/66 = **0.58** ← the ceiling of the current directions |
+| intended in the top 3 | 55/66 = 0.83 |
+| held at the centre | 28/66 |
+| released onto a WRONG sphere | 11/66 |
+| missed onto its own antipode | **0** — the six dualities separate cleanly |
+
+**The bottleneck is the directions, not the gate.** An offline sweep of the three earned-collapse
+constants (COLLAPSE × MARGIN × RATIO, 80 settings) tops out at 0.576 — exactly the rank-1 ceiling —
+and buys it by releasing everything: at 0.02/0/1.0 the accuracy is 0.576 with 28 briefs on a wrong
+sphere and none held. The current 0.06/0.02/1.3 trades 11 of those hits for 28 briefs held at the
+centre and only 11 wrong. Since a held brief runs on the coordinator (safe, unspecialised) and a
+released one runs on the wrong specialist, **the conservative gate is defensible and loosening it is
+not the fix**. Live 0.23 vs offline 0.41 on the same briefs is a separate discrepancy — the live
+path assigns through swarm.cjs with the budget partition and a possibly staler atlas; not yet
+explained, logged as open.
+
+Three faculties route well (motor_praxis, social_cognition, metacognitive_regulation, 4/6 each);
+sensory_perception, language_semiotics, episodic_memory, divergent_synthesis and valuation_salience
+score 0/6 live and are the ones dragging the ceiling. Next, in order, all offline and free: (1)
+explain live vs offline; (2) per-faculty embeddings of description+keywords scored directly instead
+of a signed projection onto six axes; (3) if the ceiling moves above ~0.75, re-run on batch 02 as a
+held-out set before believing it.
