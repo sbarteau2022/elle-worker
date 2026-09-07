@@ -416,3 +416,14 @@ error. Fixes: a delegated step is capped at 2,048 tokens; the profile's step bud
 1,024–4,096 (was up to 8,192); next, the client streams generations so headers arrive at once.
 
 **DELEGATE_004** pre-registered: http client without the 300 s header limit, delegated steps capped at 2,048 tokens, two agents, only the s7 view; rows test 420–439; same D1–D3; VOID if > 5% server errors.
+
+**DELEGATE_004 — truncated at n = 5 by decision.** Zero server errors (the http client holds;
+D3 passes), all requests served by elle-s7 (D1 holds), and 5/5 finals were protocol blocks
+(3 budget, 1 κ, 1 requirements) with no arithmetic error — the gap HEAL_002 exists to close.
+Running the remaining fifteen would have re-measured a known result at the cost of the GPU.
+
+### HEAL_002 data batch — pre-registered (2026-09-07 03:2x)
+Sixty held-out rows (test 440–499, seq 1361..1420) run by the COORDINATOR (no specialist
+served, executor central), three agents, reviewer on, every exchange captured as CONVO.jsonl.
+Purpose: the approved exchanges are the loop-distillation set for HEAL_002 (multi-turn: every
+assistant turn). Reported: approved count, approved-correct, exchanges captured, mean turns.
