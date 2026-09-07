@@ -408,3 +408,9 @@ analytic bound φ²/ρ. All seven required static gates pass; G7 pending.
 
 Paper note (Atlas 2.0 draft): "Rosen ridge" conflates the Rosenbrock ravine (optimisation) with
 the Rosen bridge (the channel, rosen-bridge.cjs); G7/G8's concrete numbers are unmeasured here.
+
+**DELEGATE_003 — VOID** (2 `fetch failed` in 7 finals, no OOM: the specialist's steps ran past
+the client's 300 s header timeout — thousands of thinking tokens per step at 20 tok/s behind a
+second agent and the reviewer). Five non-error finals: all step-budget/κ blocks, no arithmetic
+error. Fixes: a delegated step is capped at 2,048 tokens; the profile's step budget is
+1,024–4,096 (was up to 8,192); next, the client streams generations so headers arrive at once.
