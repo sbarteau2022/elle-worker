@@ -427,3 +427,9 @@ Sixty held-out rows (test 440–499, seq 1361..1420) run by the COORDINATOR (no 
 served, executor central), three agents, reviewer on, every exchange captured as CONVO.jsonl.
 Purpose: the approved exchanges are the loop-distillation set for HEAL_002 (multi-turn: every
 assistant turn). Reported: approved count, approved-correct, exchanges captured, mean turns.
+
+**G7 interim (settling_time.cjs, n = 6):** T_lorentz / T_euclid median 1.000. Uninformative:
+the coordinator finishes these tasks in two or three turns, and on a two- or three-point
+series both metrics settle at the last point. The settling-time claim needs trajectories of
+eight or more turns (long multi-step tasks) before it can be measured either way. Recorded so
+the number is not mistaken for a result.
