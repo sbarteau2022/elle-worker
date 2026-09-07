@@ -468,3 +468,15 @@ the run is ~11 h and the pre-registered 200 steps will be cut to fit (recorded h
 after). Note for the next heal: LoRA only on the layers ABOVE the carve gap (43–63) would let the
 backward pass stop at layer 43 — roughly half the cost — and is where the adaptation naturally
 lives; untested.
+
+### Rosen bridge as the transport — wired, live smoke (2026-09-07 04:5x)
+`sphere-lanes.cjs` (Elle d07e082, G8 in 81861df): every hop of the hull is a geodesic lane; a
+REGION is sealed on the lane of its hop and posted as `LANE {from,to,tick,path,wire}`; it opens on
+that lane at that tick and nowhere else; non-edges have no lane; child atlases derive roots per
+sphere. Unit tests 8 + worker round trip with a forged wire; readiness static gate READY 9/9.
+**Live smoke through the real agent-bridge (no GPU needed):** task 1421 created, a sphere-7
+region sealed on 0→7 (tick 0, 384-byte wire), sent as a directive, read back from the board,
+opened → level 7, model elle-s7, via {0→7, tick 0}; task cancelled. The machine's lane root now
+exists (`~/.elle/hyper-map/lane-root`, 0600) and lanes.json shows `0->7: 1`. First task to ride a
+lane under a real worker: DELEGATE_005 (`run_delegate_005.sh` ends with a transport check that
+counts LANE vs plain REGION on the posted tasks).
