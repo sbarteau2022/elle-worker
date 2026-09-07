@@ -11,8 +11,8 @@ import json, os, re, sys, time, urllib.request
 URL = os.environ.get("MLX_URL", "http://127.0.0.1:11437")
 TAGS = (sys.argv[1] if len(sys.argv) > 1 else "elle,elle-c48,elle-c32,elle-c24,elle-c16,elle-c8").split(",")
 DATA = os.environ["GSM8K_TEST"]
-A, B = 300, 320
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs", "carve_depth_probe.json")
+A, B = [int(x) for x in os.environ.get("ROWS", "300-320").split("-")]
+OUT = os.environ.get("PROBE_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs", "carve_depth_probe.json")
 
 def chat(tag, msgs, n, ctx=4096, temp=0.0, timeout=900):
     body = {"model": tag, "stream": False, "messages": msgs, "options": {"num_predict": n, "num_ctx": ctx, "temperature": temp}}

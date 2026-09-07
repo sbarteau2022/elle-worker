@@ -219,3 +219,34 @@ name which per-region adapter it runs under; they do not by themselves reduce co
 "3B-equivalent" is the next build: a depth-carved view over the coordinator's loaded layers
 (64 = 48 GatedDeltaNet + 16 attention, dense, no experts) with a per-region DoRA heal, depth
 chosen by measurement, served as elle-<role> tags sharing the coordinator's tensors.
+
+### CARVE_DEPTH_001 — depth-carved views of the coordinator, unhealed (2026-09-07 00:xx)
+
+The carve (Elle 00add33): a roster tag {"repo": coordinator, "layers": "depth:N"} serves a
+VIEW of the loaded coordinator whose decoder runs N of the 64 layers (first and last quarter
+of N kept whole, the middle spread evenly; hybrid masks need ≥1 attention + ≥1 linear layer).
+Nothing copied: server RSS 15.3 GB with the base plus three views resident; each view carved
+in 0.0 s; the base slot dissolved while the views held its weights. Probe: greedy, 512-token
+cap, eight trivial sums + held-out GSM8K test 300–319, `carve_depth_probe.py`.
+
+| tag | sums | GSM8K | hit cap | tok/s | mean gen |
+|---|---|---|---|---|---|
+| elle | 8/8 | 14/20 | 4 | 16.83 | 363 |
+| elle-c48 | 2/8 | 0/20 | 9 | 20.5 | 288 |
+| elle-c32 | 0/8 | 0/20 | 0 | 26.9 | 89 |
+| elle-c24 | 0/8 | 0/20 | 19 | 37.95 | 494 |
+| elle-c16 | 0/8 | 0/20 | 10 | 53.41 | 331 |
+| elle-c8 | 0/8 | 0/20 | 14 | 87.62 | 406 |
+
+Verdict: **an unhealed depth carve of this hybrid is dead below the full stack.** Even 48 of
+64 (25% removed, spread through the middle) drops trivial sums to 2/8 and GSM8K to 0/20;
+32 and below emit noise. Speed scales as expected (16.8 → 87.6 tok/s at 8 layers), so the
+mechanism delivers the compute saving; the quality does not survive removal. Two readings
+remain open until the diagnostic set answers them: (a) the view is subtly wrong for this
+architecture (an identity view "0-63" must reproduce the full model exactly; a single dropped
+linear layer must barely move it); (b) GatedDeltaNet stacks are far less tolerant of layer
+removal than plain transformers, in which case the 3B-equivalent needs a healing step
+(per-region DoRA on the kept layers, distilled from the full coordinator) before it can work
+at any depth. CARVE_DIAG_001 runs next: elle-v64 (identity), elle-d30 (drop layer 30),
+elle-d4 (drop 28–31), elle-b56 (drop 48–55), elle-b48 (drop 40–55), elle-a48 (drop 16 linear
+layers, keep all 16 attention layers), sums + rows 300–309.
