@@ -1,7 +1,7 @@
 {
- "at": "2026-09-07T03:43:22.493Z",
+ "at": "2026-09-07T15:47:57.314Z",
  "tau": 0.1,
- "n": 54,
+ "n": 65,
  "skipped": [
   {
    "task": "task-1366",
@@ -9,8 +9,8 @@
   }
  ],
  "median_ratio": 1,
- "mean_ratio": 0.9907407407407407,
- "frac_meeting_phi_inv": 0.018518518518518517,
+ "mean_ratio": 0.9923076923076923,
+ "frac_meeting_phi_inv": 0.015384615384615385,
  "phi_inv": 0.6180339887498948,
  "tasks": [
   {
@@ -498,6 +498,105 @@
    "ratio": 1,
    "kappaEnd": 0.727,
    "region": 7
+  },
+  {
+   "task": "task-1422",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 0
+  },
+  {
+   "task": "task-1423",
+   "turns": 7,
+   "tL": 5,
+   "tE": 5,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1424",
+   "turns": 8,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.998,
+   "region": 7
+  },
+  {
+   "task": "task-1425",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 0
+  },
+  {
+   "task": "task-1426",
+   "turns": 7,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1427",
+   "turns": 7,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1428",
+   "turns": 7,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1429",
+   "turns": 7,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1430",
+   "turns": 7,
+   "tL": 5,
+   "tE": 5,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1431",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 0
+  },
+  {
+   "task": "task-1432",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
   }
  ]
 }
