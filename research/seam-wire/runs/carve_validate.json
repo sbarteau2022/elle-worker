@@ -1,0 +1,646 @@
+{
+ "at": "2026-09-07T01:03:57Z",
+ "rows": [
+  300,
+  310
+ ],
+ "tags": {
+  "elle": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 5,
+   "gsm8k_n": 10,
+   "gen_tokens": 3471,
+   "tok_per_s": 17.3,
+   "wall_s": 201.0,
+   "rows": [
+    {
+     "idx": 300,
+     "gold": 78.0,
+     "pred": 78.0,
+     "correct": true,
+     "gen": 190,
+     "s": 11.0
+    },
+    {
+     "idx": 301,
+     "gold": 8.0,
+     "pred": 17.0,
+     "correct": false,
+     "gen": 512,
+     "s": 30.1
+    },
+    {
+     "idx": 302,
+     "gold": 15.0,
+     "pred": 15.0,
+     "correct": true,
+     "gen": 200,
+     "s": 11.8
+    },
+    {
+     "idx": 303,
+     "gold": 1300.0,
+     "pred": 2.0,
+     "correct": false,
+     "gen": 512,
+     "s": 30.1
+    },
+    {
+     "idx": 304,
+     "gold": 3200.0,
+     "pred": 4800.0,
+     "correct": false,
+     "gen": 393,
+     "s": 23.4
+    },
+    {
+     "idx": 305,
+     "gold": 4.0,
+     "pred": 4.0,
+     "correct": true,
+     "gen": 286,
+     "s": 16.4
+    },
+    {
+     "idx": 306,
+     "gold": 10.0,
+     "pred": 5.0,
+     "correct": false,
+     "gen": 299,
+     "s": 17.2
+    },
+    {
+     "idx": 307,
+     "gold": 16.0,
+     "pred": 4.0,
+     "correct": false,
+     "gen": 512,
+     "s": 28.9
+    },
+    {
+     "idx": 308,
+     "gold": 6.0,
+     "pred": 6.0,
+     "correct": true,
+     "gen": 294,
+     "s": 16.6
+    },
+    {
+     "idx": 309,
+     "gold": 8.0,
+     "pred": 8.0,
+     "correct": true,
+     "gen": 273,
+     "s": 15.5
+    }
+   ]
+  },
+  "elle-k8": {
+   "sums": 15,
+   "sums_n": 16,
+   "gsm8k_correct": 7,
+   "gsm8k_n": 10,
+   "gen_tokens": 2818,
+   "tok_per_s": 18.78,
+   "wall_s": 150.4,
+   "rows": [
+    {
+     "idx": 300,
+     "gold": 78.0,
+     "pred": 78.0,
+     "correct": true,
+     "gen": 170,
+     "s": 9.1
+    },
+    {
+     "idx": 301,
+     "gold": 8.0,
+     "pred": 32.0,
+     "correct": false,
+     "gen": 512,
+     "s": 27.4
+    },
+    {
+     "idx": 302,
+     "gold": 15.0,
+     "pred": 15.0,
+     "correct": true,
+     "gen": 137,
+     "s": 7.5
+    },
+    {
+     "idx": 303,
+     "gold": 1300.0,
+     "pred": 1300.0,
+     "correct": true,
+     "gen": 338,
+     "s": 18.2
+    },
+    {
+     "idx": 304,
+     "gold": 3200.0,
+     "pred": 4800.0,
+     "correct": false,
+     "gen": 299,
+     "s": 16.0
+    },
+    {
+     "idx": 305,
+     "gold": 4.0,
+     "pred": 4.0,
+     "correct": true,
+     "gen": 145,
+     "s": 7.8
+    },
+    {
+     "idx": 306,
+     "gold": 10.0,
+     "pred": 10.0,
+     "correct": true,
+     "gen": 263,
+     "s": 14.0
+    },
+    {
+     "idx": 307,
+     "gold": 16.0,
+     "pred": 0.5,
+     "correct": false,
+     "gen": 512,
+     "s": 27.1
+    },
+    {
+     "idx": 308,
+     "gold": 6.0,
+     "pred": 6.0,
+     "correct": true,
+     "gen": 230,
+     "s": 12.4
+    },
+    {
+     "idx": 309,
+     "gold": 8.0,
+     "pred": 8.0,
+     "correct": true,
+     "gen": 212,
+     "s": 10.8
+    }
+   ]
+  },
+  "elle-k12": {
+   "sums": 15,
+   "sums_n": 16,
+   "gsm8k_correct": 5,
+   "gsm8k_n": 10,
+   "gen_tokens": 2430,
+   "tok_per_s": 21.65,
+   "wall_s": 112.6,
+   "rows": [
+    {
+     "idx": 300,
+     "gold": 78.0,
+     "pred": 78.0,
+     "correct": true,
+     "gen": 122,
+     "s": 5.9
+    },
+    {
+     "idx": 301,
+     "gold": 8.0,
+     "pred": 2.0,
+     "correct": false,
+     "gen": 130,
+     "s": 6.2
+    },
+    {
+     "idx": 302,
+     "gold": 15.0,
+     "pred": 15.0,
+     "correct": true,
+     "gen": 91,
+     "s": 4.4
+    },
+    {
+     "idx": 303,
+     "gold": 1300.0,
+     "pred": 9.0,
+     "correct": false,
+     "gen": 512,
+     "s": 23.4
+    },
+    {
+     "idx": 304,
+     "gold": 3200.0,
+     "pred": 1600.0,
+     "correct": false,
+     "gen": 218,
+     "s": 10.1
+    },
+    {
+     "idx": 305,
+     "gold": 4.0,
+     "pred": 4.0,
+     "correct": true,
+     "gen": 184,
+     "s": 8.5
+    },
+    {
+     "idx": 306,
+     "gold": 10.0,
+     "pred": 10.0,
+     "correct": true,
+     "gen": 246,
+     "s": 11.4
+    },
+    {
+     "idx": 307,
+     "gold": 16.0,
+     "pred": 4.0,
+     "correct": false,
+     "gen": 512,
+     "s": 23.4
+    },
+    {
+     "idx": 308,
+     "gold": 6.0,
+     "pred": 28.0,
+     "correct": false,
+     "gen": 172,
+     "s": 8.0
+    },
+    {
+     "idx": 309,
+     "gold": 8.0,
+     "pred": 8.0,
+     "correct": true,
+     "gen": 243,
+     "s": 11.3
+    }
+   ]
+  },
+  "elle-k16": {
+   "sums": 12,
+   "sums_n": 16,
+   "gsm8k_correct": 1,
+   "gsm8k_n": 10,
+   "gen_tokens": 3109,
+   "tok_per_s": 23.22,
+   "wall_s": 134.3,
+   "rows": [
+    {
+     "idx": 300,
+     "gold": 78.0,
+     "pred": 39.0,
+     "correct": false,
+     "gen": 84,
+     "s": 3.8
+    },
+    {
+     "idx": 301,
+     "gold": 8.0,
+     "pred": 2.0,
+     "correct": false,
+     "gen": 306,
+     "s": 13.1
+    },
+    {
+     "idx": 302,
+     "gold": 15.0,
+     "pred": 15.0,
+     "correct": true,
+     "gen": 209,
+     "s": 9.0
+    },
+    {
+     "idx": 303,
+     "gold": 1300.0,
+     "pred": 50.0,
+     "correct": false,
+     "gen": 512,
+     "s": 21.9
+    },
+    {
+     "idx": 304,
+     "gold": 3200.0,
+     "pred": 500.0,
+     "correct": false,
+     "gen": 497,
+     "s": 21.2
+    },
+    {
+     "idx": 305,
+     "gold": 4.0,
+     "pred": 80.0,
+     "correct": false,
+     "gen": 178,
+     "s": 7.6
+    },
+    {
+     "idx": 306,
+     "gold": 10.0,
+     "pred": 60.0,
+     "correct": false,
+     "gen": 512,
+     "s": 21.7
+    },
+    {
+     "idx": 307,
+     "gold": 16.0,
+     "pred": 4.0,
+     "correct": false,
+     "gen": 152,
+     "s": 6.6
+    },
+    {
+     "idx": 308,
+     "gold": 6.0,
+     "pred": 2.0,
+     "correct": false,
+     "gen": 512,
+     "s": 22.7
+    },
+    {
+     "idx": 309,
+     "gold": 8.0,
+     "pred": null,
+     "correct": false,
+     "gen": 147,
+     "s": 6.6
+    }
+   ]
+  },
+  "elle-k20": {
+   "sums": 1,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 10,
+   "gen_tokens": 3603,
+   "tok_per_s": 25.12,
+   "wall_s": 143.8,
+   "rows": [
+    {
+     "idx": 300,
+     "gold": 78.0,
+     "pred": 16.0,
+     "correct": false,
+     "gen": 212,
+     "s": 8.5
+    },
+    {
+     "idx": 301,
+     "gold": 8.0,
+     "pred": 12.0,
+     "correct": false,
+     "gen": 512,
+     "s": 20.3
+    },
+    {
+     "idx": 302,
+     "gold": 15.0,
+     "pred": 25.0,
+     "correct": false,
+     "gen": 512,
+     "s": 20.8
+    },
+    {
+     "idx": 303,
+     "gold": 1300.0,
+     "pred": 1.0,
+     "correct": false,
+     "gen": 512,
+     "s": 20.5
+    },
+    {
+     "idx": 304,
+     "gold": 3200.0,
+     "pred": 10.0,
+     "correct": false,
+     "gen": 148,
+     "s": 6.0
+    },
+    {
+     "idx": 305,
+     "gold": 4.0,
+     "pred": 2.0,
+     "correct": false,
+     "gen": 137,
+     "s": 5.5
+    },
+    {
+     "idx": 306,
+     "gold": 10.0,
+     "pred": 27.0,
+     "correct": false,
+     "gen": 512,
+     "s": 20.1
+    },
+    {
+     "idx": 307,
+     "gold": 16.0,
+     "pred": null,
+     "correct": false,
+     "gen": 512,
+     "s": 20.1
+    },
+    {
+     "idx": 308,
+     "gold": 6.0,
+     "pred": 1.0,
+     "correct": false,
+     "gen": 512,
+     "s": 20.3
+    },
+    {
+     "idx": 309,
+     "gold": 8.0,
+     "pred": null,
+     "correct": false,
+     "gen": 34,
+     "s": 1.6
+    }
+   ]
+  },
+  "elle-k24": {
+   "sums": 1,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 10,
+   "gen_tokens": 3206,
+   "tok_per_s": 26.95,
+   "wall_s": 119.3,
+   "rows": [
+    {
+     "idx": 300,
+     "gold": 78.0,
+     "pred": 2.0,
+     "correct": false,
+     "gen": 512,
+     "s": 19.3
+    },
+    {
+     "idx": 301,
+     "gold": 8.0,
+     "pred": 3.0,
+     "correct": false,
+     "gen": 23,
+     "s": 1.1
+    },
+    {
+     "idx": 302,
+     "gold": 15.0,
+     "pred": 1.0,
+     "correct": false,
+     "gen": 31,
+     "s": 1.3
+    },
+    {
+     "idx": 303,
+     "gold": 1300.0,
+     "pred": 50.0,
+     "correct": false,
+     "gen": 512,
+     "s": 18.8
+    },
+    {
+     "idx": 304,
+     "gold": 3200.0,
+     "pred": 1.0,
+     "correct": false,
+     "gen": 49,
+     "s": 2.0
+    },
+    {
+     "idx": 305,
+     "gold": 4.0,
+     "pred": 1.0,
+     "correct": false,
+     "gen": 512,
+     "s": 18.9
+    },
+    {
+     "idx": 306,
+     "gold": 10.0,
+     "pred": 3.0,
+     "correct": false,
+     "gen": 512,
+     "s": 18.8
+    },
+    {
+     "idx": 307,
+     "gold": 16.0,
+     "pred": 4.0,
+     "correct": false,
+     "gen": 512,
+     "s": 18.8
+    },
+    {
+     "idx": 308,
+     "gold": 6.0,
+     "pred": null,
+     "correct": false,
+     "gen": 512,
+     "s": 19.0
+    },
+    {
+     "idx": 309,
+     "gold": 8.0,
+     "pred": null,
+     "correct": false,
+     "gen": 31,
+     "s": 1.4
+    }
+   ]
+  },
+  "elle-k32": {
+   "sums": 0,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 10,
+   "gen_tokens": 1576,
+   "tok_per_s": 32.91,
+   "wall_s": 48.2,
+   "rows": [
+    {
+     "idx": 300,
+     "gold": 78.0,
+     "pred": null,
+     "correct": false,
+     "gen": 5,
+     "s": 0.3
+    },
+    {
+     "idx": 301,
+     "gold": 8.0,
+     "pred": null,
+     "correct": false,
+     "gen": 26,
+     "s": 1.0
+    },
+    {
+     "idx": 302,
+     "gold": 15.0,
+     "pred": null,
+     "correct": false,
+     "gen": 4,
+     "s": 0.3
+    },
+    {
+     "idx": 303,
+     "gold": 1300.0,
+     "pred": null,
+     "correct": false,
+     "gen": 512,
+     "s": 15.3
+    },
+    {
+     "idx": 304,
+     "gold": 3200.0,
+     "pred": null,
+     "correct": false,
+     "gen": 2,
+     "s": 0.2
+    },
+    {
+     "idx": 305,
+     "gold": 4.0,
+     "pred": null,
+     "correct": false,
+     "gen": 1,
+     "s": 0.1
+    },
+    {
+     "idx": 306,
+     "gold": 10.0,
+     "pred": null,
+     "correct": false,
+     "gen": 512,
+     "s": 15.2
+    },
+    {
+     "idx": 307,
+     "gold": 16.0,
+     "pred": null,
+     "correct": false,
+     "gen": 1,
+     "s": 0.2
+    },
+    {
+     "idx": 308,
+     "gold": 6.0,
+     "pred": 1.0,
+     "correct": false,
+     "gen": 512,
+     "s": 15.2
+    },
+    {
+     "idx": 309,
+     "gold": 8.0,
+     "pred": null,
+     "correct": false,
+     "gen": 1,
+     "s": 0.2
+    }
+   ]
+  }
+ }
+}

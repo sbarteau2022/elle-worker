@@ -298,3 +298,24 @@ free everywhere except the input layer and the block 51–58 (the diagnostic's 4
 this block). The flat middle means the scan cannot rank layers 12–47 against each other; joint
 removal must be validated directly. CARVE_VALIDATE_001 runs next: drop k = 8/12/16/20/24/32
 free linear layers, middle-first, every attention layer kept; 16 sums + GSM8K 300–309.
+
+### CARVE_VALIDATE_001 — free linear layers dropped middle-first, all attention kept (2026-09-07)
+
+| tag | dropped | kept | sums | GSM8K 300–309 | tok/s |
+|---|---|---|---|---|---|
+| elle | 0 | 64 | 16/16 | 5/10 | 17.3 |
+| elle-k8 | 8 | 56 | 15/16 | 7/10 | 18.8 |
+| elle-k12 | 12 | 52 | 15/16 | 5/10 | 21.7 |
+| elle-k16 | 16 | 48 | 12/16 | 1/10 | 23.2 |
+| elle-k20 | 20 | 44 | 1/16 | 0/10 | 25.1 |
+| elle-k24 | 24 | 40 | 1/16 | 0/10 | 27.0 |
+| elle-k32 | 32 | 32 | 0/16 | 0/10 | 32.9 |
+
+**Unhealed frontier: twelve linear layers.** k8 and k12 match the full model on both probes
+(7/10 and 5/10 against 5/10, n=10) at +8% and +25% speed with nothing trained. The cliff is
+between 12 and 16 (12/16 sums but 1/10 GSM8K), and 20+ is dead. The 3B-equivalent (8 of 64
+layers) is far beyond anything the unhealed view can reach; healing is where the rest of the
+depth has to come from. HEAL_001 next: DoRA on elle-k16 (48 layers, spec `0-21,23,27,31,35,39,43-63`) distilled
+from the full coordinator on sphere 1's 85 clean GSM8K rows (002b-clean + approved), 300
+steps, rank 16, CE + KL(top-32); before/after on 16 sums + 4 valid rows; then served as
+elle-s1 and delegated to through the app.
