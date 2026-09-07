@@ -16,7 +16,8 @@ MLX_SURPRISAL_LOG=$RUNS/surprisal_sidecar.jsonl MLX_CACHE_MAX_GB=1 APC_NUM_BLOCK
 for i in $(seq 1 60); do curl -s -m 3 http://127.0.0.1:11437/health >/dev/null && break; sleep 2; done
 curl -s http://127.0.0.1:11437/health | python3 -c "import json,sys; h=json.load(sys.stdin); print('carved', list(h.get('carved',{})))"
 cd $E; pkill -f "npx electron ." || true; sleep 2
-ELLE_DIST=1 ELLE_SWARM_SOVEREIGN=1 ELLE_SWARM_MAX=2 ELLE_SWARM_MAX_STEPS=8 ELLE_OLLAMA_URL=http://127.0.0.1:11437 ELLE_HYPER_MAP_DIR=$HOME/.elle/hyper-map ELLE_SWARM_LEDGER=agent nohup npx electron . > $RUNS/elle-app.$L.log 2>&1 &
+# ELLE_MLX_SERVE=0: the app must NOT run its own mlx-serve supervisor — with the external server on the port it flipped to "down → ELLE_OLLAMA_URL restored to Ollama" mid-run and DELEGATE_005 sat unclaimed for 3 h
+ELLE_DIST=1 ELLE_MLX_SERVE=0 ELLE_SWARM_SOVEREIGN=1 ELLE_SWARM_MAX=2 ELLE_SWARM_MAX_STEPS=8 ELLE_OLLAMA_URL=http://127.0.0.1:11437 ELLE_HYPER_MAP_DIR=$HOME/.elle/hyper-map ELLE_SWARM_LEDGER=agent nohup npx electron . > $RUNS/elle-app.$L.log 2>&1 &
 for i in $(seq 1 45); do grep -q "atlas13 \[faculty\]" $RUNS/elle-app.$L.log && break; sleep 2; done
 node electron/native/gsm8k-in-app.cjs post test $N $OFF | tee $RUNS/$L.post.out; grep -o '/Users.*json' $RUNS/$L.post.out > $RUNS/$L.posted_path
 echo "$L posted → $(cat $RUNS/$L.posted_path)"
