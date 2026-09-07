@@ -31,6 +31,7 @@ ELLE_DIST=1 ELLE_MLX_SERVE=0 ELLE_SWARM_SOVEREIGN=1 ELLE_SWARM_MAX=2 ELLE_SWARM_
 for i in $(seq 1 45); do grep -q "atlas13 \[faculty\]" $RUNS/elle-app.$L.log && break; sleep 2; done
 node electron/native/gsm8k-in-app.cjs post test $N $OFF | tee $RUNS/$L.post.out; grep -o '/Users.*json' $RUNS/$L.post.out > $RUNS/$L.posted_path
 echo "$L posted → $(cat $RUNS/$L.posted_path)"
+python3 $W/research/seam-wire/delegate_watchdog.py "$(cat $RUNS/$L.posted_path)" $RUNS/specialists_$L.json $RUNS/mlx-serve.$L.log 3 > $RUNS/$L.watchdog.out 2>&1 &
 node electron/native/gsm8k-in-app.cjs watch "$(cat $RUNS/$L.posted_path)" 60
 node electron/native/gsm8k-in-app.cjs grade "$(cat $RUNS/$L.posted_path)" | tee $RUNS/$L.grade.out
 node -e '
