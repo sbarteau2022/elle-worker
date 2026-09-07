@@ -348,3 +348,17 @@ close it and answer, which is the served behaviour anyway.
 
 DELEGATE_001 next: elle-s1 served as sphere 7 (convergent logic) in the faculty atlas; the
 coordinator delegates held-out GSM8K test 320–339 to it through the app; reviewer on.
+
+### DELEGATE_001 — pre-registered while running (2026-09-07 02:06)
+
+The faculty atlas (Elle 87ccf23): twelve canonical spheres as six dualities, routing in the
+1024-d embedding space with a keyword vote, earned collapse; the healed k16 specialist served
+as sphere 7, Convergent Logic (`elle-s7`). 20 held-out rows (test 340–359, seq 1281..1300),
+posted through the app; the coordinator decided the executor per goal. First eight decisions:
+all `sphere 7 / elle-s7`. Claims: **D1** the delegated tasks actually run on elle-s7 (server
+request counts + the worker's model line), **D2** approved-and-correct rate reported against
+002b's 0.94 (n=20, informational; the specialist is 48 of 64 layers, 85-row heal), **D3**
+reviewer send-backs and escalations to the centre reported. Faculty routing on 40
+re-embedded real tasks before the run: 20/20 GSM8K → convergent logic; code tasks held (motor
+praxis ≈ convergent logic). The six operational profile coordinates are small in this space
+(|c| < 0.03) so the knobs sit near neutral (temperature 0.49); noted, not yet a claim.
