@@ -715,3 +715,42 @@ mlx-serve dropped the batch and fell back to sequential (the "division by zero" 
 adapter-view run). Guarded (patches/mlx_lm_batch_tps_guard.py, re-applied by run.sh). Measured on
 elle-s7, 200-token replies: 1 stream 10.6 s, 4 concurrent 13.4 s → **3.2× throughput**. Two workers
 are back on for the board loop; the direct eval will use concurrency next.
+
+### RESULTS 2026-09-07 17:0x — C1, DELEGATE_005 (board loop), and the open blocker
+**C1 cost (bench_adapters.json, valid run: per-arm copies, forward-path assert):** 48-layer carve,
+top 21 adapted, rank 16, seq 1024, grad checkpointing, 4 steps, s/step median:
+
+| arm | s/step | × LoRA | peak GB | trainable |
+|---|---|---|---|---|
+| LoRA (mlx_lm) | 28.3 | 1.00 | 22.8 | 10.3M |
+| cheap DoRA (ours) | 53.7 | **1.90** | 22.8 | 10.7M |
+| Rosen-HypDoRA (cheap DoRA + bridge) | 75.6 | **2.67** | 22.8 | 11.4M |
+| DoRA (mlx_lm, dequantises per step) | 119.4 | **4.22** | 22.8 | 10.7M |
+
+Pre-registered thresholds: cheap-dora ≤ 1.15× **REFUTED** (1.90×); rosen ≤ 1.3× **REFUTED** (2.67×);
+mlx_lm dora ≥ 3× confirmed (4.22×). Honest reading: the row-norm identity halves DoRA's cost
+(119 → 54 s) but it is not "LoRA's price" — the quantized matmul of A's r columns and its backward
+through every adapted projection cost ~25 s/step on their own. The bridge adds another ~22 s. The
+"DoRA without DoRA's price" sentence is withdrawn; the defensible one is "DoRA at 2.2× less than the
+reference implementation on 4-bit weights, no dequantisation". Memory is identical across arms.
+
+**DELEGATE_005, board loop, healed elle-s7 (test 500–519).** Third attempt on the batched server
+with two workers: rows 1499–1506 **approved, 8/8 correct by hand against gold**; row 1498 blocked
+on the 8-step budget (protocol block); rows 1507–1517 blocked on a server Metal OOM again — 11 rows
+void. On the 9 valid rows: **H1 protocol-block rate 1/9 = 11%** (DELEGATE_004: 5/5 = 100%) — met;
+**H2 approved-and-correct 8/9 = 0.89** vs the coordinator's 0.90 — parity at n = 9; H3 server
+errors 11/20 — the run is VOID by its own rule, so H1/H2 are reported as the partial they are. The
+direct eval on the same 20 rows: 15/20 = 0.75, 0 errors. The loop (tools, run_code verification,
+reviewer) beats the bare model on the rows it completes. gsm8k-in-app's grader scored the run
+correct 0 / refused 20 / unplaced 20: it does not survive rows that were reopened by editing the
+board — grader bug, logged; the hand grade above is the record.
+
+**OPEN BLOCKER:** the serving process accumulates memory across board-loop requests on the adapter
+view and OOMs after ~8–9 long tasks even with Ollama empty (the direct eval's 20 short sequential
+requests never did). Dead allocations are never released after the first OOM. Not yet root-caused
+(candidates: per-request cache_store of 16k-token DeltaNet/KV states on the view's pool escaping
+MLX_CACHE_MAX_GB; batch-path buffers; the LoRA fp32 intermediates at 16k × 2 streams). Mitigation
+for the next board run: restart the server every 8 tasks, or ELLE_SWARM_MAX_STEPS lower, until the
+health `cache.bytes` per tag is read across a run. HEAL_003 arm A (lora21, NoRA-init) started
+15:58 local; arm B follows; DELEGATE_006A/B will each hit this unless the restart is in place —
+run_delegate.sh should be given a per-8-tasks server restart before they run.
