@@ -46,7 +46,7 @@ def main():
     print("layer  kind    sums  cost")
     for x in rows:
         print(f"{x['layer']:>5}  {x['kind']:<6}  {x['sums']:>4}  {x['cost']:>4}{'  <-- costly' if x['cost'] >= 3 else ''}")
-    linear = sorted((i for i in cost if not FULL(i)), key=lambda i: (cost[i], -abs(i - N / 2)))   # cheapest first; ties: middle layers first
+    linear = sorted((i for i in cost if not FULL(i)), key=lambda i: (cost[i], abs(i - N / 2)))    # cheapest first; ties: middle layers first (the scan is flat there; the diag showed 28-31 free, 48-55 critical)
     attn_cost = sum(cost[i] for i in cost if FULL(i)) / max(1, sum(1 for i in cost if FULL(i)))
     lin_cost = sum(cost[i] for i in cost if not FULL(i)) / max(1, sum(1 for i in cost if not FULL(i)))
     print(f"mean cost: attention {attn_cost:.2f}, linear {lin_cost:.2f}")
