@@ -453,3 +453,18 @@ one position per row and was killed), 200 steps. Served as elle-s7; DELEGATE_005
 (test 500–519), two agents. Claims: **H1** delegated tasks that end in budget/κ blocks < 40%
 (DELEGATE_004: 5/5); **H2** approved-and-correct reported against the coordinator's 0.90;
 **H3** server errors ≤ 5%. VOID above 5% errors.
+
+### HEAL_002 — two silent deaths, then gradient checkpointing (2026-09-07 04:4x)
+The first two HEAL_002 launches (6,144-token window) logged "LoRA on 48 layers × 6 projections:
+24.1M trainable params" and nothing else: no traceback, the python process simply gone after a
+few minutes. macOS killed it for memory — 1,809-token rows through 48 layers with every layer's
+activations held for the backward pass. Fix (Elle cc3fdec): `heal_carve.py` wraps each kept layer
+in mlx_lm's `grad_checkpoint` (activations recomputed in the backward pass, default on,
+`--no-checkpoint` to opt out) and defaults the window to 3,072 tokens, which still holds the whole
+exchange for most rows (mean 1,809). Relaunched: teacher 218 s, unhealed view sums 10/16 (same as
+before), **it 1/200 loss 1.564 (ce 0.880, kl 0.684) at 219 s/it** — the first iteration includes
+compile/warm-up; steady-state timing recorded when it 2–5 land. If steady state stays near 200 s
+the run is ~11 h and the pre-registered 200 steps will be cut to fit (recorded here before, not
+after). Note for the next heal: LoRA only on the layers ABOVE the carve gap (43–63) would let the
+backward pass stop at layer 43 — roughly half the cost — and is where the adaptation naturally
+lives; untested.
