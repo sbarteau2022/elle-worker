@@ -11,6 +11,9 @@ ARMS=${1:-AB}; STEPS=${2:-100}; SPEC="0-21,23,27,31,35,39,43-63"
 while pgrep -f "heal_carve.py" >/dev/null; do sleep 120; done
 pkill -f "server.py --port 11437" || true; pkill -f "npx electron ." || true; sleep 3
 cd $M
+# the cost claim, on a free GPU, with the per-arm copy fix (the 10:1x run's arms contaminated each other)
+echo "== BENCH adapters (rerun) $(date '+%H:%M:%S')" | tee -a $RUNS/heal_003.log
+.venv/bin/python specialists/bench_adapters.py --steps 4 --seq 1024 --arms lora,cheap-dora,rosen-hypdora,dora 2>&1 | tail -30 | tee $RUNS/bench_adapters.rerun.log || echo "bench failed (non-fatal)"
 heal() {  # name, extra args…
   local name=$1; shift
   echo "== HEAL_003 $name $(date '+%H:%M:%S')" | tee -a $RUNS/heal_003.log

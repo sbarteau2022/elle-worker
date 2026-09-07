@@ -579,3 +579,15 @@ Loss fell 17× and both evaluations improved. Read it narrowly: sums is 16 items
 DELEGATE_005 (20 held-out GSM8K rows through the full board loop), pre-registered above and now
 queued. Adapter: `adapters/sphere7-loop-k16` (96 MB, git-ignored; heal.json tracked, data sha
 fe708c5d). HEAL_002 carries NO NoRA and stands as the un-normalised baseline for HEAL_003.
+
+### C1 (cost) — first run VOID, rerun scheduled (2026-09-07 10:1x)
+`bench_adapters.py` ran four arms in one process. `carve_view` without an adapter SHARES the base
+model's layer objects, so arm 1's `linear_to_lora_layers` wrapped them in place and every later arm
+measured the previous one's modules: cheap-dora and mlx_lm dora errored outright, and
+rosen-hypdora reported 0.7M trainable — the bridge alone, its attention projections already
+LoRA-wrapped and therefore skipped. **The only valid number from that run is the LoRA arm: 24.4
+s/step, 22.8 GB peak, 10.3M trainable** (48-layer carve, top 21 adapted, rank 16, seq 1024, grad
+checkpointing). Everything else is void. Fixed: the bench now copies each kept layer and its
+sub-blocks per arm (the same copy the server does when it applies an adapter to a view) and
+asserts the base carries no adapter modules before each arm. Rerun is queued at the top of
+run_heal_003.sh, where the GPU is free. C1's pre-registered thresholds are unchanged.
