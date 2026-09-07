@@ -391,3 +391,20 @@ budget running out without `done` — the specialist knows the arithmetic and no
 (HEAL_001 trained on answers). Loop-distillation data is now captured (CONVO.jsonl per task,
 Elle commit) for HEAL_002. **DELEGATE_003** pre-registered: two agents, 1 GB caches, only the
 s7 view resident; rows test 380–399; same D1–D3; VOID if > 5% server errors.
+
+### READINESS gate (Elle 3fae959 + clamp fix) — "ready" as a test result
+
+`node electron/native/readiness.cjs static|live [rows] [offset]`. Static gates, no model: G1 the
+vector-equilibrium frame (12 unit vertices, 6 antipodal pairs, 24 edges, neighbour cosine ½ ⇒
+R = 2r, 8 triangles + 6 squares), G2 isometric transport (relative norm change 1e-15 over 20
+random chart transports), G3 winding (φ⁻¹ steps pass, the exact half-turn step is refused),
+G4 φ² asymmetry, G5 κ ∈ (0,1), G6 holding loss ≤ e−1 (sup 0.0098 over 2000 strain steps), G9
+anti-starvation of the float budget. G7 (the paper's φ⁻¹ settling speedup) is reported PENDING:
+no drift-time experiment exists; it is a claim until one does. Live gates: mlx-serve, bridge,
+faculty atlas with embeddings, and a delegated micro-run scored on executor rate (D1),
+approved-correct (D2), server errors ≤ 5% (D3), reviewer activity (D4). First static run found a
+real defect: κ underflowed to exactly 0 under 400 undecayed failures; z is now clamped at the
+analytic bound φ²/ρ. All seven required static gates pass; G7 pending.
+
+Paper note (Atlas 2.0 draft): "Rosen ridge" conflates the Rosenbrock ravine (optimisation) with
+the Rosen bridge (the channel, rosen-bridge.cjs); G7/G8's concrete numbers are unmeasured here.
