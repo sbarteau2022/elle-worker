@@ -19,6 +19,10 @@ export MLX_SPECIALISTS=$RUNS/specialists_$L.json
 MLX_SURPRISAL_LOG=$RUNS/surprisal_sidecar.jsonl MLX_CACHE_MAX_GB=1 APC_NUM_BLOCKS=128 nohup ./run.sh > $RUNS/mlx-serve.$L.log 2>&1 &
 for i in $(seq 1 60); do curl -s -m 3 http://127.0.0.1:11437/health >/dev/null && break; sleep 2; done
 curl -s http://127.0.0.1:11437/health | python3 -c "import json,sys; h=json.load(sys.stdin); print('carved', list(h.get('carved',{})))"
+# THE MODEL NUMBER FIRST, directly (minutes, no board): accuracy of the served view on the same rows
+$M/.venv/bin/python $M/specialists/eval_specialist.py --tag elle-s7 --n $N --offset $OFF --label ${L}_direct 2>&1 | tail -3 | tee $RUNS/$L.direct.out
+# smoke: one real generation must succeed before the board loop starts; a dead server is restarted once
+if ! grep -q '"server_errors": 0' $RUNS/$L.direct.out; then echo "direct eval saw server errors — restarting the server once"; pkill -f "server.py --port 11437" || true; sleep 5; MLX_SURPRISAL_LOG=$RUNS/surprisal_sidecar.jsonl MLX_CACHE_MAX_GB=1 APC_NUM_BLOCKS=128 nohup ./run.sh > $RUNS/mlx-serve.$L.2.log 2>&1 & for i in $(seq 1 60); do curl -s -m 3 http://127.0.0.1:11437/health >/dev/null && break; sleep 2; done; fi
 cd $E; pkill -f "npx electron ." || true; sleep 2
 # ELLE_MLX_SERVE=0: the app must NOT run its own mlx-serve supervisor — with the external server on the port it flipped to "down → ELLE_OLLAMA_URL restored to Ollama" mid-run and DELEGATE_005 sat unclaimed for 3 h
 # MAX=1: the healed view falls back from batch_generate to the sequential path; two concurrent prefills on it
