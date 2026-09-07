@@ -9,6 +9,10 @@ set -e
 E=/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle; M=$E/tools/mlx-serve; W=/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker; RUNS=$W/research/seam-wire/runs; mkdir -p $RUNS
 ARMS=${1:-AB}; STEPS=${2:-100}; SPEC="0-21,23,27,31,35,39,43-63"
 while pgrep -f "heal_carve.py" >/dev/null; do sleep 120; done
+# GPU guard: a model resident in Ollama (the app once flipped to it and Ollama loaded a 17 GB GGUF of the
+# coordinator) shares unified memory with mlx-serve and OOMs the specialist. Unload anything it holds.
+for m in $(curl -s -m 3 http://127.0.0.1:11434/api/ps 2>/dev/null | python3 -c "import json,sys; print(' '.join(x['name'] for x in json.load(sys.stdin).get('models',[])))" 2>/dev/null); do
+  echo "unloading $m from Ollama"; curl -s -m 20 -X POST http://127.0.0.1:11434/api/generate -d "{\"model\":\"$m\",\"keep_alive\":0}" >/dev/null; done
 pkill -f "server.py --port 11437" || true; pkill -f "npx electron ." || true; sleep 3
 cd $M
 # the cost claim, on a free GPU, with the per-arm copy fix (the 10:1x run's arms contaminated each other)

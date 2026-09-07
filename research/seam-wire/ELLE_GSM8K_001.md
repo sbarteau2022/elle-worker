@@ -678,3 +678,14 @@ hard for the coordinator at max 8 steps (3 refusals, budget blocks) AND, on the 
 exist, the settling claim is flat. A cleaner G7 needs longer step budgets so the chains complete,
 and then the settling number stands on its own. Not scheduled yet; it competes with HEAL_003 for
 the GPU.
+
+### DELEGATE_005 — first attempt VOID at 2 rows: server Metal OOM (2026-09-07 13:50)
+Rows 1498/1499 blocked in under two minutes with `[METAL] Insufficient Memory` from mlx-serve while
+elle-s7 filled its prompt cache. Cause: **a second full copy of the coordinator was resident in
+Ollama** (`elle:latest`, 17.4 GB GGUF Q4_K_M) — loaded this morning when the first DELEGATE_005 app's
+supervisor "restored ELLE_OLLAMA_URL to Ollama" and its workers hit it — sharing unified memory with
+mlx-serve's 16 GB (wired 34.5 of 48 GB). Unloaded (wired → 4.1 GB), the four affected rows
+(1498–1501: two OOM-blocked, two claimed by the dead app) reopened on the board with an operator
+note, bridge restarted, app relaunched with the supervisor off. No row ran a model step before the
+reopen, so the 20-row measurement stands as posted. Both runners now unload anything Ollama holds
+before serving.

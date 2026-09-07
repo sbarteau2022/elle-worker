@@ -10,6 +10,10 @@ A=${1:?adapter name}; L=${2:?label}; N=${3:-20}; OFF=${4:-500}; SPEC="0-21,23,27
 test -f $M/adapters/$A/adapters.safetensors && test -f $M/adapters/$A/adapter_config.json
 pgrep -f "heal_carve.py" >/dev/null && { echo "a heal is still training — the GPU is not free"; exit 2; }
 echo "{\"elle-s7\": {\"repo\": \"$M/weights/Qwen3.8-27B-4bit\", \"layers\": \"$SPEC\", \"adapter\": \"$M/adapters/$A\"}}" > $RUNS/specialists_$L.json
+# GPU guard: a model resident in Ollama (the app once flipped to it and Ollama loaded a 17 GB GGUF of the
+# coordinator) shares unified memory with mlx-serve and OOMs the specialist. Unload anything it holds.
+for m in $(curl -s -m 3 http://127.0.0.1:11434/api/ps 2>/dev/null | python3 -c "import json,sys; print(' '.join(x['name'] for x in json.load(sys.stdin).get('models',[])))" 2>/dev/null); do
+  echo "unloading $m from Ollama"; curl -s -m 20 -X POST http://127.0.0.1:11434/api/generate -d "{\"model\":\"$m\",\"keep_alive\":0}" >/dev/null; done
 cd $M; pkill -f "server.py --port 11437" || true; for i in $(seq 1 20); do pgrep -f "server.py --port 11437" >/dev/null || break; sleep 1; done
 export MLX_SPECIALISTS=$RUNS/specialists_$L.json
 MLX_SURPRISAL_LOG=$RUNS/surprisal_sidecar.jsonl MLX_CACHE_MAX_GB=1 APC_NUM_BLOCKS=128 nohup ./run.sh > $RUNS/mlx-serve.$L.log 2>&1 &
