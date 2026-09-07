@@ -14,9 +14,9 @@ cd $M; pkill -f "server.py --port 11437" || true; for i in $(seq 1 20); do pgrep
 unset MLX_SPECIALISTS; MLX_SURPRISAL_LOG=$RUNS/surprisal_sidecar.jsonl MLX_CACHE_MAX_GB=1 APC_NUM_BLOCKS=128 nohup ./run.sh > $RUNS/mlx-serve.g7.log 2>&1 &
 for i in $(seq 1 40); do curl -s -m 3 http://127.0.0.1:11437/health >/dev/null && break; sleep 2; done
 curl -s http://127.0.0.1:11437/health | python3 -c "import json,sys; h=json.load(sys.stdin); print('served', list(h.get('roster',{}))[:6], 'carved', list(h.get('carved',{})))"
-# app: two agents, 24 steps each (a 6-problem chain is ~2 steps per problem + done)
+# app: two agents, 24 steps and 60 min each (the default 15-min task timeout would cut a 6-problem chain; ~2 steps per problem + done)
 cd $E; pkill -f "npx electron ." || true; sleep 2
-ELLE_DIST=1 ELLE_SWARM_SOVEREIGN=1 ELLE_SWARM_MAX=2 ELLE_SWARM_MAX_STEPS=24 ELLE_OLLAMA_URL=http://127.0.0.1:11437 ELLE_HYPER_MAP_DIR=$HOME/.elle/hyper-map ELLE_SWARM_LEDGER=agent nohup npx electron . > $RUNS/elle-app.g7.log 2>&1 &
+ELLE_DIST=1 ELLE_SWARM_SOVEREIGN=1 ELLE_SWARM_MAX=2 ELLE_SWARM_MAX_STEPS=24 ELLE_SWARM_TIMEOUT_MS=3600000 ELLE_OLLAMA_URL=http://127.0.0.1:11437 ELLE_HYPER_MAP_DIR=$HOME/.elle/hyper-map ELLE_SWARM_LEDGER=agent nohup npx electron . > $RUNS/elle-app.g7.log 2>&1 &
 for i in $(seq 1 45); do grep -q "atlas13 \[faculty\]" $RUNS/elle-app.g7.log && break; sleep 2; done
 node electron/native/gsm8k-in-app.cjs post test $N $OFF $K | tee $RUNS/g7_chain.post.out; grep -o '/Users.*json' $RUNS/g7_chain.post.out > $RUNS/g7_chain.posted_path
 echo "G7 chain battery posted: $N tasks × $K problems from test row $OFF → $(cat $RUNS/g7_chain.posted_path)"
