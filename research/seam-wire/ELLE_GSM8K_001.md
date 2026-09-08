@@ -891,3 +891,15 @@ data bug to fix before it is: lastD frozen on some brief runs.
 healed view **sums 13/16 (from 10/16), valid 1/2** — the compensation works (HEAL_003 arm A had
 collapsed to 1/16). HEAL_002 (all 48 layers, no NoRA) was 12/16, 2/2. Arm B (rosen-hypdora) is
 training; its bench gate passed (exactness + finite loss).
+
+### DATA BUG: the depth of every centre-held task was a constant (2026-09-08 08:3x, Elle)
+Trajectory rows of tasks placed at level 0 carried lastD = 0.900 on every turn (#1437, #1449, #1453
+…): the worker used the REGION CENTRE as the lineage anchor, and for the centre that is the origin;
+every turn's probe point sits at PROBE_RADIUS = 0.9 from the origin whatever its direction. With
+routing holding 58% of briefs at the centre, most brief trajectories fed a constant into the settling
+ratio, the free energy (ε = 1.2 forever) and Phase-Eight. Fixed: the lineage anchor is always the
+task's own point (its brief on the map; the centre only when no embedder answers) and the sphere
+distance is a second measurement, regionD, that the region bound and the free-energy prior read.
+Every trajectory-based number above this entry was computed on the old rows; the ones from GSM8K
+tasks (placed on sphere 7, a real centre at radius ~1.2) are unaffected, the ones from held briefs
+are not measurements. Re-measure after the next board run.
