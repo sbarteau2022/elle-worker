@@ -808,3 +808,14 @@ allocation (the catalog is one fixed text), PLV 2:1 on real trajectories, the G8
   ‖x‖ = 300); NoRA's √(3d/r) gain compensated in the LoRA scale for every adapter type and in the
   throat width; the bench asserts step-0 exactness and a finite loss per arm before timing.
   HEAL_004 = HEAL_003's design rerun with these; not scheduled until the review of 3848aa4 lands.
+
+### G7 (Phase-Eight) on the real trajectories — NEGATIVE (2026-09-08 07:4x)
+readiness G7b over the last 183 task trajectories (528 turns with a depth reading): **PLV_2:1 = 0.020,
+p = 0.18**. The paper's 0.990 (p = 0.001) is the synthetic Phase-Eight benchmark; the live runs show
+no 2:1 lock between the φ⁻¹ generation rhythm and the depth wander. Read with G7-settling (median
+ratio 1.000) this is the second flat result for the torus-time claims on 2–8-turn tasks; whether
+longer runs change it is what the breathing window and the chain battery at a higher step budget
+would show. Not a bug in the measurement: synthetic lock/drift/noise separate as the paper's own
+test does (plv.test.cjs). PS (the phase-space gate) is pending until a board run logs K.
+HEAL_004 (both arms with the fixes, DELEGATE_007A/B) launched 07:41; the bench's exactness and
+finite-loss asserts gate the arms before any step trains.
