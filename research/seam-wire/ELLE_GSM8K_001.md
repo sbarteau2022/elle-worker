@@ -832,3 +832,28 @@ is longer than nearly every task (2–8 turns), so what the Hilbert phase is tra
 between-task drift, not a within-task oscillation. The torus reading is not what is missing; a
 within-task oscillation at ~0.3 cycles/turn is, and only longer runs (the chain battery at a real
 step budget) can show whether one exists.
+
+### Phase-Eight on the TOKEN axis — weak but real coupling, strongest on the longest runs (2026-09-08 08:0x)
+Stewart's point: one rhythm is fast, one is slow — the per-turn θ ramp is the torus coordinate, not a
+measured generation rhythm. The measured one is the per-token surprisal stream the server logs for
+every request (runs/surprisal_sidecar.jsonl, 2,483 requests). Joined to the trajectories by task and
+turn (the k-th request is the k-th turn), 120 tasks / 108,556 tokens: fast phase = Hilbert phase of
+the surprisal stream, slow phase = Hilbert phase of the depth interpolated across each turn's tokens.
+
+| | PLV_2:1 | p (200 shifts) |
+|---|---|---|
+| turn axis, θ ramp (yesterday's G7b) | 0.020 | 0.18 |
+| token axis, pooled | **0.131** | **0.005** |
+| token axis, per-task median | 0.184 | |
+| token axis, best three (the chain tasks #1454, #1425, #1422; 1.1–3.3k tokens) | 0.48–0.51 | |
+| token axis, PLV_1:1 pooled | 0.144 | |
+
+Reading: on the token axis there IS a statistically detectable coupling between the generation
+rhythm and the depth wander, it grows with run length (the chain tasks reach 0.5), and it shows no
+preference for 2:1 over 1:1. The paper's 0.990 is the synthetic benchmark; the live number is 0.13
+pooled, 0.5 on the longest runs. Caveat: both Hilbert phases are trend-dominated (the surprisal
+spectrum peaks at the window length), so part of the coupling is the shared trend within a turn;
+the surrogate shifts control for it only partly. G7b in readiness stays on the honest turn-axis
+measurement until a token-axis version with a detrending band is built and pre-registered. The
+actionable part: the lock, if it exists, needs runs of thousands of tokens — the chain battery at a
+real step budget, again.
