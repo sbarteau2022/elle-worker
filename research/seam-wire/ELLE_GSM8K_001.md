@@ -957,3 +957,41 @@ the instrument proves optimal is the property that makes the layer unable to see
 That suggests the split every working long-convolution model uses and that the coordinator itself
 already has — short range plus long range — so a third arm (`tit+local`, taps {1,2,3} ∪ golden) and
 a recall arm long enough for the baseline to form an induction head are running now.
+
+### TIT vs attention — the corrected three-arm run (2026-09-08 15:4x)
+1,200 steps local / 6,000 recall, 3 seeds, 2 layers, 64 dims, N = 64, CPU (the GPU was serving).
+
+| task | chance | attention | TIT golden | TIT golden+local |
+|---|---|---|---|---|
+| local bigram | 0.500 | **1.000** | 0.740 | **0.898** |
+| associative recall | 0.083 | 0.111 | 0.186 | 0.224 |
+| params | | 77,824 | 47,120 | 47,894 |
+
+**The local result is the one that counts, and the mechanism was found and then fixed.** The golden
+orbit is the maximally equidistributed sequence — that is exactly what makes φ the unique maximiser
+of the Hurwitz constant — and equidistribution has no short offsets: the smallest golden tap is 6 at
+N=64/k=8 and 23 at N=256/k=8. A task about an ADJACENT pair is therefore invisible to a golden-only
+mixer, which is why it scored 0.740. Adding taps {1,2,3} took it to **0.898 for 774 extra
+parameters**, closing two thirds of the gap to attention. The optimality the instrument proves and
+the locality a layer needs are in direct tension; the resolution is the short-range/long-range split
+that every working long-convolution model uses and that the coordinator already has (48 recurrent
+layers under 16 global ones).
+
+**The recall arm is VOID for the second time and no conclusion is drawn from it.** The attention
+baseline reached 0.111 against a chance rate of 0.083 after 6,000 steps — it never learned the task,
+so it is not a baseline. TIT's 0.186/0.224 are above chance but cannot be read as content-based
+routing when the arm that is supposed to demonstrate content-based routing failed. The instrument,
+not the architecture, is what failed here: a 2-layer single-head model at lr 3e-3 on this
+construction does not form an induction head. Fixing it means adopting a published induction-task
+setup with known-good hyperparameters, not tuning until the number improves — that would be
+fishing. Until then the content-lookup question is OPEN, and the honest position on removing
+attention is that we do not yet know what would be lost.
+
+**H1 REFUTED** (TIT ≥ attention − 0.05 on local: 0.740 and 0.898 both below 1.000). **H2 REFUTED but
+VOID.** Budgets were not matched and the mismatch favours attention (77.8k vs 47.1k params).
+
+**Runnable on the real model now:** `heal_carve --adapter tit --tit-layers all|last:N|<indices>`
+replaces the chosen softmax-attention layers of a carved view with mixers whose output projection
+starts at zero — the pass-through state the depth carve measured as survivable — so the existing
+heal grows them from there. Not yet run on the coordinator; the GPU is on HEAL_004's delegate runs,
+and the pre-registration for that experiment should say which layers and what would refute it.
