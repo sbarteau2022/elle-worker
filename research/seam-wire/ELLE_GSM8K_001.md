@@ -903,3 +903,57 @@ distance is a second measurement, regionD, that the region bound and the free-en
 Every trajectory-based number above this entry was computed on the old rows; the ones from GSM8K
 tasks (placed on sphere 7, a real centre at radius ~1.2) are unaffected, the ones from held briefs
 are not measurements. Re-measure after the next board run.
+
+### The curved torus, and the Toroidal Isotropic mixer measured against attention (2026-09-08 15:xx)
+**The curved torus is implemented** (Elle e5f5f2f: `tools/mlx-serve/geometry/toroidal.py` and
+`electron/native/providers/curved-torus.cjs`, cross-checked twins, 18 python + 7 node tests). Metric
+E=r², F=0, G=(R+r cos θ)²; K(θ) = cos θ/[r(R+r cos θ)]; ∫∫K dA = 0 to 4e-15, which is Gauss–Bonnet
+with χ = 0 and conserves nothing cognitive — the compendium's Note 5 is right. Geodesics: Clairaut
+ρ²φ′ conserved to 1e-8 along RK4 traces; meridians and BOTH equators are geodesics and no other
+parallel is; trapped geodesics turn exactly at R + r cos θ = |c|.
+
+**Note 5's open question is answered with a number.** The compendium says a planar lemniscate
+equation is not a derivation of a geodesic and asks for the geodesic equations. Supplied, and
+applied: the lemniscate lifted onto the surface has geodesic curvature up to **21.2** (mean 2.26)
+where a geodesic has k_g ≡ 0. The surface's actual families are meridians, equator-crossing
+windings, and outer-band oscillations. There is no figure-eight family.
+
+**An exact identity worth keeping.** At the golden aspect r/R = α = 1/φ, because 1+α = φ, αφ = 1 and
+1−α = α²: **K_max = +1 and K_min = −φ³ exactly**, so |K_min|/K_max = φ³. Checked to 1e-12.
+
+**And the cost, gated not hidden.** The embedded torus has positive curvature on its outer band, so
+a product using it is NOT non-positively curved and geodesics need not be unique — the
+Cartan–Hadamard argument behind PG1 does not apply to it. readiness G1c reports the mode in force
+(flat by default; ELLE_TORUS=curved) and PG1's curvature half now depends on it.
+
+**The TIT mixer, and what "remove the standard transformer" means here.** The archived instrument is
+number theory, not a layer; its architecture table is the spec. "No privileged position" + "the same
+displacement everywhere" force a translation-equivariant map on a cyclic index set, i.e. a circular
+convolution; "the geometry is the encoding" fixes its taps to the golden orbit and its weights to
+α^j. Built (geometry/tit.py) with a drop-in substitute for the coordinator's attention layers
+(geometry/tit_substitute.py): the model is ALREADY 48/64 GatedDeltaNet, so the standard-transformer
+part is exactly the 16 softmax layers, and the substitute starts with o_proj at zero — the
+pass-through state the depth carve measured as survivable — so the existing heal grows it out of
+zero instead of pretraining it. Prefill equals step-by-step decode to 1e-5; the decode state is a
+constant ring, not a growing KV cache.
+
+**First measured comparison (2 layers, 64 dims, N=64, 3 seeds, CPU):**
+
+| task | attention | TIT (golden taps) |
+|---|---|---|
+| local bigram (chance 0.50) | **1.000** | 0.740 |
+| associative recall (chance 0.083) | 0.079 | 0.164 |
+
+H1 (TIT ≥ attention − 0.05 on local) **REFUTED**. H2 **REFUTED but VOID**: the attention baseline
+scored 0.079 against a chance rate of 0.083, so it never learned recall in 1200 steps and the arm
+measured nothing. Budgets were NOT matched (attention 77,824 params vs TIT 47,120) — reported, and
+it favours attention, though not by enough to explain 1.000 vs 0.740.
+
+**The mechanism, diagnosed.** The golden orbit is the MAXIMALLY equidistributed one — that is
+exactly what makes φ the unique maximiser of the Hurwitz constant — and equidistribution is the
+opposite of locality. Its smallest tap is **6 at N=64 with 8 taps, and 23 at N=256**. The local task
+asks about an *adjacent* bigram, so a golden-only mixer is structurally blind to it. The property
+the instrument proves optimal is the property that makes the layer unable to see its neighbours.
+That suggests the split every working long-convolution model uses and that the coordinator itself
+already has — short range plus long range — so a third arm (`tit+local`, taps {1,2,3} ∪ golden) and
+a recall arm long enough for the baseline to form an induction head are running now.
