@@ -857,3 +857,37 @@ the surrogate shifts control for it only partly. G7b in readiness stays on the h
 measurement until a token-axis version with a detrending band is built and pre-registered. The
 actionable part: the lock, if it exists, needs runs of thousands of tokens — the chain battery at a
 real step budget, again.
+
+### Review of 3848aa4 — one HIGH defect confirmed and fixed; Phase-Eight with the instrument itself; HEAL_004 arm A (2026-09-08 08:1x)
+**Defect (confirmed by reproduction, two refuters):** jitterbug.lateral's shell branch tested for a
+decision kind 'via-centre' that atlas13 never emits ('stay' | 'central' | 'lateral'), so in the shell
+every non-kissing handoff still relayed through the centre and the ring never opened; the test's
+assertions were guarded on the same never-true kind and passed vacuously. Also: even with the kind
+fixed, a direct non-kissing lane could not be sealed (sphere-lanes accepts hull edges only) and the
+handoff would have been silently dropped and retried every tick. Fixed: the branch keys on
+'central' with spokes kept central; served tags accept the `:latest` alias and arrays; sphere-lanes
+seals a RING hop when asked (`{ ring: true }`), the flag travels in the sealed record and the opener
+enforces it; handoffs ask for a ring lane on a non-kissing lateral; the tests assert unconditionally
+and a lane test exercises seal → open → regionOf on an antipodal pair. The other two review lenses
+and most verifiers hit the session limit; the numeric lens is unreviewed.
+
+**Phase-Eight, with the instrument (research/seam-rip/phase_eight.py: band-pass both signals,
+Hilbert, 2:1 PLV, circular-shift null of the FAST phase):** on the token-axis series (surprisal
+stream × interpolated depth), slow band at the depth's dominant frequency and the fast band one
+octave up, plus three fixed band pairs, pooled and the three longest tasks: **every cell NULL**.
+Best: #1464 at slow 0.002–0.02 cyc/token, PLV 0.50 vs null 0.41, p = 0.017 (gate p < 0.01). The
+earlier "pooled 0.131, p = 0.005; chains ~0.5" was the UNFILTERED Hilbert phase — trend-dominated,
+as flagged — and is withdrawn as evidence of a lock. Verdict stands at: no eight emerges on the data
+we have, on either axis, with the instrument's own rule. The instrument's self-test still passes
+(locked 0.99 / drift 0.17 / noise 0.12).
+
+**r_estimate protocol (Phase-Space Memory paper, N ≥ 200 trajectories with ≥ 8 samples, held-out
+NRMSE < 0.15, contraction sign ≥ 90%):** only 13 trajectories qualify; 3 of the first 6 carry a
+CONSTANT depth 0.900 across every turn (#1437, #1449, #1453 — briefs; lastD not updating), so the
+fit is degenerate on them; on the rest the contraction sign holds in 8%. Not measurable yet, and a
+data bug to fix before it is: lastD frozen on some brief runs.
+
+**HEAL_004 arm A (LoRA r16, top 21 layers, NoRA-init gain-compensated):** loss 1.564 → 0.124,
+healed view **sums 13/16 (from 10/16), valid 1/2** — the compensation works (HEAL_003 arm A had
+collapsed to 1/16). HEAL_002 (all 48 layers, no NoRA) was 12/16, 2/2. Arm B (rosen-hypdora) is
+training; its bench gate passed (exactness + finite loss).
