@@ -819,3 +819,16 @@ would show. Not a bug in the measurement: synthetic lock/drift/noise separate as
 test does (plv.test.cjs). PS (the phase-space gate) is pending until a board run logs K.
 HEAL_004 (both arms with the fixes, DELEGATE_007A/B) launched 07:41; the bench's exactness and
 finite-loss asserts gate the arms before any step trains.
+
+### Phase-Eight: is the torus flat? — tested on the same 528 turns (2026-09-08 07:5x)
+Stewart's conjecture: the missing 2:1 lock is because the torus is not flat. Tested three readings of
+the fast phase against three slow signals (Hilbert phase of lastD, drift, κ): the flat torus in turn
+index (φ⁻¹ per turn), the flat torus in INTRINSIC time (wall-clock per turn / median 27.1 s, the
+paper's θ = (t − t0)/τ_R), and a CURVED ring torus (arc length along the meridian, r/R = 0.25…1.0);
+plus the 1:1 ratio. Every PLV ≤ 0.071, every surrogate p ≥ 0.04 (most > 0.15). Decisive: the depth
+series' own spectral peak is at **0.033 cycles per turn** (a ~30-turn cycle) against the fast rhythm
+0.618 and its half 0.309 — the slow wander is ten times slower than a 2:1 lock needs, and its period
+is longer than nearly every task (2–8 turns), so what the Hilbert phase is tracking is the
+between-task drift, not a within-task oscillation. The torus reading is not what is missing; a
+within-task oscillation at ~0.3 cycles/turn is, and only longer runs (the chain battery at a real
+step budget) can show whether one exists.
