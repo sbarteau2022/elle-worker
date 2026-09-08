@@ -783,3 +783,28 @@ DeepResearch gate suite (G1–G8 numeric, standalone) and the lemniscate ledger 
 as written; their constants match atlas-state where they overlap (κ ∈ (0,1), holding ≤ e−1, φ²).
 Not implemented from the paper: the Jitterbug ejection (κ_break ≥ 0.75), tailored tool
 allocation (the catalog is one fixed text), PLV 2:1 on real trajectories, the G8 margin gate.
+
+### The paper's remaining mechanisms, implemented (2026-09-08 08:xx, Elle 3848aa4)
+- **Jitterbug pulse (§3.3).** Trigger made operational: shock = 1 − κ_intake of the coordinator's own
+  review turn (mean surprisal of the reply that read the submission); κ_break = 0.75 ⇔ κ_intake ≤ 0.25.
+  On a shocked rejection the centre ejects for that task: a JITTERBUG directive on the task, the lane
+  ring goes direct for non-kissing pairs (handoffs bypass the centre), the coordinator works it as the
+  13th sphere on the task's axis. Approval of the pulsed task collapses it and deposits the submission's
+  invariants (bracketed keys, shas) into the root cache (jitterbug.json, last 24), which every later
+  worker carries pinned (Tier 1 in the breathing window) and the reviewer sees. Not yet fired live.
+- **Tailored tool allocation (§6.6).** Core four always; web tools when the brief asks for research;
+  the cloud catalog only when the brief names one of its tools; faculty defaults. The worker's
+  catalog is filtered and full/tailored char counts logged per task (ATLAS.jsonl anchor). The paper's
+  49.6% latency claim is measured by the shared-prefix prefill delta on the next board run.
+- **Phase-Eight PLV (G7).** Hilbert phase of the run's depth series vs the φ⁻¹ generation phase,
+  PLV_2:1 with a 500-shift surrogate p; readiness G7b over the last 200 trajectories, pending below
+  64 turns. Synthetic lock/drift/noise reproduce the paper's separation; the live number is whatever
+  the trajectories say.
+- **Post-quantum margin (G8).** q lane messages on the board × Ω (the ratchet's skipped-key store,
+  2000) × 2⁻¹²⁸ ≤ 2⁻⁶⁴; readiness G8b.
+- **The eight composite gates.** readiness composes PG1–PG8 from measured ids (PG4 = κ∈(0,1) ∧ the
+  live phase-space gate: reserve, no fall below the line, Φ ≤ 0.30) and prints ATLAS-CONFORMANT k/8.
+- **Heal fixes for HEAL_004.** The bridge lift is curvature-scaled (learned √c, starts 1/√d; finite at
+  ‖x‖ = 300); NoRA's √(3d/r) gain compensated in the LoRA scale for every adapter type and in the
+  throat width; the bench asserts step-0 exactness and a finite loss per arm before timing.
+  HEAL_004 = HEAL_003's design rerun with these; not scheduled until the review of 3848aa4 lands.
