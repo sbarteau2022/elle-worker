@@ -754,3 +754,32 @@ for the next board run: restart the server every 8 tasks, or ELLE_SWARM_MAX_STEP
 health `cache.bytes` per tag is read across a run. HEAL_003 arm A (lora21, NoRA-init) started
 15:58 local; arm B follows; DELEGATE_006A/B will each hit this unless the restart is in place —
 run_delegate.sh should be given a per-8-tasks server restart before they run.
+
+### HEAL_003 — BOTH ARMS VOID, causes reproduced (2026-09-08 06:4x)
+Arm A (LoRA r16, top 21 layers, NoRA-init): loss 1.56 → 0.41 but the healed view fell to **sums
+1/16** (from 10/16 unhealed); direct eval on test 540–559: 2/20. Cause: NoRA-init raises the initial
+‖x·A‖ from 2.6 to 79 (31×, measured); with mlx_lm's LoRA scale 20 and HEAL_002's learning rate the
+gradient on B is 31× larger and the view is destroyed, not healed. NoRA's paper tunes α and the
+rate around it; the amendment bolted it onto unchanged ones. Arm B (rosen-hypdora, NoRA-init):
+**loss NaN from step 1**. Cause: the bridge's lift exp_o takes sinh of the MLP input's norm — 71.6
+after RMSNorm — which is inf in float32 above ~70 (finite at 30, inf at 70, measured). v1 had no
+curvature scale on the lift; HypLoRA has one. The bench never checked the loss for NaN, so it
+timed a broken adapter. Fixes (not yet run): a curvature scale on the lift (lift x/√d, ‖·‖ ≈ 1),
+learning rate divided by the NoRA gain (or NoRA off), and a NaN + step-0 exactness check in the
+bench before any arm trains. HEAL_002 (plain LoRA, all 48 layers, no NoRA) remains the only good
+adapter. DELEGATE_006A/B are void with their arms; the watchdog worked (OOM rows retried).
+
+### The breathing window implemented from Stewart's StrataKV benchmarks (2026-09-08 07:0x)
+Elle/benchmarks/ (Stewart, live against mlx-serve): tailored preamble in a shared namespace,
+surprisal-classified intake, exhale of the fringe, 2% leak, invariant pinning — System B kept the
+key and the sha at 276 prefilled tokens vs System A's 1,947, 4.6 s vs 9.1 s. The server already had
+namespaces, /api/cache/evict and the per-token surprisal in the reply; the policy is now in the
+worker loop (Elle a4fbcbc): tiers by κ_intake = σ(2 − s̄) on the reply that read the observation,
+Tier 3 (< 1/π) exhaled to a digest once outside the last two exchanges, Tier 1 invariants pinned,
+2% leak of the lowest-κ Tier 2 per exhale; exhaled/leaked counts and the coherence phase space
+(K = Σκ, dκ, d²κ, regime, runaway) logged per turn. Not yet measured on a board run — the next
+board run reports exhaled/leaked in ATLAS.jsonl and whether the ~8-task OOM moves. Stewart's
+DeepResearch gate suite (G1–G8 numeric, standalone) and the lemniscate ledger simulation both pass
+as written; their constants match atlas-state where they overlap (κ ∈ (0,1), holding ≤ e−1, φ²).
+Not implemented from the paper: the Jitterbug ejection (κ_break ≥ 0.75), tailored tool
+allocation (the catalog is one fixed text), PLV 2:1 on real trajectories, the G8 margin gate.
