@@ -94,6 +94,7 @@ import { parseTTS, synthesizeSpeech } from './tts';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
+import { proposeAnchor, recallAnchor, type AnchorProposal } from './anchor-ledger';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
 import { ingestTokenOperatorRun, getTokenOperatorRun, listTokenOperatorRuns } from './token-operator';
 import { cognitiveMapSnapshot, logActiveInference } from './active-inference';
@@ -1918,6 +1919,21 @@ export default {
         const result = await ingestAtlas(env, body);
         return json(result);
       } catch (e) { return err(`atlas ingest failed: ${(e as Error).message}`, 400); }
+    }
+
+    // Device-only revisions; no LLM tool dispatch can call this writer.
+    if (path === '/api/atlas/anchors/propose' && request.method === 'POST') {
+      if (!isServiceRequest(request, env)) return err('Unauthorized', 401);
+      try { return json(await proposeAnchor(env, body as unknown as AnchorProposal)); }
+      catch (e) { return err(`anchor proposal failed: ${(e as Error).message}`, 400); }
+    }
+    if (path === '/api/atlas/anchors/read' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      const id = url.searchParams.get('id');
+      if (!id) return err('anchor id required', 400);
+      const kappa = Number(url.searchParams.get('kappa') ?? '0');
+      try { return json(await recallAnchor(env,id,kappa)); }
+      catch (e) { return err((e as Error).message,400); }
     }
 
     // Token operator ingest (𝒯 — see src/token-operator.ts) — the ONLY write
