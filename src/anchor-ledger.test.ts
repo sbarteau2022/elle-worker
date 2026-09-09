@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assessAnchor, supportBound, proposeAnchor, readAnchor, anchorHistory, recallAnchor, type AnchorProposal } from './anchor-ledger';
 function proposal(overrides: Partial<AnchorProposal> = {}): AnchorProposal {
@@ -65,7 +65,7 @@ it('survives a database reopen and concurrent writers cannot both revise the sam
   } finally {env.close();rmSync(folder,{recursive:true});}
 });
 it('pressure: twelve spheres retain exceptions through 240 accepted and rejected proposals', async()=>{
-  const env=database();
+  const env=database(); const observations: unknown[] = [];
   try {
     for(let sphere=1;sphere<=12;sphere++) {
       const id=`sphere-${sphere}`;
@@ -75,12 +75,16 @@ it('pressure: twelve spheres retain exceptions through 240 accepted and rejected
         const result=await proposeAnchor(env,proposal({id,sphere,expectedVersion:version,
           kappa:good?.8:.1, exceptions:[`exception-${sphere}-${step}`]}));
         expect(result.accepted).toBe(good);
+        observations.push({sphere,step,expectedAcceptance:good,...result});
       }
       expect((await readAnchor(env,id))?.version).toBe(10);
       const history=await anchorHistory(env,id);
       expect(history).toHaveLength(20);
       for(let step=0;step<20;step++) expect(JSON.stringify(history)).toContain(`exception-${sphere}-${step}`);
     }
+    if(process.env.ATLAS_PRESSURE_REPORT) writeFileSync(process.env.ATLAS_PRESSURE_REPORT, JSON.stringify({
+      protocol:'synthetic ledger pressure; not learned semantic accuracy',spheres:12,proposals:240,
+      accepted:observations.filter((x:any)=>x.accepted).length,observations},null,2));
   } finally {env.close()}
 });
 
