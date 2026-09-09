@@ -340,3 +340,47 @@ Ratio √2/√(2/3) = √3 identically (residual 6.7e-16); hexagon offset exactl
 6. The stacking block in your audit arrived truncated (`12345`). Please resend.
 
 *Everything above is local and unpublished. Treat line numbers as approximate; the quoted text is exact.*
+
+---
+
+## CURRENT STATE — 2026-09-09 end of session (supersedes routing entries above)
+
+**A valid holdout now exists.** `gemini-batch-16.jsonl`, 72 briefs across all twelve spheres,
+written blind by twelve agents with no access to the router or embedder. It passed a pre-registered
+lockstep rule (≤5/12 spheres routing all six rows to one faculty, AND mean distinct destinations
+≥1.7) at 5/12 and 2.00. Batches 02–15 score 11/11 and 1.00 — they are eleven templates.
+
+**MEASURED — `KW_WEIGHT` 0.12 → 0.06.** End-to-end through `assign()` (so `collapse()` included):
+
+| kw | batch-01 (dev) | batch-16 (holdout) |
+|---|---|---|
+| 0 | 43.9% | 38.9% |
+| **0.06** | 60.6% | **48.6%** |
+| 0.12 (old) | 62.1% | 36.1% |
+
++12.5 points on held-out data. The regexes are fitted to batch-01; halving the weight recovers most
+of the loss without suppressing the release rate.
+
+**REFUTED, by me, same day — "set `KW_WEIGHT` to 0".** That came from an argmax measurement.
+`collapse()` thresholds the *absolute* top score, so removing a positive additive term suppresses
+release, and a held decision is a failure. kw=0 is the *worst* setting on both batches. **Any
+routing claim computed as argmax over faculty scores describes a router that does not exist** — the
+deployed one holds about a third of all decisions. Argmax and end-to-end disagreed in direction here,
+not just magnitude.
+
+**MEASURED — `convergent_logic` was never tested.** Zero briefs across all 990 rows of batches 01–15,
+so it could only ever be a wrong answer; pre-centring it was top-1 for 22.7% of everything. Its
+true-positive rate, measured for the first time on batch-16: **6/6**.
+
+**MEASURED — the sensory description rewrite is rejected.** On the holdout with the keyword layer
+tuned, it is accuracy-neutral (57/72 either way), buying sensory recall 4/6→6/6 by raising
+false-into-sensory 0→2. The regex arm was byte-identical to baseline in two independent batches.
+
+**MEASURED — the profile path is uncentred** (`atlas13.cjs:625`) and `profileKnobs` is inert: every
+task ever profiled received temperature ≈0.48, num_predict ≈2570, max_steps 8, review_max 2. Two
+stacked defects; centring alone does not fix the second. Recorded as proposals, not applied.
+
+**MEASURED — the reviewer blocks correct work.** Four hand-verified cases, including one where the
+coordinator derived all four addends correctly and then asserted 20+25+70+60 = 110, permanently
+blocking the correct answer 175. Prevalence is **OPEN** — two attempts to automate a rate produced
+parser artifacts and were withdrawn.

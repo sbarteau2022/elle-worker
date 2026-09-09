@@ -2135,3 +2135,47 @@ there was an artifact of a templated corpus, and it did not survive contact with
 - Sensory description rewrite — **rejected on measurement**, not on process grounds this time.
 - Sensory keyword regex — **rejected**, inert in two independent batches.
 - `convergent_logic` — true-positive rate measured for the first time: **6/6**.
+
+---
+
+# RETRACTION: "SET KW_WEIGHT = 0" WAS WRONG — IT IS 0.06 (2026-09-09, same day)
+
+The recommendation two sections above, committed as `dce5310`, is **withdrawn**. It was measured by
+argmax over the twelve faculty scores. The deployed router does not use argmax: `assign()` passes the
+scores through `collapse()`, which holds a decision unless the top score clears absolute thresholds
+(`COLLAPSE` 0.06, `MARGIN` 0.02, `RATIO` 1.3). **A held decision is a failure**, and the keyword term
+is a positive additive contribution of up to 0.12 — so deleting it suppresses the release rate.
+
+Re-measured end-to-end through `assign()` on the real atlas:
+
+| kw | batch-01 overall | batch-16 (holdout) release% | precision | **overall** |
+|---|---|---|---|---|
+| 0 | 43.9% | 63.9% | 60.9% | **38.9%** |
+| **0.06** | 60.6% | **75.0%** | **64.8%** | **48.6%** |
+| 0.12 *(old default)* | **62.1%** | 66.7% | 54.2% | **36.1%** |
+| 0.24 | 56.1% | 61.1% | 45.5% | 27.8% |
+
+**kw=0 is the worst setting on both batches.** The optimum is **0.06**: +12.5 points on the holdout
+against the old default, −1.5 on dev. `KW_WEIGHT` is now `0.06`.
+
+## What was actually true, and what was not
+
+- **True and unchanged:** the keyword regexes are fitted to batch-01. The old default 0.12 is
+  optimal on dev and is 12.5 points below optimal on held-out data. Halving it is a real gain.
+- **False:** "geometry alone generalises, the keyword layer does not, set it to 0." The keyword term
+  is doing structural work — clearing the collapse gate — that the argmax view was blind to.
+  Ranking and release are different jobs and only release is deployed.
+
+## The methodological error, stated plainly so it is not repeated
+
+Every accuracy number in this document computed as `argmax over faculty scores` describes a router
+that **does not exist**. The real one holds roughly a third of all decisions. Argmax and end-to-end
+disagree in *direction*, not just magnitude — argmax said 0.792 for kw=0 on batch-16 and the router
+delivers 38.9%.
+
+**Rule going forward: anything that changes a score is measured through `assign()`.** The earlier
+argmax figures remain in this file as a record of how the conclusion was reached and are not to be
+cited as router performance.
+
+This does not disturb the lockstep result — that measures which faculty a brief is *nearest*, which
+is a property of the geometry and correctly computed by argmax. batch-16 remains a valid holdout.

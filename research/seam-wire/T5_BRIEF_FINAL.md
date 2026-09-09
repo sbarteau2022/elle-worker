@@ -1,5 +1,13 @@
 # T5 — generate batch-16. FINAL BRIEF. Supersedes every earlier T5 instruction.
 
+> **STATUS 2026-09-09: COMPLETE. `briefs/gemini-batch-16.jsonl` exists — 72 rows, 12 spheres.**
+> It passed the pre-registered lockstep rule (5/12 lockstep, mean 2.00 distinct destinations,
+> against ≤5 and ≥1.7) and is the first valid holdout this project has had. The gate flagged one
+> clause — median verify length 196 > 178 — which was tested and found to be a false positive
+> (truncating to batch-01's own verify length leaves the T3 cosine unchanged at 0.1697).
+> This brief is kept as the specification that produced it. Do not re-run it.
+
+
 Written 2026-09-09 after an adversarial workflow (13 agents, 13 attack batches) refuted three
 earlier versions of this brief, two of them mine. If you were given an earlier T5 spec — one
 mentioning "median SequenceMatcher below 0.15", or "V6 verify IDF cosine < 0.35", or a

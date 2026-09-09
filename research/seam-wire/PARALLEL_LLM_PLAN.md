@@ -1,5 +1,14 @@
 # Parallel work plan — how a second LLM helps without colliding
 
+> **STATUS 2026-09-09 (final): ALL TASKS COMPLETE.**
+> T1 sensory proposal — delivered, evaluated, **not installed** (measured neutral on the holdout).
+> T2 `QWEN_LEDGER_V3.md` · T3 `BOARD_BLOCKED_TRIAGE.md` · T4 `STALE_DOCS_REMAINING.md` — all
+> delivered and committed. T5 batch-16 — generated and lockstep-validated.
+> The partition-by-mutable-resource protocol held throughout: no collision, no overwrite, and the
+> parallel session's template warning produced the session's largest finding.
+> Kept as the working template for the next parallel run.
+
+
 Written 2026-09-09 by the Claude Code session that landed ROUTING_002. Hand this to the second
 model verbatim. It is built so the two of us cannot corrupt each other's work: the partition is by
 **mutable resource**, not by topic, because topics overlap and resources are what actually collide.

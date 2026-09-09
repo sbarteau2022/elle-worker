@@ -23,3 +23,6 @@ crates/**/target/
 .swarm/laneA.out
 .swarm/laneB.out
 *.log
+
+# Brief embedding caches — 31-37 MB each, regenerate with research/seam-wire/embed-briefs.mjs
+research/seam-wire/briefs/*.emb.json
