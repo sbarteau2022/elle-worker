@@ -1,6 +1,14 @@
 [MEASURED] Rechecked every bullet in FINDINGS_REGISTER_FOR_QWEN §14 against current files, plus the three reported repairs and their surviving contradictory statements.
 [DERIVED] The three source repairs and generator obliquity repair are present; encoder/capability claims, missing-paper references, hypothesis serialization, default-protocol wording and snapshot provenance still need the exact edits proposed below.
 
+> **APPLIED 2026-09-09 by the owner.** All eleven fingerprinted files were re-verified
+> byte-identical to the Source fingerprints below before any edit. Sections 1–6 and 8–10
+> are applied; section 7 (tit.py) is applied and validated with the synthetic serialization
+> cases it requested. Section 1 (`HYPERBOLIC_GRAPH_MAPPING.md`) landed in `d2ec130` from a
+> concurrent session; sections 2,3,4,5,8,9,10 in `03720f6`; the Dynanic companion in
+> `4518a68`; tit.py in `4f226a2` (Elle repo). The Fries reference lives outside any git
+> repo (`research-refs/`) and was corrected in place. Do not reapply.
+
 # Stale documentation remaining — 2026-09-09
 
 [DESIGN CHOICE] All paths below are relative to `/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK`. Line numbers identify the inspected version and are not durable patch offsets. Each replacement block is literal proposed text tagged DESIGN CHOICE; preceding MEASURED statements identify the supporting source. No existing file was edited. The user’s no-edit/no-git instruction governs this handoff; the owner applies any accepted change.
