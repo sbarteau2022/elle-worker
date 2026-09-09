@@ -354,3 +354,106 @@ Two defects, one of them the reason the first was never caught:
 
 **Still open:** F3 config-transcript hash (F3b, the carry-forward gate, is done; the hash itself is
 not). Semantic δ-arm, blocked on the `/api/search` service key.
+
+## The semantic δ-arm is not blocked the way the register says (2026-09-09)
+
+`DELTA_HYPERBOLICITY_CONTENT.md` records the decisive arm as blocked by an auth gate on
+`/api/search` (service-key gated, `src/index.ts:2837`). Checked: that is no longer the binding
+constraint, and the arm as *specified* has gone stale in a more interesting way.
+
+- **bge-large is not installed on this machine.** Ollama holds exactly two tags, `elle:latest` and
+  `elle-worker:latest` — both the 27B. mlx-serve's roster has no embedding model. So "the production
+  bge embedding" cannot be reproduced locally at all; it is an `ollama pull` away, not an auth token.
+- **More to the point, the atlas no longer routes in bge space.** `local-embed.cjs` defaults to
+  `/api/embed/layers` — the coordinator's own hidden states at seven depths, 7 × 5120 = 35,840-d
+  (Stewart, confirming: *"we have the embedder that we pulled from the multimodal qwen"*). The
+  installed `facultyEmb` and `centreMu` are both 35,840-d. bge-large 1024-d survives only in
+  elle-worker's cloud memory path (`mem-intake.ts` validates that width).
+
+So the arm as written would measure a space the local system has migrated off. The question it was
+asked to settle — *is real content tree-like enough to justify ℍ* — still stands, but it has to be
+asked in the space the atlas actually uses.
+
+**Run instead, and reported below: the graph-geodesic arm in the layer-tap space.** Same corpus
+(`corpus/**/*.md`), same production chunker (`semanticChunks` ported verbatim from `src/index.ts:385`,
+1030 chunks against the register's 1021 — one file added since), same estimator family as the
+lexical arm (symmetrized k-NN at k = 3/5/8, BFS hop metric, 4-point δ, R = 5 seeded relabelings).
+Directly comparable to the lexical arm's δ/diam of 0.1607 / 0.2500 / 0.2500.
+
+Note the register already warned off the estimator I used this morning: *"Direct metric 4-point δ on
+the angular distances (no graph in the loop): δ/diam median 0.0361. That number is not usable as
+evidence of tree-likeness — see Limitation 2."* Today's controls independently reproduced that
+warning (random noise scores 0.0811, inside the tree band). The graph is not optional.
+
+### Pre-registration — written before the numbers, 2026-09-09
+Decision rule for the graph-geodesic arm in the layer-tap space, fixed in advance:
+
+- **δ/diam ≤ 0.08 at every k** → TREE-LIKE. The precondition for ℍ is cleared in the space the
+  atlas actually routes in. This would be the first positive evidence for the hyperbolic factor
+  anywhere in the corpus, and would move ℍ from INSTRUMENTATION toward MECHANISM pending a
+  retrieval win.
+- **0.08 < δ/diam ≤ 0.30** → NOT CLEARED, which is not refuted. Same verdict the lexical arm
+  reached (0.1607 / 0.2500 / 0.2500), now in the live space. ℍ stays INSTRUMENTATION.
+- **δ/diam > 0.30** → NOT TREE-LIKE. Approaching the ring control (0.475–0.480). ℍ should be
+  dropped for this space and the product mix set toroidal-or-flat on evidence rather than taste.
+
+Companion statistics reported regardless, because δ alone is insufficient (today's controls: δ = 0
+has two degenerate causes): component count, giant-component fraction, graph diameter, |E|, and
+‖μ‖/mean‖v‖. A result with one component at 100% and a diameter under ~6 is a small-world graph
+where δ has little room to vary — that would make the number uninformative rather than negative,
+and it must be said if it happens.
+
+Both arms (raw and mean-centred) are run because centring is now live in `assign()`; if they differ
+materially, the register that routing uses is not the register ℍ would be built in, and that is
+itself a finding.
+
+### RESULT — graph-geodesic δ in the layer-tap space (2026-09-09)
+
+1030 corpus chunks, production chunker, layer-tap embedding (7×5120), symmetrized k-NN,
+BFS hop metric, 4-point δ, R=5 seeded relabelings (`0xA11C0DE0+r`), 150k quadruples each.
+‖μ‖/mean‖v‖ = 0.9215. Zero embed failures.
+
+| arm | k | \|E\| | comps | giant % | diam | δ median | **δ/diam** | relabelings |
+|---|---|---|---|---|---|---|---|---|
+| RAW | 3 | 2183 | 5 | 95.8 | 24 | 4 | **0.1667** | 4,4,4,4,4 |
+| RAW | 5 | 3638 | 2 | 99.2 | 15 | 2.5 | **0.1667** | 2.5 ×5 |
+| RAW | 8 | 5772 | 1 | 100.0 | 12 | 2.5 | **0.2083** | 2,2.5,2.5,2.5,2.5 |
+| CENTRED | 3 | 2124 | 8 | 91.7 | 26 | 5 | **0.1923** | 4.5,5,5,5,5 |
+| CENTRED | 5 | 3530 | 3 | 96.5 | 14 | 3 | **0.2143** | 3 ×5 |
+| CENTRED | 8 | 5603 | 1 | 100.0 | 11 | 2.5 | **0.2273** | 2.5 ×5 |
+
+Register's lexical arm, same estimator: **0.1607 / 0.2500 / 0.2500**. Bands: tree 0.00–0.08,
+ring 0.475–0.480.
+
+**Verdict, by the rule fixed before the run: NOT CLEARED.** Every cell falls in 0.08–0.30.
+The informativeness check passes — diameters are 24/15/12 and 26/14/11, far above the ~6 floor
+where δ would have no room to vary — so this is a real negative, not a degenerate one. Relabeling
+spread is negligible (four of six cells are identical across all five seeds).
+
+**The finding that matters is the comparison, not the number.** The layer-tap space —
+35,840 dimensions of a 16 GB multimodal model's own hidden states at seven depths — is
+**indistinguishable from tf-idf** on tree-likeness: 0.167–0.208 against 0.161–0.250. A bag of word
+counts and a frontier model's internal representation agree, to within the estimator's resolution,
+that this corpus is not hierarchical.
+
+That makes three independent spaces with the same verdict: **tf-idf 0.161–0.250, PAMI 0.200–0.286,
+layer-tap 0.167–0.208.** The register recorded ℍ's precondition as *"not cleared — which is not the
+same as refuted"*, with the decisive arm blocked. The arm is no longer blocked and the verdict did
+not move. Tree-likeness is not a property of the embedding one picks; on this corpus it is absent
+from every space tried.
+
+**ℍ's status: INSTRUMENTATION, now on evidence rather than for want of a measurement.** It has
+produced no measurement a flat build could not, and its precondition has failed in three spaces
+including the live one. This does not refute hyperbolic embedding in general — a genuinely
+tree-shaped corpus would read differently, and `DHNG_VS_EUCLIDEAN`'s +10.9% on a synthetic tree
+stands. It refutes the assumption that *this* content is that shape.
+
+**Centring costs a little tree-likeness in the valid estimator too** — +0.026 / +0.048 / +0.019
+at k = 3/5/8, and it fragments the k-NN graph (5→8 and 2→3 components at k = 3 and 5). Same
+direction as this morning's retracted 4-point reading, but about half the magnitude, and now from
+an estimator that survives its controls. The routing register and the ℍ register genuinely pull
+against each other; the trade is real but small, and routing's side of it is 9.6× measured.
+
+Artifacts: `/tmp/corpus_chunks.json` (1030 chunks), `/tmp/corpus_emb.json` (480 MB raw layer-tap
+vectors — persisted unmodified, so any later register applies without re-embedding),
+`/tmp/delta_graph.cjs`. The embedding cost 18.6 min of 27B forward passes and need not be repeated.
