@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { assessAnchor, supportBound, proposeAnchor, readAnchor, anchorHistory, recallAnchor, type AnchorProposal } from './anchor-ledger';
+import { assessAnchor, supportBound, proposeAnchor, readAnchor, anchorHistory, recallAnchor, recoverAnchor, type AnchorProposal } from './anchor-ledger';
 function proposal(overrides: Partial<AnchorProposal> = {}): AnchorProposal {
   return {id:'boiling',sphere:1,expectedVersion:0,statement:'Water boils near 100 C at one atmosphere', kappa:.8,
     evidence:Array.from({length:8},(_,i)=>({source:`lab-${i}`,reference:`measurement-${i}`,supports:true})),
@@ -100,5 +100,21 @@ it('recall surfaces rejected exceptions and lowers support after counterevidence
     expect(after.supportLowerBound).toBeLessThan(before.supportLowerBound);
     expect(after.anchor?.version).toBe(1);
     expect(after.exceptions).toContain('New conflicting measurement');
+  } finally {env.close()}
+});
+
+it('recovery resolves stored evidence and a repeated proposal cannot discard rejected counterevidence',async()=>{
+  const env=database();try {
+    await env.DB.prepare('CREATE TABLE pami_memories (id TEXT PRIMARY KEY, content TEXT)').run();
+    await env.DB.prepare('INSERT INTO pami_memories VALUES (?,?)').bind('original','Exact pressure exception and measured observation').run();
+    const initial=proposal({evidence:proposal().evidence.map(e=>({...e,reference:'pami:original'}))});
+    await proposeAnchor(env,initial);
+    const recovered=await recoverAnchor(env,initial.id,.1);
+    expect(recovered.recovered[0].content).toContain('pressure exception');
+    expect(recovered.action).toBe('recover-evidence');
+    expect(recovered.recoveryStatus).toBe('incomplete'); // legacy PAMI previews cannot certify full recovery
+    await proposeAnchor(env,{...initial,expectedVersion:1,kappa:.1,evidence:initial.evidence.map(e=>({...e,supports:false}))});
+    expect((await proposeAnchor(env,{...initial,expectedVersion:1})).accepted).toBe(false);
+    expect((await readAnchor(env,initial.id))?.version).toBe(1);
   } finally {env.close()}
 });

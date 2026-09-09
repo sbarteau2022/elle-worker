@@ -34,7 +34,7 @@ export function supportBound(evidence: AnchorEvidence[]): number {
   const p = [...sources.values()].filter(Boolean).length / n, z = 1.96;
   return (p + z*z/(2*n) - z*Math.sqrt(p*(1-p)/n + z*z/(4*n*n))) / (1+z*z/n);
 }
-export function assessAnchor(p: AnchorProposal, current: AnchorState | null, policy = ANCHOR_POLICY) {
+export function assessAnchor(p: AnchorProposal, current: AnchorState | null, policy = ANCHOR_POLICY, observed: AnchorProposal[] = []) {
   validateProposal(p);
   if (!Number.isInteger(policy.minSources) || policy.minSources < 1 ||
       !Number.isFinite(policy.supportFloor) || policy.supportFloor <= 0 || policy.supportFloor > 1 ||
@@ -43,16 +43,17 @@ export function assessAnchor(p: AnchorProposal, current: AnchorState | null, pol
   if (current && (current.id !== p.id || current.sphere !== p.sphere)) throw new Error('anchor identity is immutable');
   // A changed statement must earn support afresh; old supporting votes cannot certify new words.
   const prior = current?.statement === p.statement ? current.evidence : [];
-  const evidence = [...new Map([...prior, ...p.evidence].map(e => [JSON.stringify(e), e])).values()];
+  const historic = observed.filter(old => old.statement === p.statement).flatMap(old => old.evidence);
+  const evidence = [...new Map([...prior, ...historic, ...p.evidence].map(e => [JSON.stringify(e), e])).values()];
   const lower = supportBound(evidence);
   const state: AnchorState = { id:p.id, sphere:p.sphere, version:p.expectedVersion+1, statement:p.statement,
-    evidence, exceptions:[...new Set([...(current?.exceptions ?? []), ...p.exceptions])], supportLowerBound:lower };
+    evidence, exceptions:[...new Set([...(current?.exceptions ?? []), ...observed.flatMap(old => old.exceptions), ...p.exceptions])], supportLowerBound:lower };
   const enough = new Set(evidence.map(e => e.source)).size >= policy.minSources;
   const reason = p.kappa < policy.recoveryFloor ? 'recover-evidence' : !enough ? 'evidence-floor' : lower < policy.supportFloor ? 'support-floor' : 'accepted';
   return { accepted:reason === 'accepted', reason, state };
 }
 export interface AnchorEnv { DB: D1Database }
-async function schema(env: AnchorEnv) {
+export async function ensureAnchorSchema(env: AnchorEnv) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_anchor_events (
     event_id TEXT PRIMARY KEY, anchor_id TEXT NOT NULL, version INTEGER NOT NULL,
     accepted INTEGER NOT NULL, reason TEXT NOT NULL, proposal_json TEXT NOT NULL,
@@ -61,12 +62,12 @@ async function schema(env: AnchorEnv) {
     ON elle_anchor_events(anchor_id, version) WHERE accepted = 1`).run();
 }
 export async function readAnchor(env: AnchorEnv, id: string): Promise<AnchorState | null> {
-  await schema(env);
+  await ensureAnchorSchema(env);
   const row = await env.DB.prepare('SELECT state_json FROM elle_anchor_events WHERE anchor_id = ? AND accepted = 1 ORDER BY version DESC LIMIT 1').bind(id).first<{state_json:string}>();
   return row ? JSON.parse(row.state_json) : null;
 }
 export async function anchorHistory(env: AnchorEnv, id: string) {
-  await schema(env);
+  await ensureAnchorSchema(env);
   return (await env.DB.prepare('SELECT event_id, version, accepted, reason, proposal_json, state_json, created_at FROM elle_anchor_events WHERE anchor_id = ? ORDER BY created_at, event_id').bind(id).all()).results;
 }
 /** Reconstruct the current evidence view without rewriting the accepted statement.
@@ -87,19 +88,50 @@ export async function recallAnchor(env: AnchorEnv, id: string, kappa: number) {
     history };
 }
 
-export async function proposeAnchor(env: AnchorEnv, proposal: AnchorProposal) {
+export async function proposeAnchor(env: AnchorEnv, proposal: AnchorProposal, persistWith?: (eventId: string) => D1PreparedStatement[]) {
   validateProposal(proposal);
-  const current = await readAnchor(env, proposal.id), verdict = assessAnchor(proposal, current);
+  const current = await readAnchor(env, proposal.id);
+  const observed = await anchorHistory(env, proposal.id);
+  const earlier = observed.map(row => JSON.parse(row.proposal_json as string) as AnchorProposal);
+  // Rejected counterevidence is still evidence. Re-submission cannot wash it out.
+  const verdict = assessAnchor(proposal,current,ANCHOR_POLICY,earlier);
   const eventId = crypto.randomUUID();
-  // Compare-and-swap in the INSERT itself: two writers cannot both advance one version.
-  const result = await env.DB.prepare(`INSERT INTO elle_anchor_events
+  // Freeze both the accepted version and evidence frontier. A concurrent
+  // rejection may introduce counterevidence even when the version is unchanged.
+  const frontier = `COALESCE((SELECT MAX(version) FROM elle_anchor_events WHERE anchor_id = ? AND accepted = 1),0) = ?
+    AND (SELECT COUNT(*) FROM elle_anchor_events WHERE anchor_id = ?) = ?`;
+  const args = [proposal.id,proposal.expectedVersion,proposal.id,observed.length];
+  const statement = env.DB.prepare(`INSERT INTO elle_anchor_events
     (event_id,anchor_id,version,accepted,reason,proposal_json,state_json,created_at)
-    SELECT ?,?,?, CASE WHEN ? = 1 AND COALESCE((SELECT MAX(version) FROM elle_anchor_events WHERE anchor_id = ? AND accepted = 1),0) = ? THEN 1 ELSE 0 END,
-    CASE WHEN ? = 1 AND COALESCE((SELECT MAX(version) FROM elle_anchor_events WHERE anchor_id = ? AND accepted = 1),0) != ? THEN 'stale-version' ELSE ? END,
-    ?,?,?`).bind(eventId,proposal.id,proposal.expectedVersion+1,verdict.accepted?1:0,proposal.id,proposal.expectedVersion,
-      verdict.accepted?1:0,proposal.id,proposal.expectedVersion,verdict.reason,JSON.stringify(proposal),JSON.stringify(verdict.state),Date.now()).run();
-  if (!result.success) throw new Error('anchor event was not persisted');
-  const saved = await env.DB.prepare('SELECT accepted FROM elle_anchor_events WHERE event_id = ?').bind(eventId).first<{accepted:number}>();
-  return { eventId, accepted:saved?.accepted === 1, reason:verdict.accepted && saved?.accepted !== 1 ? 'stale-version' : verdict.reason,
+    SELECT ?,?,?, CASE WHEN ? = 1 AND (${frontier}) THEN 1 ELSE 0 END,
+    CASE WHEN ? = 1 AND NOT (${frontier}) THEN 'stale-evidence' ELSE ? END,
+    ?,?,?`).bind(eventId,proposal.id,proposal.expectedVersion+1,verdict.accepted?1:0,...args,
+      verdict.accepted?1:0,...args,verdict.reason,JSON.stringify(proposal),JSON.stringify(verdict.state),Date.now());
+  const results = persistWith ? await env.DB.batch([statement,...persistWith(eventId)]) : [await statement.run()];
+  if (!results.every(result=>result.success)) throw new Error('anchor event was not persisted');
+  const saved = await env.DB.prepare('SELECT accepted, reason FROM elle_anchor_events WHERE event_id = ?').bind(eventId).first<{accepted:number;reason:string}>();
+  return { eventId, accepted:saved?.accepted === 1, reason:saved?.reason ?? 'persistence-error',
     anchor:await readAnchor(env,proposal.id) };
+}
+
+/** Exact-reference recovery. Structural similarity alone never establishes factual support.
+ * Unresolved references remain explicit; arbitrary URLs are not fetched as a side effect.
+ */
+export async function recoverAnchor(env: AnchorEnv, id: string, kappa: number) {
+  const recall = await recallAnchor(env,id,kappa);
+  const recovered: Array<{ reference:string; content:string; complete:boolean }> = [];
+  const fullStore = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'elle_anchor_intake'").first();
+  const unresolved: string[] = [];
+  for (const reference of recall.evidenceReferences) {
+    if (!reference.startsWith('pami:') || reference.length <= 5) { unresolved.push(reference); continue; }
+    const row = await env.DB.prepare('SELECT content FROM pami_memories WHERE id = ?')
+      .bind(reference.slice(5)).first<{content:string|null}>();
+    const full = fullStore ? await env.DB.prepare('SELECT content FROM elle_anchor_intake WHERE memory_id = ?')
+      .bind(reference.slice(5)).first<{content:string}>() : null;
+    if (full?.content) recovered.push({reference,content:full.content,complete:true});
+    else if (row?.content) recovered.push({reference,content:row.content,complete:false});
+    else unresolved.push(reference);
+  }
+  return {...recall,recovered,unresolved,
+    recoveryStatus:unresolved.length || !recovered.length || recovered.some(e=>!e.complete) ? 'incomplete' : 'references-retrieved'};
 }
