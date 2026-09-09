@@ -523,6 +523,8 @@ $$\text{Poincaré Distance Error: } |d_{\text{WASM}}(u, v) - d_{\text{Float64}}(
 **Primary Subsystem:** `src/pfar.ts`, `src/vfar.ts`, `src/pami.ts`, `src/mem-intake.ts`, Cloudflare Vectorize
 
 #### Technical Objectives:
+> [SUPERSEDED 2026-09-09] These are historical objectives, not implemented state. As built: PFAR extracts selected eGeMAPS-related features with no spectral-flux extractor; vFAR uses **four** Gabor orientations (0°, 45°, 90°, 135°) and implements no scene-cut detection; and the 1024-dimensional leaf encoder in item 4 is retired — see §2.2 and `PSI_ENCODER_FINDING.md`. Retained as a dated record of intent.
+
 1. Deploy WASM-accelerated eGeMAPS acoustic prosody ripper (`pfar_extract_features`), extracting pitch $F_0$, spectral flux, HNR, jitter, and shimmer within $<2\,\text{ms}$ per audio slice.
 2. Deploy visual field ripper (`vfar_extract_features`) with 2D Sobel and 8-orientation Gabor filter convolutions.
 3. Implement PAMI 8-scale Morlet continuous wavelet phase ripper (`pami_phase_tensor`).
