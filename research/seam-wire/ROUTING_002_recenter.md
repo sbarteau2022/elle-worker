@@ -1531,3 +1531,376 @@ retrieval built on it inherits the pre-centring cone.
 
 Tagged **MEASURED** (the counts) and **OPEN** (what they imply). No script needed — the numbers are
 read directly from `~/.elle/hyper-map/atlas13.json`.
+
+---
+
+# TWO ROUTERS IN TWO SPACES — AND ONLY ONE WAS FIXED (2026-09-09)
+
+## Corrections to the section above, before the finding
+
+1. **"The centre holds 1227 of 1850 = 66%" was WRONG.** `levels[0].n` is the *total task-node count*
+   (the denominator), not centre membership — `build()` sets `levels[0].n = nodes.length` at
+   `atlas13.cjs:469`. The actual split is `central_members = 604` against 623 in spheres:
+   **49.2% central, 50.8% in spheres, 1227 accounted exactly.** The empty-sphere facts stand.
+2. **"`assign()` picks the level geometrically via CENTRAL_FRAC" was WRONG.** That is the `kissing`
+   branch (`:632`). The deployed mode is `faculty`, where `level` comes from the *centred* collapse —
+   so `decideDelegation` does consume the centring fix. Retracted.
+
+## The finding: the code documents two routers, and they are in different spaces
+
+`build()`, `atlas13.cjs:441-446`, verbatim:
+
+```js
+// existing nodes carry only their 16-d direction (no full embedding), so
+// they are stamped by keyword vote + projected cosine; NEW goals route in
+// embedding space through assign(). Sphere directions are the descriptions.
+const slots = nodes.map((n) => { const c = collapse(fac, axisCoords(fac, dirsNow, n.dir, n.text)); return c.held ? 0 : fac.byId[c.pole].level; });
+```
+
+| | **Router A — stored map** | **Router B — new goals** |
+|---|---|---|
+| where | `build()` slots | `assign()` faculty collapse |
+| space | **16-d** `node.dir` vs `facultyDirs` | **35840-d** `vec` vs `facultyEmb` |
+| centred? | **NO** — `centred()` is never called in `build()` | **YES** (this session's fix) |
+| what it placed | all **1227** existing task nodes | everything routed since |
+
+Timing confirms it: atlas `built_at` **13:51:11**, `centreMu` installed **13:52:47** — 96 seconds
+later. Every stored membership predates the fix *and* lives in a space the fix cannot reach, because
+`centreMu` is 35840-d and `node.dir` is 16-d.
+
+**Everything measured in this document is Router B. Router A placed the entire existing map.**
+
+## Router A has the same cone, and it is worse
+
+Measured on all 1227 stored 16-d directions (no embedder needed — the dirs are on disk):
+
+| | RAW (deployed) | CENTRED-16 |
+|---|---|---|
+| mean off-diagonal cosine, 12 faculty dirs | **+0.9114** | +0.7959 |
+| mean 12-cosine spread per node | 0.1712 | **0.3374** (2.0×) |
+| faculties that never win | **`social_cognition` — 0 of 1227** | none |
+
+‖μ₁₆‖ = 0.6395 against unit-length node directions. The twelve 16-d faculty directions are **91%
+mutually aligned** — worse than the 35840-d faculty embeddings (0.8355 in the aperture section).
+
+Raw, `episodic_memory` (420) and `somatic_interoception` (356) take **63% of the map between them**,
+and `social_cognition` never wins once — the same never-selected degeneracy already seen in
+`profileEmb` (two sign-locked axes) and in reverse for `convergent_logic`. Centred, every faculty
+wins at least once.
+
+> **Top-1 faculty changes under 16-d centring for 288 of 1227 nodes = 23.5%.**
+
+## Scope of that number — stated because it is not the exact quantity
+
+This is top-1 by cosine, **not** `build()`'s exact `slots`, which additionally applies pair
+differences, a keyword vote (`KW_WEIGHT` 0.12) and the `collapse()` gate.
+`providers/faculties.json` became TCC-unreadable mid-session (no `com.apple.macl`), so the pairs and
+keyword regexes are unavailable and `slots` cannot be reproduced exactly. **23.5% is the magnitude of
+the cone's effect on the underlying ranking, not a verified reassignment count.** The gate would move
+some of those to `held` (level 0) rather than to another sphere.
+
+## What this means
+
+The librarian premise is that knowledge lives in the MAP and routing accuracy is knowledge accuracy.
+If so, the number that matters is not batch-01 routing accuracy — it is **how much of the existing
+1227-node map is in the wrong sphere**, and the answer is *at least a fifth of it moves* the moment
+the same fix already applied to Router B is applied to Router A.
+
+**This should outrank batch-16 in priority.** It needs no embedder, no new corpus, and no GPU — only
+`faculties.json` back, to reproduce `slots` exactly and to re-stamp. Tagged **MEASURED** (the cone,
+the 23.5%) and **OPEN** (the exact reassignment). Script: `scripts_map16_cone.py`.
+
+**Do not re-stamp before reading this**: re-stamping rewrites which sphere every stored memory lives
+in. That is the single most destructive operation available in this system, it is not reversible
+without a map backup, and `map.json` carries `recentered: 0` — nothing has ever recentred it. Back up
+`~/.elle/hyper-map/` first.
+
+---
+
+# THE STORED MAP IS FILED BY KEYWORD, NOT BY GEOMETRY (2026-09-09)
+
+I recovered the six duality pairs (from `FINDINGS_REGISTER_FOR_QWEN.md` §2, which quotes
+`faculties.json` verbatim and is still readable) and reproduced `build()`'s `slots` — pairs,
+`axisCoords` differences, and the `collapse()` gate at 0.06 / 0.02 / 1.3. The only missing term is
+the keyword vote, whose regexes live in the now-unreadable `faculties.json`.
+
+**The reproduction failed its validation check, and that is the result.**
+
+| sphere | reproduction, RAW, no keyword vote | **deployed** |
+|---|---|---|
+| central (held) | 505 | **604** |
+| motor_praxis | 148 | **292** |
+| language_semiotics | **440** | 190 |
+| convergent_logic | 22 | **90** |
+| divergent_synthesis | **41** | 1 |
+| somatic_interoception | 10 | **0** |
+| spatial_topography | 46 | 23 |
+
+Cosine geometry alone does not come close. `language_semiotics` is over-assigned 2.3×,
+`motor_praxis` under-assigned 2×, `convergent_logic` under-assigned 4×, `divergent_synthesis`
+over-assigned 41×.
+
+## RETRACTION
+
+**The "43.9% of slots change under 16-d centring" figure is withdrawn.** It was computed between two
+arms that both omit the keyword vote, so neither is the deployed router. It is not a statement about
+this system. The earlier **23.5%** figure stands, because it is explicitly scoped to top-1 by cosine
+and never claimed to be `slots`.
+
+## What the failure demonstrates
+
+`facultyScore` is `cosine(unit(fvec), unit(vec)) + KW_WEIGHT * hits / 3`, with `KW_WEIGHT = 0.12`
+and hits capped at 3. So the keyword term contributes up to **0.12**.
+
+Against that: the measured per-node spread across all twelve 16-d cosines is **0.1712** (raw), and
+`collapse()` fires at `COLLAPSE = 0.06`. **A single faculty's keyword hits can contribute twice the
+collapse threshold, and a full keyword match is comparable to the entire spread of the geometry it
+is added to.** The pair *differences* that `axisCoords` actually gates on are smaller still.
+
+> **In the 16-d router that filed all 1227 stored memories, the keyword vote is not a tie-breaker.
+> It is the dominant term. The stored map is organised substantially by regex matching, and the
+> embedding geometry is a small correction on top.**
+
+This is consistent with the code's own comment — *"stamped by keyword vote + projected cosine"* —
+which names the keyword vote first. What was not known is the *ratio*, and the ratio is the point.
+
+## Consequences
+
+1. **Centring Router A may matter far less than the 16-d cone suggests.** If assignment is mostly
+   lexical, removing the geometric cone moves fewer nodes than the cosine analysis implies. The
+   23.5% top-1-by-cosine figure is an **upper bound** on what centring alone could change, not an
+   estimate.
+2. **It re-frames "routing accuracy is knowledge accuracy."** Whatever `assign()` achieves in
+   35840-d for new goals, the 1227 memories already on disk were filed by a keyword vote with a
+   geometric nudge. The two routers do not merely differ in space and centring — **they differ in
+   kind**, one semantic and one substantially lexical.
+3. **It re-frames the ℍ result.** This document concluded the layer-tap space is indistinguishable
+   from tf-idf on tree-likeness. For the stored map that is not even a comparison: a large part of
+   its structure *is* lexical, by construction.
+
+## What would settle it
+
+`faculties.json` readable → reproduce `slots` exactly, confirm 604/623, then ablate: run with and
+without the keyword term and report how many nodes each term alone decides. That is the honest
+version of the measurement I attempted here, and it is one file-permission away.
+
+Tagged **MEASURED** (the reproduction gap, the 0.12-vs-0.1712 ratio), **DERIVED** (keyword dominance
+follows from those two numbers plus COLLAPSE = 0.06), **RETRACTED** (43.9%).
+Script: `scripts_reslot.py` — kept, with its validation failure, because the failure is the finding.
+
+## PROVED WITHOUT THE REGEXES: the keyword vote decides EVERY stored node
+
+The regexes are gone with `faculties.json`, but the question can be settled without them. A node is
+**keyword-decidable** if perturbing any single pair coordinate by ±`KW_WEIGHT` (0.12 — the most one
+faculty's keyword hits can contribute) changes the slot `collapse()` returns. That is a rigorous
+bound computed from geometry alone.
+
+```
+KEYWORD-DECIDABLE: 1227/1227 = 100.0%
+```
+
+| quantity (16-d, all 1227 task nodes) | value |
+|---|---|
+| geometric top-vs-next margin, **median** | **0.0282** |
+| geometric top-vs-next margin, mean | 0.0338 |
+| nodes with margin < KW_WEIGHT (0.12) | **100.0%** |
+| nodes with margin < COLLAPSE (0.06) | 83.5% |
+| leading \|coord\|, median | 0.0989 |
+| nodes below the 0.06 gate on geometry alone | 6.1% |
+
+**The keyword vote is 0.12. The median margin the geometry provides between the winning axis and the
+runner-up is 0.0282 — the vote is 4.3× larger.** Not one node in 1227 has a geometric margin the
+keyword term cannot overturn.
+
+The geometry does clear the *gate* (median leading coordinate 0.0989 against COLLAPSE = 0.06, only
+6.1% falling short). So geometry decides **whether** a node is filed at all; the keyword vote decides
+**where**.
+
+> **The 16-d geometry determines almost nothing about which sphere a stored memory lives in.
+> The stored map is, in effect, a regex classifier with a geometric admission test.**
+
+## What this does to the preceding sections
+
+- **Centring Router A is close to pointless.** The 16-d cone is real (0.9114 mutual alignment) and
+  removing it doubles the cosine spread — but the cosine spread is not what decides the sphere. The
+  23.5% top-1-by-cosine figure is an upper bound that the keyword vote will mostly overwrite.
+  **I withdraw the recommendation that re-stamping Router A outranks batch-16.** The lever for the
+  stored map is the keyword vocabulary in `faculties.json`, not the geometry.
+- **It sharpens rather than weakens the two-router finding.** The routers differ in space (16-d vs
+  35840-d), in centring (no vs yes), *and* in kind — Router A is substantially lexical, Router B is
+  substantially semantic. This document measured Router B and the sensory 2×2 established there that
+  **regex-only was byte-identical to baseline** — a 0.12 vote could not close a 35840-d cosine gap.
+  The same 0.12 constant is decisive in one router and inert in the other.
+
+That contrast is the cleanest statement of the problem this document has arrived at:
+
+> **The same keyword weight that cannot move the new-goal router at all decides every filing
+> decision in the stored map. The two halves of the system disagree about what a faculty is.**
+
+Tagged **DERIVED** (the bound is exact given `KW_WEIGHT`, `COLLAPSE`, `MARGIN`, `RATIO` and the
+measured coordinates). Script: `scripts_kwbound.py`.
+
+## CORRECTION: Router B is keyword-decidable too — the contrast above is WRONG
+
+I wrote, one section up, that the same 0.12 constant "is decisive in one router and inert in the
+other." **That is wrong and I withdraw it.** Measured on batch-01's 66 cached 35840-d vectors:
+
+| router / arm | median margin | median \|lead\| | margin<0.12 | margin<0.06 | **keyword-decidable** |
+|---|---|---|---|---|---|
+| A — 16-d stored map | 0.0282 | 0.0989 | 100.0% | 83.5% | **100.0%** |
+| B — 35840-d, RAW | 0.0351 | 0.0683 | 100.0% | 98.5% | **100.0%** |
+| B — 35840-d, CENTRED | 0.0456 | 0.1477 | 80.3% | 57.6% | **95.5%** |
+
+`KW_WEIGHT = 0.12` exceeds the top-vs-next margin for **every** node in both routers raw, and for
+95.5% of Router B even after centring. **The routing surface of this entire system is
+keyword-dominated, not keyword-tie-broken.** That is a worse finding than the contrast I drew, and it
+applies to the half of the system this document spent all day improving.
+
+### Reconciling with the sensory 2×2, which is not contradicted
+
+Arm C of the sensory rewrite (regex only) was byte-identical to baseline on batch-03. That remains
+true and is not in tension: **"keyword-decidable" is a statement about capacity, not about what the
+actual hits do.** A brief whose margin is 0.03 *can* be flipped by a 0.12 vote, but only if the
+regex actually fires, and only if it fires for the right faculty. Arm C's edits happened not to fire
+in a way that changed any outcome. My error was reading "that edit changed nothing" as "the term
+cannot matter."
+
+### The one genuinely new argument for centring
+
+Centring does not remove keyword dominance, but it measurably reduces it, and this was not among the
+reasons given anywhere above:
+
+- median leading coordinate **0.0683 → 0.1477** (2.2×) — raw, the median node barely clears the
+  `COLLAPSE = 0.06` gate at all
+- fraction with margin below the gate **98.5% → 57.6%**
+- keyword-decidable **100.0% → 95.5%**
+
+So centring buys robustness, not just accuracy: it moves the geometry from "always overridable" to
+"usually overridable". That is a modest claim and it is the honest one.
+
+### What actually follows
+
+The lever for routing quality in **both** halves of the system is `KW_WEIGHT` and the regexes, not
+the embedding geometry. Two cheap experiments, both needing only `faculties.json`:
+
+1. **Sweep `KW_WEIGHT`** (0.00, 0.03, 0.06, 0.12, 0.24) on batch-01 and report accuracy and
+   keyword-decidability. If accuracy is flat, the term is doing nothing useful and its weight should
+   drop until the geometry decides. If accuracy falls at 0, the router is a regex classifier wearing
+   an embedding and this document's framing needs rewriting.
+2. **Ablate per node**: how many nodes does each term decide *alone*? That is the measurement I tried
+   and could not complete.
+
+Neither needs a GPU. Both outrank every geometric fix proposed above, because a 0.12 constant that
+overrides the geometry for 95–100% of decisions is the largest single lever in the router.
+
+Tagged **MEASURED**. Script: `scripts_routerB_margin.py` (numpy).
+
+---
+
+# WHAT CENTRING ACTUALLY DID: IT CHANGED WHAT THE ROUTER *IS* (2026-09-09)
+
+The `KW_WEIGHT` sweep needs the regexes, which are gone. But its most informative point —
+`KW_WEIGHT = 0`, pure geometry — needs nothing but the cached vectors. Run on batch-01:
+
+| batch-01 | **geometry only (KW=0)** | recorded, with keywords |
+|---|---|---|
+| RAW top-1 | **0.015** — one brief in sixty-six | **0.227** |
+| CENTRED top-1 | **0.606** | **0.621** |
+
+| arm (KW=0) | hit | held | wrong |
+|---|---|---|---|
+| RAW | **0** | 22 | 44 |
+| CENTRED | 29 | 23 | 14 |
+
+## The result
+
+- **Before centring, the embedding contributed essentially nothing.** Geometry alone scores 0.015 —
+  one brief out of sixty-six, indistinguishable from chance (1/12 = 0.083 would be chance for a
+  uniform guess; 0.015 is *below* it). The deployed 0.227 was almost entirely the keyword vote.
+  **The pre-centring router was a regex classifier with an inert 35840-dimensional embedding
+  attached.**
+- **After centring, the geometry does the work.** 0.606 of the 0.621 is geometry; the keyword term
+  adds roughly 0.015.
+
+> **Centring did not merely raise accuracy 0.227 → 0.621. It changed what the router is: from a
+> keyword classifier whose embedding contributed nothing, to an embedding classifier whose keyword
+> vote is a marginal correction.**
+
+That is a better description of this session's central result than the accuracy number, and it is
+the one to carry forward.
+
+## It resolves the paradox two sections up
+
+Keywords remain *capable* of flipping 95.5% of centred decisions (margins are small), yet they
+*contribute* only ~0.015 of accuracy. Both are true: capacity is not effect. After centring, the
+keyword vote mostly fires in agreement with the geometry, or does not fire at all. That is also
+exactly why the sensory rewrite's arm C (regex only) came back byte-identical to baseline — **after
+centring there is very little left for a regex to do.** Three separate observations, one explanation.
+
+## Caveats, stated
+
+- These are my numpy reimplementation (same PAIRS, same COLLAPSE/MARGIN/RATIO, same cached
+  `.posted` vectors), not `routing-diagnose`. The centred comparison (0.606 vs recorded 0.621) is
+  within 0.015, so the reimplementation tracks; but that 0.015 gap is *assumed* to be the keyword
+  term rather than proven to be — it could include small pipeline differences.
+- **The RAW comparison does not depend on that assumption.** Geometry alone cannot produce 0.227
+  when it produces 0.015; the gap is 15×, far beyond any reimplementation slack.
+- batch-02 and batch-03 are TCC-unreadable, so this is batch-01 only — the development set, 66
+  distinct tasks. It is in-sample.
+
+## Revised priority
+
+The `KW_WEIGHT` sweep drops from "largest single lever" to "worth one hour." The measurement above
+already answers its important half: **at the deployed centred configuration, lowering `KW_WEIGHT`
+toward zero would cost ≈0.015 accuracy and buy a large robustness gain** (keyword-decidability
+95.5% → 0% by construction). That is a defensible trade and it is now the cheapest real improvement
+available to the router — cheaper than batch-16, cheaper than any geometric fix in this document.
+
+**But it must be validated out-of-sample**, and batch-01 is the development set, and batches 02–15
+are one template. So it, too, waits on batch-16. Everything does.
+
+Tagged **MEASURED**. Script: `scripts_kw0.py`.
+
+## Footnote — the stake: each routing decision files 2.25 nodes, not one
+
+`build()` routes `kind === 'task'` only (`taskNodes()` filters on it), which is **1227 of 2764
+nodes = 44.4%**. The other 55.6% — 1458 results and 78 sources — are never assigned a sphere
+directly. All 2764 carry a usable `dir`, so this is a design choice, not a capability limit.
+
+It is a **coherent** choice: every one of the 1536 non-task nodes resolves to a task ancestor
+(`result.parent` is a task in 1458/1458 cases; `source.parent` is a result in 78/78). Tasks are
+routed; results and sources inherit.
+
+The consequence is an amplification factor, and it is the reason the routing numbers matter more
+than their own scale suggests:
+
+> **One task's routing decision files itself plus 1.19 results plus 0.06 sources — 2.25 nodes.**
+
+So the pre-centring router — whose geometry contributed **0.015** accuracy, i.e. essentially nothing
+— did not merely mis-file 1227 task descriptions. It set the sphere of the entire 2764-node map,
+including all 1458 actual work products, on the strength of a keyword vote. `levels[].n` counts only
+tasks, so "Motor Praxis: 292 members" is 292 tasks and roughly 347 unstated results riding along.
+
+Tagged **MEASURED**. No script — read directly from `map.json`.
+
+## Cross-check: the Router B margins replicate across two implementations
+
+The Router B margin table was computed twice, independently and by accident — a pure-Python version
+started first and ran long enough to be backgrounded, and a numpy rewrite produced the numbers used
+above. Both completed.
+
+| arm | median margin | median \|lead\| | margin<0.12 | margin<0.06 |
+|---|---|---|---|---|
+| RAW | 0.0351 | 0.0683 | 100.0% | 98.5% |
+| CENTRED | 0.0456 | 0.1477 | 80.3% | 57.6% |
+
+**Identical to four decimal places on every cell.** The two runs used different numeric precision —
+numpy at float32, pure Python at float64 — and different code paths (explicit loops vs matrix
+product), so this is not a shared-implementation artifact. It is a genuine replication of the
+quantities the keyword-dominance argument rests on.
+
+Worth stating because the *other* replication attempt today failed: V6 differed 2× between the
+workflow agent and my reimplementation, purely from an unstated IDF-fitting scope. These margins
+have no free parameters — the pairs, the constants and the vectors are all fixed — and they
+replicate exactly. That contrast is the same lesson twice: **specification tightness predicts
+replication better than the statistic's separation power does.**
