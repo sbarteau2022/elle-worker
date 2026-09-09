@@ -457,3 +457,81 @@ against each other; the trade is real but small, and routing's side of it is 9.6
 Artifacts: `/tmp/corpus_chunks.json` (1030 chunks), `/tmp/corpus_emb.json` (480 MB raw layer-tap
 vectors — persisted unmodified, so any later register applies without re-embedding),
 `/tmp/delta_graph.cjs`. The embedding cost 18.6 min of 27B forward passes and need not be repeated.
+
+---
+
+# THE BRIEF CORPUS IS 77 DISTINCT TASKS, NOT 1056 (2026-09-09)
+
+Found while validating the parallel session's `sensory_perception` proposal, which warned that
+batch-02's six sensory rows looked like one template. That warning was right and it generalises far
+beyond sensory. Median within-batch pairwise brief similarity, per faculty:
+
+| | batch-01 | batches 02–15 |
+|---|---|---|
+| median across all 11 faculties | **0.038** | **0.975** |
+
+Batch-01 is 66 genuinely distinct tasks. **Every batch from 02 to 15 is the same 11 templates —
+one per faculty — with the topic noun swapped**, six copies each. Row-aligned similarity between
+batch-02 and batch-03 is **0.967**: batch-03 is not a new sample, it is batch-02 relabelled
+("Parse Writing Payload Batch 01" → "Parse Writing Payload Batch 02").
+
+Effective distinct tasks in the whole 1056-brief corpus: **66 (batch-01) + 11 (the template set) = 77.**
+
+## What this corrects
+
+**The batch-02 held-out result stands but its power does not.** 0.076 → 0.727 is a real transfer
+from batch-01's diverse tasks onto unseen text, and the direction is not in doubt. But the effective
+n is **~11 distinct tasks counted six times each**, not 66 independent trials. Every confidence
+interval quoted on batch-02 in this document is too narrow by roughly √6. The centring result's
+strength rests on **batch-01's 66 diverse tasks**, where it is in-sample-but-LOO-validated, plus a
+directionally consistent transfer to 11 template families. That is still a good result. It is not
+66 independent held-out confirmations, and I described it as if it were.
+
+**"sensory_perception is the worst faculty in both batches (6 of 13 and 6 of 14)" was inflated.**
+Batch-01's six sensory failures are six *independent* failures (similarity 0.055) — that is the real
+evidence. Batch-02's six are one failure counted six times.
+
+**The four-arm validation below is not an independent holdout.** Batch-03's sensory rows are the
+same template as batch-02's. Reported for the record, not as confirmation.
+
+## The four-arm result, correctly scoped
+
+Untouched batch-03, n=66, frozen batch-01 `centreMu`, live atlas read-only and never rebuilt.
+Candidate description embedded exactly as `swarm.cjs:329` builds faculty vectors.
+
+| arm | acc | hit | held | wrong | sens rank-1 | sens hit | false-into-sens |
+|---|---|---|---|---|---|---|---|
+| A baseline | 0.742 | 49 | 13 | 4 | **0** | 0 | 0 |
+| B description only | 0.667 | 44 | 18 | 4 | 2 | 0 | 0 |
+| C regex only | 0.742 | 49 | 13 | 4 | 0 | 0 | 0 |
+| D both | **0.758** | 50 | 12 | 4 | **6** | 6 | 0 |
+
+Against the parallel session's own pre-registered rule (sensory rank-1 **and** total correct
+releases both up, no increase in wrong releases, no new false releases into sensory): B FAIL,
+C FAIL, **D PASS**.
+
+The interaction is the interesting part and is probably real: **neither change works alone.**
+The regex alone changes nothing at all — identical numbers to baseline — because a ≤0.12 keyword
+vote cannot close the cosine gap. The description alone improves sensory ranking (0→2 rank-1) but
+costs five hits elsewhere, and those five go to *held*, not to wrong releases (held 13→18): the new
+description makes five non-sensory briefs more ambiguous. Adding the regex tips those back out.
+So the description repositions and the regex breaks the resulting ties.
+
+But **"0/6 → 6/6" is really "0/1 → 1/1" on one template**, and that template is batch-02's.
+The +1 net hit and −1 held across all 66 rows are the honest headline, and they are within noise.
+
+## Decision: DO NOT INSTALL the sensory rewrite
+
+Not because it failed — it passed the rule — but because **no valid holdout exists.** Batch-01 is
+the only diverse sensory data and it was the development set; batches 02–15 are one template.
+Installing on this evidence would be tuning to a single task shape.
+
+**This is now the binding constraint on the whole routing programme, not just on sensory.** The
+next useful thing anyone can do is generate genuinely diverse briefs — batch-01's construction is
+the model (median similarity 0.038); whatever produced batches 02–15 collapsed to a template and
+nobody noticed for two days of measurement. Until that exists, routing changes can only be
+validated on batch-01, which every proposal has now seen.
+
+Credit where due: the parallel session flagged the template risk for batch-02 from source inspection
+alone, before any of this was measured, and explicitly declined to claim its twelve predicted flips
+as demonstrated. Its caution was better calibrated than my headline.
