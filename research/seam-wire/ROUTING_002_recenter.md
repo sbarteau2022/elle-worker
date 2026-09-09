@@ -1962,3 +1962,95 @@ Getting a real rate needs the reviewer's arithmetic emitted in a machine-checkab
 the fix above. Until then the 467 κ-blocked tasks cannot be triaged automatically, and the
 `BOARD_BLOCKED_TRIAGE` proposal to cancel 75 duplicates should not be executed: if the gate errs,
 some of those blocked records are correct work.
+
+---
+
+# BATCH-16 EXISTS: 72 BRIEFS, 12 SPHERES, THE CORPUS BLOCKER IS CLEARED (2026-09-09)
+
+Written by 12 Sonnet agents, one per sphere, in ~2 minutes. Each wrote blind — no embedder, no GPU,
+no router — which is the property that makes the acceptance test non-gameable: **the generator cannot
+observe the metric.** 12/12 returned, 0 errors, exactly 6 rows per sphere.
+
+**`convergent_logic` now has briefs for the first time.** Its six: a combined-rate word problem,
+an induction proof, an exact ledger sum, a logic grid, a recurrence closed-form derivation, and an
+error-location task. Its true-positive rate has never been measurable until now.
+
+## Gate result
+
+| sphere | T1core | T1schema | T2skel | T3vcos |
+|---|---|---|---|---|
+| convergent_logic | 0 | 0.0000 | 0.5310 | 0.1104 |
+| divergent_synthesis | 0 | 0.0000 | 0.5528 | 0.1241 |
+| episodic_memory | 0 | 0.0000 | 0.2911 | 0.1250 |
+| language_semiotics | 0 | 0.0000 | 0.3939 | 0.0775 |
+| metacognitive_regulation | 0 | 0.0000 | 0.5829 | 0.0942 |
+| motor_praxis | 1 | 0.0000 | 0.1064 | 0.0805 |
+| predictive_simulation | 0 | 0.0000 | 0.5342 | 0.0752 |
+| sensory_perception | 0 | 0.0000 | 0.2317 | 0.1276 |
+| social_cognition | 0 | 0.0000 | 0.4227 | 0.0726 |
+| somatic_interoception | 0 | 0.0000 | 0.5226 | 0.1403 |
+| spatial_topography | 0 | 0.0000 | 0.5188 | 0.0763 |
+| valuation_salience | 0 | 0.0000 | 0.4695 | **0.1684** |
+
+Every substantive test passes. **T2 skeleton 0.5829 worst** against a 0.78 bar and batch-01's own
+0.6927 — batch-16 is *more* structurally varied than the known-good batch. **T3 cosine 0.1684 worst**
+against 0.18, versus batch-01's 0.1218.
+
+## The one FAIL was a proxy misfiring, and I tested rather than overrode it
+
+The gate failed on a single clause: median verify length 196 > 178 chars. That guard exists to catch
+**padding used to dilute the T3 cosine**, so the question is whether dilution is actually present.
+
+Direct test — truncate the verify fields and re-measure:
+
+| variant | worst sphere | median |
+|---|---|---|
+| full length | 0.1684 | 0.1023 |
+| truncated to 178 | 0.1508 | 0.0855 |
+| truncated to 89 (batch-01's median length) | **0.1697** | 0.0876 |
+
+**Truncation does not lower the cosine.** At batch-01's own verify length the worst sphere is
+0.1697 — statistically the same as full length. If padding were doing the work, stripping it would
+make the cosine jump. It does not.
+
+So the length is verbosity, not dilution, and the cause is my own brief: it asked for "one or two
+sentences describing how an agent would check its own answer" and demanded a genuinely *different
+checking procedure* per row. batch-01's verifies are terser one-liners. The synthesis placed the real
+dilution route at **~324 chars**; batch-16's median is 196, max 288.
+
+**VERDICT: the 178-char clause is a verified false positive.** It is a proxy set at 2× batch-01's
+median, and it fired without the condition it proxies for being present. Recorded, not silently
+overridden — and not "fixed" by regenerating, which would be tuning against the gate.
+
+## The honour check, which the gate cannot do
+
+T1 abstained on all twelve spheres (schema 0.0000 everywhere; core 0 except motor_praxis at 1). That
+is exactly the attack-K hole: with no shared data specimen to detect, only T2 and T3 guard the batch,
+and both are beatable by varying prose. So the gate did **not** certify this batch and I read it.
+
+`valuation_salience` (weakest, 0.1684): threshold-count → argmax-selection → proportional allocation
+summing to a total → binary go/no-go with a reasoning constraint → sensitivity analysis for a flip
+point → Borda-count consolidation. Six operations, six answer shapes, six checking procedures.
+
+`social_cognition` (strongest, 0.0726): classify-and-tally → rank-with-justification →
+infer-intent-with-confidence-and-quotes → rewrite-preserving-content → locate-a-specific-sentence →
+binary escalation decision.
+
+Both are genuinely six tasks. Per-sphere rationales from each writer are in `BATCH16_RATIONALES.md`.
+
+### A real limitation of T3 this exposed
+
+`valuation_salience` scores highest on verify cosine because **four of its six verifies say
+"recompute … in python and confirm"** — not because the tasks repeat, but because four of its six
+tasks are genuinely numeric, and numeric tasks share a checking *verb* while differing entirely in
+checking *procedure*. T3 partially penalises arithmetic-heavy faculties for a property of the domain.
+Worth knowing before anyone tunes the 0.18 bar downward.
+
+## What is still blocked
+
+The decisive test — **does the router send all six rows of a sphere to the same faculty?** — needs the
+35840-d layer-tap embedder. `mlx-serve` on :11437 is alive but reports `upstream: ""`, so no model is
+attached; loading one is ~24 GB of GPU and was not authorised. Batch-16 is ready the moment it is.
+
+Pre-registered, before any embedding: **≤5/12 spheres in lockstep AND mean distinct destinations
+≥1.7.** batch-01 scored 4/11 and 1.91; batches 02/03 scored 11/11 and 1.00.

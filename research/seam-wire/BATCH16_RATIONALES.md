@@ -1,0 +1,75 @@
+# batch-16 — per-sphere distinctness rationales
+
+Written blind by 12 Sonnet agents, one per sphere, with no access to the router or embedder.
+
+## convergent_logic
+
+**Why six tasks:** r1 DERIVE a rate (combined-work word problem) -> answer is a single time value, checked by recomputing the combined rate. r2 PROVE an identity by induction -> answer is a proof document, checked by validating each algebraic step of the inductive argument independently. r3 CALCULATE an exact running total from an embedded transaction list -> answer is a dollar figure, checked by independent resummation. r4 DECIDE/deduce a constraint-satisfying assignment (logic grid) -> answer is a table of position+color pairs, checked by testing the assignment against every clue. r5 DERIVE a closed-form formula from a recurrence and evaluate it -> answer is an algebraic expression plus one number, checked by substituting the formula back into the recurrence and cross-checking against direct iteration. r6 LOCATE an error in a given calculation and state the corrected result -> answer is a verdict plus corrected roots, checked by expanding the factorization and re-solving via the quadratic formula. No two share a verification procedure (recompute-rate / validate-proof-steps / resum-ledger / test-constraints / substitute-and-cross-check / expand-and-resolve).
+
+**Payload rows:** r3 (ledger transactions) and r4 (logic-puzzle clues) carry embedded data payloads the answer must be computed/deduced from. r1, r2, r5, r6 state a fully self-contained problem inline (r6 embeds a worked derivation to be checked, which functions as its payload).
+
+## divergent_synthesis
+
+**Why six tasks:** 1: GENERATE names under an exclusion constraint -> answer is a list of strings checked by substring exclusion. 2: INVERT failure modes into fixes -> answer is paired rows checked by positional correspondence. 3: COMBINE two forced domains -> answer is one concept-paragraph checked by dual-glossary lexical presence. 4: GENERATE metaphors plus self-critique -> answer is metaphor+limitation pairs checked by a required clause pattern and register distinctness. 5: DESIGN alternative architectures for one requirement -> answer is 3 schema sketches checked by paradigm-name distinctness plus per-item query rationale. 6: GENERATE repurposing options under a categorical-spread constraint -> answer is 5 industry-tagged uses checked by category non-repetition. No two share a checking procedure: exclusion-list, positional-pairing, dual-lexicon, clause-pattern, paradigm-count, category-uniqueness.
+
+**Payload rows:** Rows 1, 2, 3, 5, and 6 embed concrete data (a forbidden-name list; a checkout drop-off stat; a two-domain term glossary; a schema requirement; a waste-volume figure). Row 4 has no data payload — it names only the abstract concept to be explained.
+
+## episodic_memory
+
+**Why six tasks:** Row1 LOCATE a single first-occurrence entry -> answer is one cited record (session ID + quote). Row2 COUNT+filter a tagged subset -> answer is a number plus the matching version list. Row3 DERIVE a duration from timestamps -> answer is a numeric gap and its two bounding dates. Row4 TRANSFORM unstructured text into a structured, verbatim-quoted citation table -> answer is a table checked for exact-match completeness. Row5 DECIDE which archived record is the matching precedent -> answer is a single chosen ticket ID plus its verbatim fix text. Row6 RANK entities by tallied historical frequency -> answer is an ordering with counts, not a single number.
+
+**Payload rows:** All 6 rows embed a data payload (a session log, changelog, check-in log, transcript, ticket archive, and incident log respectively) — each brief is unanswerable without recalling/searching that embedded record.
+
+## language_semiotics
+
+**Why six tasks:** 1=MEASURE (compute a readability formula) -> a number; 2=RANK (order four translations by fidelity) -> an ordering; 3=LOCATE (find ambiguous-pronoun sentences) -> a list of flagged spans with candidates; 4=TRANSFORM (reformat a citation to a different style) -> a reformatted document string; 5=DERIVE (infer word-formation device + source morphemes) -> a label+decomposition per item; 6=DECIDE (judge which paraphrase preserves meaning) -> a verdict + explanation. No two share a checking procedure (recompute-formula vs criteria-scored-ordering vs re-scan-for-ambiguity vs field-checklist vs morpheme-recombination vs entailment-test).
+
+**Payload rows:** Rows 1, 2, 3, 5, and 6 embed the full data payload (paragraph, four translations, four numbered sentences, five brand names, sentence+two paraphrases) directly in the brief. Row 4 embeds a single citation record as its payload. All six rows carry an embedded payload; none is a payload-free abstract instruction.
+
+## metacognitive_regulation
+
+**Why six tasks:** 1 DERIVE a numeric calibration score (Brier) from a forecast log, checked by recomputing an MSE-style formula; 2 LOCATE the step index in a reasoning chain where a value diverges, checked by independent recomputation and step-matching; 3 RANK three claims by evidence strength, checked against an evidence-type ordering rubric; 4 COUNT sentences lacking a citation marker, checked by parsing for bracketed evidence tags; 5 DECIDE escalate-vs-answer under a stated confidence/safety policy, checked by boolean policy evaluation; 6 TRANSFORM an overconfident sentence into hedged, evidence-scoped prose, checked by a text-diff style audit for removed absolutes and added scope. Each row's verify procedure is mechanically distinct (numeric formula check, step-recomputation match, ranking-rubric check, citation-marker parse+count, boolean policy eval, text-transformation audit), so no two rows collapse to the same check.
+
+**Payload rows:** Rows 1, 2, 3, and 4 embed an explicit data payload (forecast log, numbered reasoning steps, three claims with evidence, four numbered report sentences) that the answer is computed or audited against. Rows 5 and 6 embed a short scenario/sentence plus an explicit policy or evidence constraint rather than a tabular payload, since the task is a single-instance decision or rewrite, not an aggregation over a data set.
+
+## motor_praxis
+
+**Why six tasks:** Row1: OPERATION=deploy/serve+shutdown a process; ANSWER=exact response string + confirmed-closed port; CHECK=curl body match then lsof/port-listen check. Row2: OPERATION=git tagging/version-bump sequence; ANSWER=literal `git describe` string; CHECK=regex match on describe output. Row3: OPERATION=resolve a merge conflict (decide+edit+complete merge); ANSWER=resolved file content; CHECK=diff file content for marker-free exact value + git status porcelain empty. Row4: OPERATION=cross-file rename refactor + run; ANSWER=stdout value/exit code; CHECK=grep for zero leftover old-name occurrences + script run assertion. Row5: OPERATION=multi-target build with dependency ordering; ANSWER=ordered execution log; CHECK=read log file and confirm exact target sequence with no duplicates. Row6: OPERATION=compile, observe wrong output, fix logic bug, recompile; ANSWER=corrected numeric outputs across two test vectors; CHECK=diff actual vs expected across multiple compiled-binary runs. All six require different verification procedures and produce different answer shapes (string+port state, version-string, file-diff+repo-state, stdout+grep-count, ordered-log, multi-case numeric diff).
+
+**Payload rows:** Rows 3, 4, and 6 carry embedded data payloads (branch file contents, three source-file snippets, and buggy C source with two test vectors, respectively). Rows 1, 2, and 5 are procedural setups with no embedded data — the "input" is the environment/build structure itself.
+
+## predictive_simulation
+
+**Why six tasks:** 1: DERIVE longest path through a dependency DAG → answer is an ordered task sequence + duration, checked via CPM slack. 2: DERIVE start times by BACKWARD induction from a fixed deadline → answer is a set of clock times + go/no-go flag, checked via reverse datetime subtraction. 3: DECIDE between two options via expected-value comparison → answer is a chosen option + two cost numbers, checked by recomputing p*cost+fixed_cost per branch. 4: FORECAST a compounding (non-linear) threshold-crossing time → answer is a single hour number, checked via an iterative multiplicative-rate loop. 5: DERIVE a probability analytically (closed-form normal approximation, explicitly NOT simulation) → answer is a probability + combined mean/stdev, checked via z-score/CDF math. 6: TRANSFORM a schedule table by propagating a perturbation through a dependency graph → answer is a table of new start dates per task, checked via forward-pass max-of-predecessors recompute. No two share an operation, input shape, answer shape, or check procedure.
+
+**Payload rows:** Rows 1, 5, and 6 embed a concrete data payload (task/dependency table, service latency stats, project schedule table) that the answer is computed from; rows 2, 3, 4 embed numeric parameters inline in prose rather than a structured payload.
+
+## sensory_perception
+
+**Why six tasks:** 1) COUNT occurrences of an exact substring amid decoy digits -> a single integer. 2) LOCATE the exact character column offset of a field per row in irregularly-spaced raw text -> a list of offset integers. 3) COMPARE two raw text blocks line-by-line for literal changes -> a list of (role, old, new) diff tuples. 4) DECODE a base64 payload to literal plaintext -> a verbatim decoded string. 5) MEASURE exact character-width of ASCII bars -> a list of (label, count) pairs read by counting glyphs, not inferring scale. 6) FILTER/PARTITION raw lines against a strict format rule -> two verbatim line-groups. Each has a distinct checking procedure (grep count, str.find offset check, difflib diff, base64 byte-compare, char-count, regex fullmatch partition), so no two rows are verified the same way.
+
+**Payload rows:** All six rows embed a literal data payload the agent must read verbatim (log lines, fixed-width rows, config snippets, a base64 string, an ASCII bar chart, and sensor lines) — sensory_perception tasks are precisely the ones that must carry raw input to perceive.
+
+## social_cognition
+
+**Why six tasks:** Row1=COUNT/CLASSIFY, answer is per-item labels plus category counts. Row2=RANK, answer is a strict ordering of 4 items with justification. Row3=DERIVE, answer is an inferred hidden motive (genuine vs tactic) with confidence and evidence. Row4=TRANSFORM, answer is a rewritten artifact that must preserve content while changing tone. Row5=LOCATE, answer is a single verbatim quoted sentence plus explanation, not a draft or judgement. Row6=DECIDE, answer is a binary escalate/not-escalate action justified against explicit policy criteria. Each verify procedure is structurally distinct: recount-and-match, check-permutation-validity, check-evidence-citations, check-content-preservation-plus-tone-check, string-match-the-quote, and check-decision-against-policy-booleans.
+
+**Payload rows:** Rows 1, 2, 3, 4, and 5 all embed a data payload (quoted customer comments, ticket descriptions, a vendor email, a manager's draft note, or a client email) that the agent must analyze directly. Row 6 embeds both a policy statement and a situational quote as its payload. All six rows carry an embedded payload — none is a payload-free abstract scenario — which was a deliberate choice to match the house style's concreteness while still varying operation and answer shape.
+
+## somatic_interoception
+
+**Why six tasks:** A=LOCATE an offending resource consumer -> answer is a single path+size; B=TRANSFORM raw readings into a structured status object via a threshold table -> answer is a structured object; C=RANK processes and select a minimal-cost subset -> answer is an ordered list satisfying a cumulative constraint; D=COMPARE two snapshots to find an outlier delta -> answer is a name+rate (argmax over deltas); E=DERIVE a trend and extrapolate -> answer is a rate and a projected time (regression/slope); F=DECIDE a gate verdict against a multi-metric policy -> answer is a boolean plus a named trigger. No two share a verification procedure: match-one-value, match-structured-object, sort+cumulative-threshold, per-item-delta-argmax, slope-extrapolation, and multi-metric-threshold-verdict are all distinct checks.
+
+**Payload rows:** All 6 rows embed a numeric data payload (telemetry/process readings) directly in the brief so the verify step is deterministic and doesn't require live shell access.
+
+## spatial_topography
+
+**Why six tasks:** Row1 LOCATE: shortest-path search on a grid; answer = a move count + move sequence, checked by BFS. | Row2 COUNT: connected components of an undirected graph; answer = a cluster count + room memberships, checked by union-find/DFS. | Row3 RANK: order waypoints via greedy nearest-neighbor; answer = a visiting sequence + total distance number, checked by recomputing each step's nearest choice and summing distances. | Row4 TRANSFORM: convert chained relative bearings into absolute coordinates; answer = a coordinate table, checked by re-deriving offsets and reversing them. | Row5 DECIDE: per-doorway yes/no geometric fit under 90-degree rotation; answer = boolean + orientation per item, checked by a two-orientation dimension comparison. | Row6 DERIVE: identify the facility minimizing total distance to the rest; answer = a single ID + one distance number, checked by independently summing all pairwise distances for every candidate.
+
+**Payload rows:** All six rows embed a concrete data payload: row1 an ASCII grid, row2 an edge-pair list, row3 a set of waypoint coordinates, row4 a chain of relative bearing/distance offsets, row5 crate and doorway dimensions, row6 a set of facility coordinates.
+
+## valuation_salience
+
+**Why six tasks:** 1: COUNT items meeting a compound value/risk threshold — answer is an integer plus a name list. 2: LOCATE the single argmax item under a value formula, explicitly not a full ranking — answer is one name and one score. 3: TRANSFORM importance scores into a proportional resource split — answer is a table of dollar amounts summing to a fixed total. 4: DECIDE a binary go/no-go by weighing two conflicting signals (a quant NPV vs a qualitative reliability trend) — answer is a verdict plus explicit weighing, no formula to rerun. 5: CHECK the robustness of an existing ranking to a stated input uncertainty — answer is a flip/no-flip verdict plus a breakpoint value. 6: AGGREGATE multiple stakeholders' rank-ordered lists into one consolidated order via a stated voting rule and tie-break — answer is a single merged ranking with point totals. No two share a verification procedure: recompute-and-count, compute-and-confirm-max, compute-and-confirm-sum, check-verdict-presence-and-reasoning, recompute-at-range-endpoints, recompute-Borda-and-tiebreak.
+
+**Payload rows:** Rows 1, 2, 3, and 5 embed a data payload (account table, channel table, impact scores, supplier scores). Row 4 embeds compact figures (NPV, SLA counts) inline as prose rather than a table. Row 6 embeds three ranked lists as the payload.
