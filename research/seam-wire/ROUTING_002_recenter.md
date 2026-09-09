@@ -2054,3 +2054,84 @@ attached; loading one is ~24 GB of GPU and was not authorised. Batch-16 is ready
 
 Pre-registered, before any embedding: **≤5/12 spheres in lockstep AND mean distinct destinations
 ≥1.7.** batch-01 scored 4/11 and 1.91; batches 02/03 scored 11/11 and 1.00.
+
+---
+
+# THE HOLDOUT ANSWERS EVERYTHING (2026-09-09)
+
+batch-16 embedded through the real layer-tap embedder and put to work. Three results, and the two
+that matter were not what anyone proposed.
+
+## 0. Correction: the embedder was never down
+
+I reported it blocked, from `mlx-serve` returning `upstream: ""`. That is wrong. `server.py:1449`
+says so in a comment: **"No upstream is the SOVEREIGN configuration, not an error"** — the 502 comes
+only from paths that proxy to Ollama; the MLX roster serves locally. `/api/embed/layers` answered in
+6.3 s cold, `layers [0,12,24,36,48,60,"final"]`, `hidden_dim 5120` → 35840.
+
+A second self-inflicted error caught before it did damage: my first embed normalised each of the
+seven taps. The real `reduceLayers` concatenates **raw** and only records norms in `spectrum`. Caught
+by re-embedding a cached batch-01 brief and demanding it reproduce: after the fix, **cosine 1.000000,
+max elementwise difference 0.000e+00**. Every number below rests on a pipeline proven identical to
+the one that built the cache.
+
+## 1. The lockstep test — batch-16 PASSES
+
+Pre-registered before the batch existed: **≤5/12 lockstep AND mean distinct destinations ≥1.7.**
+
+| batch | lockstep | mean dests | rank-1 histogram |
+|---|---|---|---|
+| 01 (dev) | 4/11 | 1.91 | 10,7,7,6,6,5,5,5,5,4,3,3 |
+| 02 / 03 (templated) | **11/11** | **1.00** | 6,6,6,6,6,6,6,6,6,6,6 |
+| **16 (new)** | **5/12** | **2.00** | 10,9,8,8,7,6,6,6,4,3,3,2 |
+
+**PASS on both clauses.** batch-16 is a valid holdout — the first one this project has ever had.
+
+**A limitation the test exposed in itself:** `convergent_logic` is in lockstep *because the router is
+right about all six* (6/6 correct on six genuinely different tasks — rate problem, induction proof,
+ledger sum, logic grid, recurrence, error-location). Lockstep conflates "templated" with "easy and
+well-separated". The **ragged histogram** is the more trustworthy half of the signal; a flat
+6-per-faculty histogram remains unambiguous.
+
+## 2. THE BIG ONE: the keyword layer is fitted to the development set
+
+| KW_WEIGHT | 0.0 | 0.06 | 0.12 *(deployed)* | 0.24 |
+|---|---|---|---|---|
+| batch-01 (development set) | 0.803 | 0.848 | **0.848** | 0.788 |
+| batch-16 (genuine holdout) | **0.792** | 0.736 | **0.653** | 0.583 |
+
+At the deployed weight the keyword vote is worth **+4.5 points on the set its regexes were written
+against and −13.9 points on unseen data**, and it degrades monotonically on the holdout. Geometry
+alone generalises almost perfectly: **0.803 dev vs 0.792 holdout**. The keyword layer does not
+generalise at all.
+
+**Recommendation: set `KW_WEIGHT = 0`.** Tagged **MEASURED**. This is the single largest
+accuracy change available and nobody proposed it; it only became visible once a real holdout existed.
+
+## 3. The sensory rewrite: still NO, and now for a measured reason
+
+At the deployed kw=0.12 the 2×2 looked like a win — B and D both 0.708 vs 0.653 baseline, sensory
+1/6 → 5/6. But that is a gain measured against a keyword-degraded baseline. Re-run with the keyword
+layer off, which is the better configuration:
+
+| | batch-16 HOLDOUT | | | batch-01 dev | | |
+|---|---|---|---|---|---|---|
+| | acc | sensory hit | false-into | acc | sensory hit | false-into |
+| current description | 0.792 | 4/6 | **0** | 0.803 | 2/6 | 1 |
+| proposed description | 0.792 | **6/6** | **2** | **0.773** | 4/6 | **6** |
+
+The rewrite buys sensory recall by paying false positives elsewhere: **net accuracy flat on the
+holdout (57/72 both) and −3 points on dev**, with false-into-sensory rising 0→2 and 1→6.
+
+**Verdict: do not install the description. Do not install the regex** — regex-only was byte-identical
+to baseline on batch-03 *and* batch-16, replicated on independent data.
+
+Refusing to install on batch-03 was right, and for the right reason: the "interaction" that passed
+there was an artifact of a templated corpus, and it did not survive contact with real held-out data.
+
+## What changed, in one line each
+
+- **`KW_WEIGHT` 0.12 → 0** — the only change here with a measured holdout gain (+13.9 points).
+- Sensory description rewrite — **rejected on measurement**, not on process grounds this time.
+- Sensory keyword regex — **rejected**, inert in two independent batches.
+- `convergent_logic` — true-positive rate measured for the first time: **6/6**.
