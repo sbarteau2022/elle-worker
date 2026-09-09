@@ -535,3 +535,999 @@ validated on batch-01, which every proposal has now seen.
 Credit where due: the parallel session flagged the template risk for batch-02 from source inspection
 alone, before any of this was measured, and explicitly declined to claim its twelve predicted flips
 as demonstrated. Its caution was better calibrated than my headline.
+
+---
+
+# THE TWELFTH FACULTY WAS NEVER TESTED, AND IT WAS EATING THE BOARD (2026-09-09)
+
+Found while preparing the batch-16 acceptance test. Two findings, one measurement, both independent
+of everything above.
+
+## 1. `convergent_logic` has zero briefs in the entire corpus
+
+`faculties.json` v1 defines **12** faculties. All 15 brief batches — 990 rows — cover **11**:
+
+```
+NEVER TESTED by any brief: ['convergent_logic']
+in briefs but not in faculties.json: (none)
+```
+
+So `convergent_logic` can only ever appear as a **wrong** destination. It has no correct answers.
+Every accuracy number in this document was measured on a board with a guaranteed-wrong twelfth exit.
+
+## 2. Pre-centring, that exit absorbed up to 22.7% of everything
+
+Read-only, direct on `atlas13.json` (no `ensure()`, no rebuild — Trap 8), cached `.posted` vectors,
+cosine against `facultyEmb` with and without the installed `centreMu`:
+
+| batch | RAW top-1 | RAW top-3 | CENTRED top-1 | CENTRED top-3 |
+|---|---|---|---|---|
+| 01 | 8/66 = **12.1%** | 55/66 = **83.3%** | 3/66 = 4.5% | 14/66 = 21.2% |
+| 02 | 15/66 = **22.7%** | 56/66 = **84.8%** | 0/66 = **0.0%** | 28/66 = 42.4% |
+| 03 | 15/66 = **22.7%** | 56/66 = **84.8%** | 0/66 = **0.0%** | 26/66 = 39.4% |
+
+In the raw regime a faculty that is **never the right answer** was in the top 3 for ~84% of all
+briefs and won outright for up to 22.7% of them. Its raw victims are exactly the faculties this
+document has been chasing all along: `language_semiotics` (6), `divergent_synthesis` (6),
+`sensory_perception` (2), `episodic_memory` (1) in batches 02/03.
+
+Mean-centring removes it: 22.7% → 0.0% top-1, ~84% → ~40% top-3. **This is a third independent
+confirmation of the cone diagnosis**, and the cleanest one, because it needs no accuracy metric and
+no labels — just the observation that one exit was universally attractive and is no longer.
+
+Tagged **MEASURED**. What it does *not* show: nothing here says `convergent_logic`'s description is
+good or bad. The corpus has never tested it. It only shows the cone made it a sink.
+
+## 3. Consequence: the corpus cannot measure a twelfth of the atlas
+
+`convergent_logic` is presumably the natural home for exactly the reasoning-and-deduction briefs
+that make up a lot of real routing traffic. We have measured its false-positive rate at length and
+its true-positive rate never. **batch-16 must be 12 spheres × 6 = 72 rows, not 66.**
+
+## 4. A routing-space diversity detector, better than any text statistic
+
+The same run produced a cleaner test than the lexical bar I pre-registered. Ask: *do all six rows of
+a sphere route to the same faculty?*
+
+| batch | spheres routing all 6 rows to ONE faculty | mean distinct destinations per sphere | rank-1 histogram |
+|---|---|---|---|
+| 01 (diverse) | **4/11** | **1.91** | 10,7,7,6,6,5,5,5,5,4,3,3 — ragged |
+| 02 (templated) | **11/11** | **1.00** | 6,6,6,6,6,6,6,6,6,6,6 — flat |
+| 03 (templated) | **11/11** | **1.00** | 6,6,6,6,6,6,6,6,6,6,6 — flat |
+
+Batches 02/03 produce a *perfectly* flat 6-per-faculty histogram. That is not the router being
+accurate; it is the router being unable to tell six copies apart, so each template contributes all
+six of its rows to one destination. The flat histogram is a **fingerprint of the template collapse**,
+arrived at without looking at a single character of brief text.
+
+Why this is the right acceptance test, and why it is not gameable:
+
+- It measures diversity **in the space the holdout is for**. Two briefs that the router cannot
+  separate are one task *for the purposes of a routing experiment*, whatever a text statistic says.
+- Every lexical statistic can be beaten by surface-form variation. This one cannot, because the
+  generator **has no access to the router** — no embedder, no GPU, by the terms of the split. It
+  writes blind; the test is applied afterwards by the side that owns the GPU. A metric the optimiser
+  cannot observe cannot be Goodharted.
+
+Batch-01 sits at 4/11 lockstep and 1.91 mean destinations, so a bar must sit below that.
+Pre-registered for batch-16, before it exists: **≤ 5/12 spheres in lockstep AND mean distinct
+destinations ≥ 1.7.** Batch-01 passes (4/11, 1.91); batches 02/03 fail maximally (11/11, 1.00).
+
+The lexical bar (median SequenceMatcher < 0.15) stays as a **cheap pre-filter the generator can
+self-apply**, not as the acceptance test. It was the wrong instrument for the job I gave it.
+
+## Incidental corroboration
+
+Batch-01's `sensory_perception` scatters to **5 distinct destinations** — the most of any sphere,
+more than double the batch mean. That is the same faculty this document identified as worst by
+accuracy, reached by an unrelated statistic on unrelated grounds.
+
+---
+
+# CORRECTION: "0.038" IS MOSTLY AN AUTOJUNK ARTIFACT, AND THE WHOLE LEXICAL FAMILY FAILS (2026-09-09)
+
+Adversarial workflow, four attackers + four statistic families, calibrated on batch-01 (good) and
+batch-02 (bad). Two results, both of which correct claims made earlier in this document.
+
+## 1. The 0.038 headline is inflated by difflib's junk heuristic
+
+`SequenceMatcher.ratio()` has `autojunk=True` by default. It activates at ≥200 elements and treats
+any character appearing in >1% of positions as junk. Every brief is 276–596 chars, so **autojunk was
+always active in every measurement I reported.**
+
+| statistic | batch-01 | batch-02 | separation |
+|---|---|---|---|
+| SequenceMatcher, autojunk ON (what I quoted) | **0.0375** | 0.9753 | 26.0× |
+| SequenceMatcher, autojunk OFF | **0.2889** | 0.9783 | 3.4× |
+
+**The corpus finding is unaffected** — 0.289 vs 0.978 is still unambiguous, still no sphere-level
+overlap, and batches 02–15 are still one template each. But the specific figure **0.038, which I
+quoted in this record, in the commit messages, and in the handoff plan, is an artifact-inflated
+version of 0.289** and should not be cited as a measure of semantic distance. Corrected here rather
+than edited in place, so the earlier claim and its correction both stand.
+
+Worse, within batch-01 alone S1's Spearman correlation with every other lexical statistic is ~0
+(−0.164 to +0.159). Once briefs are genuinely distinct it is **noise**, so it cannot rank one
+passing batch against another — exactly the job I gave it.
+
+## 2. Every surface-lexical statistic is defeated by a domain re-skin
+
+The attack: hold the task skeleton fixed — function words, punctuation, number slots, answer shape
+and the entire `verify` field byte-identical (verified programmatically) — and swap each row's
+content vocabulary to a different subject domain. One find-and-replace pass per row.
+
+| statistic | batch-01 (good) | re-skinned fake | verdict |
+|---|---|---|---|
+| SequenceMatcher (autojunk ON) | 0.0375 | 0.0655 | passes, inside good range |
+| SequenceMatcher (autojunk OFF) | 0.2889 | 0.3671 | passes |
+| token Jaccard | 0.1148 | 0.1250 | passes, 1.09× — indistinguishable |
+| char 5-gram Jaccard | 0.0686 | **0.0341** | **INVERTS** — fake scores 2× more diverse |
+| TF-IDF cosine | 0.0717 | 0.1609 | passes (inside batch-01's own range) |
+| longest common substring | 0.0693 | **0.0261** | **INVERTS** |
+
+Two statistics score **eleven copies of one task as more diverse than 66 genuinely distinct tasks.**
+Character n-grams key on morphology, so swapping vocabulary destroys overlap *faster* than writing a
+real new task does. A bar built on these actively rewards reaching for a thesaurus.
+
+Weaker attacks do NOT beat the family — re-rolling every number, shuffling lines, reformatting
+delimiters and synonym-swapping ~40 frame words leaves the clone batch far above every bar
+(char-5gram 0.586 vs 0.130). It is defeated *only* by content-vocabulary change, which is precisely
+the move a capable writer makes and precisely the move that leaves the task untouched.
+
+**⇒ "median SequenceMatcher < 0.15" was the wrong gate. Replacing it with "median TF-IDF < X" is the
+same gate in a different coat.** Keep TF-IDF cosine < 0.30 as a cheap copy-paste detector only.
+
+## 3. THE OPEN RISK: the lockstep bar is UNVALIDATED against this attack
+
+The routing-space lockstep test (≤5/12 spheres in lockstep, mean distinct destinations ≥1.7) was
+pre-registered on the strength of batch-01 vs batches 02/03. **It has not been tested against the
+domain re-skin**, because `mlx-serve` on :11437 returns `no upstream configured` — the embedder is
+down and the attack rows cannot be embedded.
+
+There is a concrete mechanism by which it could fail, and it should be stated before anyone relies
+on the bar. TAGGED **OPEN**, reasoning not measurement:
+
+- The re-skin raises TF-IDF cosine to 2.24× the good batch — it *spreads* rows lexically.
+- This document's own δ result found the layer-tap space **indistinguishable from tf-idf** on
+  tree-likeness (0.19/0.21/0.23 vs 0.16/0.25/0.25).
+- If the router's space behaves substantially like tf-idf, re-skinned rows would be *more* spread in
+  embedding space, hence *more* likely to scatter across faculties, hence **more likely to PASS the
+  lockstep bar** while being one task.
+
+That is the same failure mode as the lexical family, one level up. The lockstep bar's claimed
+advantage — that the generator cannot observe it — protects against deliberate gaming but not
+against a writer who varies vocabulary for ordinary stylistic reasons and accidentally satisfies it.
+
+**Required before batch-16 is accepted on this bar:** embed the four attack sets from the workflow
+journal and confirm they FAIL lockstep. If they pass, the bar is broken and the acceptance test must
+move to something that reads the operation performed rather than the text — the workflow's own
+recommendation: distinctness of the operation, of the answer's type/shape, and of what `verify`
+actually checks. That last one is attractive because the re-skin attack held `verify` byte-identical
+by construction.
+
+## Provenance caveat
+
+`gemini-batch-02.jsonl`, `gemini-batch-03.jsonl` and their cached embeddings became unreadable at the
+OS level (EPERM) partway through this session, progressively, while batch-01 stayed readable. The
+batch-02 values above were measured on the real file before it went dark; the attack ladder was then
+run against a reconstruction (batch-01 row 0 per sphere, cloned ×6 with topic-noun swap and number
+jitter) which reproduced batch-02's real values to within 0.05 on all six statistics.
+
+---
+
+# THE BATCH-16 ACCEPTANCE TEST, FINAL — AND IT NEEDS NO GPU (2026-09-09)
+
+Supersedes the lexical bar (refuted above) and does not depend on the lockstep bar (still OPEN,
+embedder down). Sourced from the adversarial workflow's verify-field family, then reimplemented and
+re-measured independently here because the agent's numbers did not reproduce.
+
+## The reproduction discrepancy — read this before using any threshold
+
+| | workflow agent | independent reimplementation |
+|---|---|---|
+| batch-01 V6 | 0.0777 (per-sphere 0.0506–0.1218) | **0.1422** (per-sphere 0.1178–0.1966) |
+
+~2×, and the cause is **IDF-fitting scope**: fitting IDF within each sphere (N=6 documents) gives a
+weak, noisy IDF and a higher floor; fitting across all 66 gives a lower one. Neither of us stated
+the scope alongside the threshold, which made both numbers unusable as written.
+**A V6 threshold is meaningless without its IDF scope.** Everything below fits IDF **within-sphere,
+N=6**, and the numbers are from the reimplementation.
+
+## The test
+
+Two gates, both pure stdlib, **no embedder and no GPU** — which is what makes this usable right now.
+
+**Gate 1 — verify-field IDF cosine (V6) < 0.35**, IDF fit within-sphere over the 6 rows, median of
+the C(6,2)=15 pairs, then median across spheres.
+
+| set | V6 | worst sphere |
+|---|---|---|
+| batch-01 (known good) | **0.1422** | 0.1966 |
+| reconstructed template (batch-02 recipe) | **1.0000** | best sphere 0.6394 |
+
+0.35 sits in the empty band between 0.1966 and 0.6394. Not a round number chosen for looks — it is
+the midpoint of the observed gap.
+
+**Gate 2 — every `verify` field between 40 and 220 characters.** Batch-01 spans 61–147.
+
+Gate 2 exists solely to close Gate 1's one known defeat. Padding `verify` with unique junk tokens
+drives V6 *below* the good batch (measured: 45 junk tokens → **0.0611**, under batch-01's 0.1422),
+so V6 alone can be beaten by a writer who pads. But padding is impossible to hide in length:
+
+| set | verify length |
+|---|---|
+| batch-01 | 61–147 |
+| padding attack | **501–583** |
+
+No overlap, not close. The attack that defeats Gate 1 is loud in Gate 2.
+
+## Why this pair, and not the lexical family
+
+The load-bearing property, measured by the workflow and the reason to prefer verify over brief:
+**verify similarity is nearly independent of brief similarity** — pair-level Pearson +0.2113
+(Spearman +0.1994, r² = 0.045) across batch-01's 165 within-sphere pairs.
+
+That independence is the whole argument. A writer driving brief-similarity down — by paraphrase,
+re-skin, padding, any of the four attacks — does **not** drag verify-similarity down with it,
+because the checking procedure has to keep matching the task. The domain re-skin that defeated every
+single lexical statistic held `verify` byte-identical *by construction*, and would score 1.0000 here.
+
+Two gates that are statistically independent are far harder to satisfy together by accident than one
+gate is — and accident, not adversarial gaming, is what actually ruined the corpus.
+
+## Rejected, with reasons
+
+- **V3 exact-duplicate-pair rate** and **V4 distinct-fraction**: perfect 0-vs-1 separation, defeated
+  by **one character** per row. They separate these two batches only because batch-02's author never
+  touched `verify`. Lazy-template tripwires — keep as free preconditions, never as the bar.
+- **V1/V2 raw SequenceMatcher on verify**: good-batch floor 0.426 (76% shared boilerplate scaffold),
+  so the usable range is 0.43–1.00 rather than 0–1. Beaten by ~20 junk tokens.
+- **The whole brief-field lexical family**: refuted above.
+
+## Standing status of the two other bars
+
+- **Lexical (median SequenceMatcher < 0.15): REFUTED.** Demote to a copy-paste tripwire.
+- **Lockstep routing test (≤5/12, mean ≥1.7): OPEN, unvalidated.** Still the better test *in
+  principle* because it measures diversity in the space the holdout is for — but it cannot be
+  checked until `mlx-serve` has an upstream again, and there is a stated mechanism by which the
+  re-skin attack may defeat it too. **Do not accept batch-16 on lockstep alone.**
+- **V6 + length band: ACCEPTED, and it is the one that works today.**
+
+Apply Gates 1 and 2 on arrival. Run lockstep as confirmation when the GPU returns; if lockstep and
+V6 disagree on the same batch, that disagreement is itself the most informative measurement
+available and should be recorded, not resolved by preference.
+
+---
+
+# GATE 3 (SNP) AND THE REAL CAUSE OF THE FILE BLACKOUT (2026-09-09)
+
+## Gate 3 — Shared Numeric Payload, FLAG-only
+
+The reskin attack rewrites 100% of the surface — domain, serialization format (syslog/JSON/CSV/ASCII
+table/key=value/XML), column names, imperative verb — while keeping the **byte-identical numeric
+payload**, the same threshold, the same operation chain and the same four-slot answer. All six rows
+have the literally identical correct answer. Solve one, you have solved all six. It drives
+SequenceMatcher to 0.0874, *below* batch-01's most-similar honest sphere (0.1030): **the lexical bar
+is not merely beatable, it is anti-correlated with what it claims to measure.**
+
+SNP scores the body instead of the costume. Extract numeric literals, drop bare single-digit
+integers (indices, id suffixes, clock fields), canonicalise via float so `0412`→412.0 and `3.80`→3.8;
+per pair take `max(Jaccard, Jaccard of each set normalised by its own max)` — the second channel
+defeats uniform rescaling. Score a pair only if both briefs carry ≥4 payload numbers.
+
+| set | SNP | measurable pairs | spheres scored |
+|---|---|---|---|
+| reskin attack | **1.0000** (worst pair 0.7391) | 15/15 | 1/1 |
+| batch-01 (good) | **0.2000** (best pair 0.2500) | **18/165 = 10.9%** | 4/11 |
+| reconstructed template | 1.0000 | 45/165 | 3/11 |
+
+Populations do not overlap even at pair level: worst attack pair 0.7391 vs best honest pair 0.2500,
+a 0.49-wide empty gap. **FLAG at ≥ 0.50** — the midpoint, not a fitted value.
+
+**The limitation is severe and non-negotiable:** SNP abstains wherever there is no numeric payload —
+**7 of 11 batch-01 spheres, 89.1% of its pairs.** It would say nothing about six reskins of a
+qualitative task (write a metaphor, resolve a social ambiguity, plan a route in prose). It is also
+evadable by *non-uniform* per-value jitter; only uniform rescaling is closed.
+
+⇒ SNP may **FLAG or ABSTAIN. It may never certify.** Coverage must be printed beside the score, or
+abstention gets silently read as a pass — which is precisely how the corpus failure survived two
+days of measurement in the first place.
+
+## A replication note worth keeping
+
+SNP reproduced **exactly** on independent reimplementation — 0.2000, 18/165, and every per-sphere
+figure to 4 dp. V6 did not: 0.0777 vs 0.1422, a 2× gap. The difference is that SNP has **no free
+parameters** (the regex, the <10 rule and the ≥4 rule are all stated), while V6's IDF-fitting scope
+was unstated and is worth a factor of two. *Prefer statistics whose specification leaves nothing to
+the implementer; where a free parameter is unavoidable, it belongs in the threshold's name.*
+
+## The file blackout is macOS TCC per-file grants — my earlier diagnosis was wrong
+
+I wrote that this was "a sandbox policy on that subtree, not the OS." That is **incorrect**. It is
+per-file macOS TCC, confirmed by `ls -leO@`:
+
+| file | `com.apple.macl` | `com.apple.provenance` | access |
+|---|---|---|---|
+| `gemini-batch-01.jsonl` | **72** | 11 | readable |
+| `gemini-batch-03.jsonl` | **72** | 11 | readable |
+| `ROUTING_002_recenter.md` | **72** | 11 | read + write |
+| `gemini-batch-02.jsonl` | **−1** | −1 | **EPERM** |
+| `PARALLEL_LLM_PLAN.md` | *(absent)* | −1 | **EPERM** |
+
+Mode is `-rw-r--r--` on every one of them and `stat()` succeeds on all; only `open()` is denied.
+A file carrying a valid `com.apple.macl` grant is accessible; one without is not. This explains every
+symptom that confused me: why it is **per-file rather than per-directory**, why it appeared to
+"spread" (I was reaching new files that had never been granted), why `getcwd()` fails on directories
+(they hold no grant), and why `dangerouslyDisableSandbox` changed nothing — the harness sandbox was
+never the constraint.
+
+**Remedy:** grant the app Full Disk Access, or Files and Folders → Desktop, in System Settings →
+Privacy & Security, then restart it. Per-file grants accumulate one user-approved file at a time and
+will never cover a repo.
+
+---
+
+# GATE 3 FINAL FORM: DP-1, THE DISTINCT-PAYLOAD RATIO (2026-09-09)
+
+SNP (above) and DP-1 detect the same thing — payload reuse — but DP-1 is the better gate and
+replaces SNP as Gate 3. Verified by independent reimplementation on the numeric channel:
+
+| set | DP-1 | per-sphere | spheres scored |
+|---|---|---|---|
+| batch-01 (good) | **1.0000** (13/13) | every scored sphere 1.000 | 4/11 |
+| reconstructed template | **0.1667** (3/18) | every scored sphere 0.167 | 3/11 |
+
+Definition: within a sphere, single-linkage cluster the briefs whose payloads collide
+(numeric-payload Jaccard ≥ 0.50); DP-1 = distinct clusters / briefs carrying a payload. **Flag below
+0.80.** 0.1667 is exactly 1/6 — six briefs, one payload.
+
+Three reasons it beats SNP as the gate:
+
+1. **It is a count a human can check by hand.** "You wrote six payloads and used one of them six
+   times." A reviewer can confirm or refute that by looking, which no similarity score allows.
+2. **It fails gracefully rather than silently.** It is defined for any sphere with ≥2 payloads, so it
+   cannot be evaded by the coverage collapse that lets a saturated 1.0-on-15-pairs look like a pass.
+3. **Unanimity is itself evidence.** Every scored sphere returns the identical value in both batches
+   (1.000 / 0.167), so the batch score is not carried by one outlier sphere.
+
+## Negative results from the same family, kept because they are load-bearing
+
+- **AT-2 artifact-presence rate FAILS**: 0.621 (good) vs 0.545 (bad). The template batch embeds
+  payloads at essentially the same rate as real work. This is the obvious first thing to reach for
+  in this family and it carries no signal — recorded so nobody reaches for it again.
+- **SK-2 pooled skeleton similarity FAILS OUTRIGHT**: 0.511 vs 0.530 — a 0.019 gap *in the wrong
+  direction*. Pooling across spheres destroys the signal, because two honest briefs of the same
+  artifact type from different spheres look alike at the skeleton level.
+- **AT-1 distinct artifact types per sphere** separates cleanly (3 vs 1, no overlap) but is diluted:
+  an artifact-free sphere scores 1 regardless of quality.
+
+## THE SCOPE LIMIT, restated because it applies to Gate 3 in both forms
+
+This whole family sees only the **55–62% of rows that embed a payload** — on batch-01, 4 of 11
+spheres. `motor_praxis`, `divergent_synthesis`, `language_semiotics` and `social_cognition` are
+largely invisible to it. Gate 3 therefore **FLAGS or ABSTAINS and never certifies**, and coverage
+must be printed beside the score. Certification is Gate 1's job alone.
+
+# THE ACCEPTANCE TEST, CONSOLIDATED
+
+Apply to batch-16 on arrival. All stdlib, no GPU, no embedder.
+
+| # | gate | threshold | batch-01 | templated | role |
+|---|---|---|---|---|---|
+| 1 | verify-field IDF cosine (IDF fit **within-sphere, N=6**) | **< 0.35** | 0.1422 | 1.0000 | certifies |
+| 2 | verify length, every row | **40–220 chars** | 61–147 | 62–140 | closes Gate 1's padding defeat |
+| 3 | distinct-payload ratio DP-1, **with coverage** | **≥ 0.80** | 1.0000 | 0.1667 | flags only |
+| — | lockstep routing test | ≤5/12 and mean ≥1.7 | 4/11, 1.91 | 11/11, 1.00 | **OPEN**, embedder down |
+
+A batch failing Gate 1 or 2, or flagged by Gate 3, is not a holdout. A batch passing all three is
+provisionally accepted and re-checked against lockstep when the GPU returns. **If lockstep and the
+verify gates disagree on the same batch, record the disagreement — do not resolve it by preference.
+That disagreement is the most informative measurement available.**
+
+## Footnote — SK-3, the zero-threshold sibling of Gate 3
+
+`SK-3 = distinct exact skeletons / artifact-bearing rows`, skeleton = the embedded payload with all
+alphanumerics erased. Batch-01: **1.0000** (41 distinct from 41 rows). Templated: **0.1667**
+(6 distinct from 36). Identical separation to DP-1.
+
+Its advantage is that it has **no threshold at all** — no Jaccard cutoff, no clustering linkage, just
+an equality count. By this session's own replication lesson (parameter-free statistics reproduced to
+4 dp; V6's unstated IDF scope was worth 2×), that is a real argument for preferring it. Its cost is
+that the erasure rule *is* a specification: what counts as "the payload" and what erasure does to
+delimiters must be pinned before use, or it acquires the same free-parameter problem by the back
+door. Either DP-1 or SK-3 is acceptable as Gate 3; whichever is used, **the extraction rule must be
+written down with the threshold, not left to the implementer.**
+
+---
+
+# THE ADVERSARIAL SYNTHESIS SUPERSEDES MY GATE — INCLUDING MY OWN FOOTNOTE (2026-09-09)
+
+13 agents, 13 attack batches, all measured. It is more thorough than the consolidation I wrote
+above and it corrects me. Recording the corrections first.
+
+## RETRACTION: my SK-3 footnote was wrong
+
+One section above I offered SK-3 (exact-skeleton dedup) as an acceptable zero-threshold Gate 3, on
+the argument that parameter-free statistics replicate. **SK-3 dies to six characters of punctuation
+jitter: 0.1667 → 0.8333.** Parameter-free is not the same as attack-resistant, and I conflated the
+two. The replication lesson stands; the recommendation built on it does not.
+
+Also rejected by the synthesis, with measurements: **SNP** (my first Gate 3), **AT-1**
+(format re-skin *inverts* it, 1.0 → 6.0 distinct types per sphere — better than the good batch),
+**AT-2** (no signal, 0.621 vs 0.545). Of my three gates only the verify channel survives, and its
+threshold is different from the one I set.
+
+## The gate that replaces it
+
+Per-sphere; a batch fails if **any** sphere fails.
+
+| test | reads | threshold | batch-01 | bad batch |
+|---|---|---|---|---|
+| **T1 SPEC** | the data specimen | core ≥ 2 shared rare tokens **OR** median schema similarity > 0.33 | core **0** in all 11 spheres; schema 0.0000 (worst pair 0.1170) | core 15–23; schema 1.0000 |
+| **T2 SKEL** | sentence skeleton, all vocabulary erased | median masked-skeleton ratio > 0.78 | median 0.5644 (range 0.1014–0.6927) | **1.0000** in all 11 |
+| **T3 VERIFY** | the verify field | median verify cosine > 0.18, **and** median verify length > 178 chars | 0.0777 (worst sphere 0.1218); length 89 | 1.0000; length 84 |
+
+Every threshold is a stated midpoint between batch-01's worst genuine sphere and the strongest
+measured evasion — none was fitted.
+
+**Note the T3 discrepancy with my own number**: it gates at **0.18**, I gated at 0.35. Same
+statistic, different IDF scope (batch-wide vs within-sphere). This is the third time today that
+unstated scope moved a threshold by ~2×. **Use 0.18 with batch-wide IDF, as specified here.**
+
+## THE HONEST RESIDUAL: attack K passes the whole gate
+
+Built and measured, not asserted. One artifact-free qualitative task — *read a stakeholder
+utterance, name the unstated concern, draft a two-sentence reply* — written six times with different
+people, settings, registers, sentence shapes and verify wordings.
+
+`T1 core 0 · T1 schema 0.0000 (abstains) · T2 skel 0.6784 (bar 0.78) · T3 vcos 0.1326 (bar 0.18)`
+→ **PASS.** Cost: about twenty minutes of writing, no tooling.
+
+**This is a whole class, not a corner case.** Only **4 of 66** batch-01 briefs carry a detectable
+data artifact, so for the payload-free spheres — `motor_praxis`, `language_semiotics`,
+`divergent_synthesis`, `social_cognition`, `metacognitive_regulation` — T1 abstains entirely and the
+batch is guarded by T2 and T3 alone. Both are beaten by varying sentence shape and check wording,
+which is exactly what a capable LLM does when told to make six briefs look different.
+
+Attack K does sit visibly above batch-01's medians (0.6784 vs 0.5644; 0.1326 vs 0.0777), so the gate
+degrades into a **warning band** there rather than clean separation.
+
+Three further stated gaps: T2's margin against structural rewriting is thin (a real per-row rewrite
+scored 0.2125, *below* batch-01's own median — sentence shape is free to vary, and T2 only works
+because template writers do not vary it); the schema channel is beatable by varying record count and
+class balance; and **nothing in the gate reads the operation the brief demands** — the operation-set
+test was dropped because synonym rotation beats it, and nothing replaced it.
+
+## The measured matrix — six attacks pass the incumbent 0.15 bar
+
+| attack | incumbent | verdict |
+|---|---|---|
+| batch-01 (good) | 0.0375 | PASS ✓ |
+| bad batch / reconstruction | 0.9748 / 0.9608 | REJECT T1+T2+T3 |
+| domain re-skin | **0.0839 passes** | REJECT T1+T2+T3 |
+| scramble brief, keep verify | **0.0890 passes** | REJECT T1+T2+T3 |
+| scramble brief + verify | **0.1140 passes** | REJECT T1+T2+T3 |
+| full-stack reskin+reroll+verify | **0.0669 passes** | REJECT T2 only |
+| + decoys | **0.0529 passes** | REJECT T2 only |
+| + sentence reorder | **0.0463 passes** | REJECT T2 only (0.8658 vs 0.78 — thinnest margin anywhere) |
+| one task, six shapes | **0.0334 passes** | REJECT T1 schema only |
+| **artifact-free, six retellings (K)** | **0.0381 passes** | **PASSES THE GATE** |
+
+## Limitations that must travel with the gate
+
+- **Validation set size is one.** Every threshold is calibrated against a single known-good batch.
+  "12% headroom" is n=1 evidence; a legitimate batch in a different house style could sit above 0.78
+  without being templated. A T2-only failure in 0.78–0.85 means *read the sphere*, do not regenerate.
+- **Calibrated for exactly 6 rows per sphere.** T1's core threshold especially — at 2 rows the
+  intersection is non-empty by chance and it false-fails (verified).
+- **Necessary, not sufficient.** Passing means no sphere reuses a specimen, is one skeleton, or
+  checks one thing. It does not mean 66 tasks are 66 tasks. Attack K passes and is one task/sphere.
+- **A false-positive mechanism was found and fixed, which implies others exist.** The first T1 core
+  channel "caught" an attack on shared tokens `('as','its','sh','my','your')` — function-word and
+  file-extension debris that became batch-rare only because the attack mangled the vocabulary. It
+  would have shipped passing for the wrong reason. **Treat any FAIL whose core is short
+  function-like tokens as suspect and read the rows.**
+
+## OPERATING PROCEDURE
+
+Run the gate. **A FAIL is decisive** — send the batch back. **A PASS is not sign-off.** Read two
+briefs from every sphere whose T1 schema is 0.0000 — in batch-01 that is seven of eleven spheres —
+because that is exactly where the gate is blind and where attack K lives.
+
+Ten minutes of reading per batch against two days of unnoticed measurement on one task per sphere.
+
+Harness: `scratchpad/gate_synth/brief_gate.py`; the 13 attack batches are `atk_A..K.jsonl` beside it,
+so the matrix is re-runnable. **Copy these out of the scratchpad before the session ends.**
+
+---
+
+# WHY convergent_logic WAS THE SINK — MECHANISM, CLOSED (2026-09-09)
+
+The sink finding above said *that* one exit absorbed the board. This says *why*, and the answer is
+that it had nothing to do with `convergent_logic`.
+
+Read-only on `atlas13.json`. For each faculty: cosine of its embedding to the installed `centreMu`,
+against its raw top-1 win count on batch-03.
+
+| faculty | cos(f, μ) | ‖f‖ | raw top-1 wins |
+|---|---|---|---|
+| metacognitive_regulation | 0.8481 | 279.0 | 13 |
+| motor_praxis | 0.8476 | 285.5 | **19** |
+| **convergent_logic** | 0.8466 | 274.4 | **15** ← never labelled |
+| predictive_simulation | 0.8393 | 297.0 | 9 |
+| spatial_topography | 0.8327 | 298.1 | 6 |
+| episodic_memory | 0.8259 | 280.3 | 2 |
+| sensory_perception | 0.8192 | 294.6 | 0 |
+| social_cognition | 0.8137 | 283.7 | 0 |
+| valuation_salience | 0.8065 | 290.7 | 2 |
+| somatic_interoception | 0.8042 | 281.9 | 0 |
+| language_semiotics | 0.7944 | 299.7 | 0 |
+| divergent_synthesis | 0.7765 | 288.1 | 0 |
+
+**Spearman(cos-to-mean, raw top-1 wins) = +0.755** across the 12 faculties.
+
+The three faculties nearest the mean took **47 of 66 wins (71%)** between them. The five furthest
+took **two wins total**. The true distribution is 6 apiece.
+
+## The two numbers that matter
+
+1. **The entire cos-to-mean range is 0.7765 – 0.8481 — a spread of 0.0716.** That 7-point differential
+   determines three quarters of the ranking. Content is deciding what is left after the mean has
+   spoken.
+2. **‖μ‖ = 236.2 against ‖f‖ ∈ [274, 300]** — the shared mean is **79–86% of every faculty vector's
+   magnitude.** Twelve vectors that are ~82% the same vector, competing on the remaining ~18%.
+
+## What this retires
+
+`convergent_logic` was **not special**. It ranked 3rd of 12 by proximity to the mean — a hair behind
+`metacognitive_regulation` and `motor_praxis` — and it is conspicuous in the error analysis for one
+reason only: **it is the one near-mean faculty with zero labelled briefs, so 100% of its wins were
+errors.** Its two neighbours were winning just as far above their share (19 and 13 against a true 6),
+but their wins were scored correct whenever they happened to land right.
+
+So the earlier framing — "a faculty that can never be right was universally attractive" — was true
+but incidental. The real statement is stronger and simpler:
+
+> **The cone collapsed a 12-way decision into a ~4-way one, ranked by proximity to μ rather than by
+> content.** Four faculties took >6 wins, seven took ≤2. Mean-centring restores the marginal
+> distribution to exactly 6 apiece.
+
+That also re-reads the "perfect flat 6-per-faculty histogram" from the lockstep section. It is *two*
+artefacts meeting: the template collapse supplies six identical rows per sphere, and centring
+supplies an unbiased 12-way decision — so each template lands all six of its rows on one exit and
+the histogram comes out exactly flat. Neither fact alone produces it.
+
+Tagged **MEASURED**. Script: `scratchpad/why_sink.py`. What it does not show: nothing here evaluates
+any faculty's description. Proximity to μ is a property of the encoder's geometry, not of whether a
+description is well written.
+
+---
+
+# THE CENTRING FIX IS INCOMPLETE: THE PROFILE PATH WAS NEVER CENTRED (2026-09-09)
+
+My own change. `assign()` centres the faculty path at `atlas13.cjs:621` and leaves the profile path
+raw at `:625`:
+
+```js
+621  const src = inEmb ? centred(atlas, atlas.facultyEmb, vec) : {...};        // centred
+625  const profile = (vec && atlas.profileEmb) ? profileCoords(atlas.profileEmb, vec) : ...;  // RAW
+```
+
+Same 35840-d space, same encoder, same μ. `profileEmb` carries the identical cone: its 12 poles sit
+at cos-to-μ 0.7759–0.8333 (spread 0.0574), against the faculties' 0.7765–0.8481 (spread 0.0716).
+
+μ does **not** cancel here, despite `profileCoords` being a difference. It computes
+`cos(unit(high),u) − cos(unit(low),u)`, normalising each pole *before* subtracting, so centring
+changes both pole directions and the query direction. Measured effect on the axis itself:
+
+| axis | RAW cos(low,high) | CENTRED |
+|---|---|---|
+| action_mode | 0.9389 | 0.8124 |
+| epistemic | 0.8881 | 0.7014 |
+| formality | 0.8522 | 0.5740 |
+| granularity | 0.9048 | 0.7072 |
+| risk | 0.8888 | 0.6879 |
+| temporality | 0.9301 | 0.8196 |
+| **mean** | **0.9005** | **0.7171** |
+
+Raw, the two *opposite poles* of each axis are 90% the same vector.
+
+## The consequence, measured on batch-01's 66 cached vectors
+
+| axis | RAW mean | RAW sd | RAW range | CEN sd | sd × |
+|---|---|---|---|---|---|
+| action_mode | −0.0012 | 0.0068 | [−0.0134, +0.0155] | 0.0408 | 5.98 |
+| epistemic | −0.0242 | 0.0064 | **[−0.0378, −0.0110]** | 0.0356 | 5.61 |
+| formality | +0.0220 | 0.0130 | [−0.0219, +0.0483] | 0.0709 | 5.46 |
+| granularity | +0.0146 | 0.0089 | [−0.0016, +0.0358] | 0.0528 | 5.96 |
+| risk | +0.0310 | 0.0102 | **[+0.0031, +0.0503]** | 0.0542 | 5.31 |
+| temporality | +0.0007 | 0.0055 | [−0.0134, +0.0137] | 0.0290 | 5.32 |
+
+**Two of six axes are sign-degenerate across the entire corpus.** `epistemic` is negative for all 66
+briefs; `risk` is positive for all 66. They cannot report one of their two poles — they emit a fixed
+bias, not a measurement. `granularity` is one brief away from the same.
+
+Centring amplifies dynamic range **5.61× on average**, drives every axis mean to ~0 (from biases like
+risk +0.0310, epistemic −0.0242), and **31.3% of all 396 profile coordinates change sign.**
+
+Raw, the profile axes are mostly reporting the constant `dot(μ, axis)` rather than anything about the
+brief. Tagged **MEASURED**. Script: `scripts_profile_cone.py`.
+
+## NOT FIXED IN CODE, deliberately — and the fix is not one line
+
+Recorded as a proposal rather than applied, for the same reason F3b exists: an **untestable,
+uncommittable edit to the routing core is precisely the silent-drift failure this document was
+opened to stop.** The embedder is down (`mlx-serve` reports `upstream: ""`) so no end-to-end check is
+possible, and git is blocked, so the edit would sit as an invisible working-tree modification.
+
+**The obvious one-line fix is wrong.** `centred()` maps over `Object.entries(embs)` and calls `sub()`
+on each value — but `profileEmb` is nested, `{axis: {low: [...], high: [...]}}`, so `sub()` would be
+handed a dict and corrupt it. A nested-aware variant is required:
+
+```js
+// alongside centred(); profileEmb is {axis: {low, high}}, one level deeper than facultyEmb
+const _centredProfileCache = new WeakMap();
+function centredProfile(atlas, poles, vec) {
+  if (!CENTRE(atlas) || !vec || !poles) return { poles, vec, centred: false };
+  const mu = atlas.centreMu;
+  const sub = (a) => { const o = new Array(a.length); for (let i = 0; i < a.length; i++) o[i] = a[i] - mu[i]; return o; };
+  let cp = _centredProfileCache.get(atlas);
+  if (!cp || cp.src !== poles) {
+    cp = { src: poles, poles: Object.fromEntries(Object.entries(poles).map(
+      ([k, p]) => [k, { low: sub(p.low), high: sub(p.high) }])) };
+    _centredProfileCache.set(atlas, cp);
+  }
+  return { poles: cp.poles, vec: sub(vec), centred: true };
+}
+// then at :625
+const pc = (vec && atlas.profileEmb) ? centredProfile(atlas, atlas.profileEmb, vec) : null;
+const profile = pc ? profileCoords(pc.poles, pc.vec)
+              : (atlas.profileDirs ? profileCoords(atlas.profileDirs, dir) : null);
+```
+
+**Before applying:** anything downstream that thresholds a profile coordinate at 0, or assumes its
+historical scale, must be re-read. Two axes have never emitted a negative (`risk`) or positive
+(`epistemic`) value in this corpus's lifetime, so any consumer tuned against that will change
+behaviour — and a 5.6× scale change will move any fixed cutoff. This is a behavioural change, not a
+bug fix, from the consumer's point of view.
+
+## AND THE CONSEQUENCE: THE PROFILE→KNOBS SYSTEM IS INERT
+
+`profileKnobs()` (`atlas13.cjs:359`) turns profile coordinates into the actual generation parameters
+for a step. It clamps to `[-1, 1]` and lerps across the full designed range:
+
+```js
+temperature: lerp(1.0, 0.0, u('risk'))                              // designed [0.00, 1.00]
+num_predict: lerp(1024, 4096, u('granularity'))                     // designed [1024, 4096]
+max_steps:   lerp(4, 12, (u('granularity') + u('action_mode')) / 2) // designed [4, 12]
+review_max:  u('risk') > 0.6 ? 3 : 2
+```
+
+The coordinates never come close to `[-1, 1]`. Emitted across batch-01's 66 briefs:
+
+| knob | designed range | **RAW (deployed)** | % of range used | CENTRED (proposed) |
+|---|---|---|---|---|
+| `temperature` | 0.00 – 1.00 | **0.47 – 0.50** | **3%** | 0.44 – 0.57 (13%) |
+| `num_predict` | 1024 – 4096 | **2558 – 2615** | **1.9%** | 2425 – 2758 (10.8%) |
+| `max_steps` | 4 – 12 | **CONSTANT 8** | **0%** | **CONSTANT 8** |
+| `review_max` | 2 or 3 | **CONSTANT 2** | 0% | **CONSTANT 2** |
+
+**Every task the router has ever profiled received temperature ≈ 0.48, num_predict ≈ 2570,
+max_steps = 8, review_max = 2.** The adaptive-parameter system is decorative. The
+`review_max: 3` branch requires `risk > 0.2` and the maximum risk coordinate ever observed is
+**0.0503** raw, **0.1222** centred — it has never fired and cannot fire.
+
+### Centring is necessary but NOT sufficient here
+
+This is the important qualifier and it separates this defect from the faculty one. Centring buys
+4–6× more spread and fixes the sign degeneracy, but `max_steps` and `review_max` stay pinned, because
+the coordinates still only reach ±0.22 against a mapping that expects ±1.
+
+So there are **two independent defects stacked**:
+
+1. **No centring** (`:625`) — the cone eats the signal; costs ~5.6× dynamic range and leaves two axes
+   sign-degenerate. Fix proposed above.
+2. **A scale mismatch in `profileKnobs`** — it assumes coordinates spanning `[-1, 1]` when the
+   estimator structurally cannot produce them. `cos(unit(high),u) − cos(unit(low),u)` is bounded by
+   `‖ĥ − l̂‖`, which for poles at cosine 0.72 is **0.75**, and in practice is far smaller because the
+   query is not aligned with the axis. **The knob mapping was never calibrated against the estimator
+   that feeds it.**
+
+Fixing (1) alone yields a system that varies temperature by ±0.06 and still cannot change
+`max_steps`. **Do not fix (1) and declare the profile system working.** (2) needs a rescale —
+standardising each axis against its observed spread is the obvious candidate, but it must be
+calibrated on a corpus that is not 77 tasks, which lands it behind batch-16 like everything else.
+
+Tagged **MEASURED**. Script: `scripts_knobs.py`. Both defects are recorded, neither is applied.
+
+---
+
+# THE ROUTER'S ADAPTIVE SURFACE IS INERT IN FOUR PLACES (2026-09-09)
+
+Having found the knob system decorative, I audited every other decision function in `atlas13.cjs`
+that is designed to vary. Four of them do not.
+
+| site | designed to vary | actually | cause |
+|---|---|---|---|
+| `profileKnobs` temperature | 0.00–1.00 | **0.47–0.50** (3%) | cone + uncalibrated scale |
+| `profileKnobs` num_predict | 1024–4096 | **2558–2615** (1.9%) | same |
+| `profileKnobs` max_steps / review_max | 4–12 / 2–3 | **constant 8 / constant 2** | same |
+| `partitionBudget` | 1024–4096 | **1024–1073** (1.6%) | cone |
+| `decideDelegation` → `executor:'sphere'` | per-sphere specialists | **unreachable** | no specialists exist |
+| `lateralDecision` → `executor:'sphere'` | lateral hand-off | **unreachable** | same |
+
+## partitionBudget
+
+`w = exp(affinity · kappa / tau)` with `kappa` defaulting to 0.5 and `tau` 0.25 — so the softmax
+sees `affinity · 2`. Measured top-1 affinities on batch-01:
+
+| arm | affinity range | sd | budgets emitted | % of designed range | max/min in a partition |
+|---|---|---|---|---|---|
+| **RAW (deployed)** | 0.7110 – 0.8628 | 0.0211 | **1024 – 1073** | **1.6%** | **1.039** |
+| CENTRED | −0.1187 – 0.3529 | 0.1028 | 1024 – 1441 | 13.6% | 1.186 |
+
+Raw, every item in a partition receives the floor to within 4%. The allocation is uniform.
+
+## `decideDelegation` and `lateralDecision` are dead for a different reason
+
+Both gate `executor: 'sphere'` on `servedTags` containing an `elle-s<level>` tag. Ollama currently
+serves `['elle:latest', 'elle-worker:latest']` — **no `elle-s*` specialist exists at all.** So every
+call returns `executor: 'central'`, and the whole sphere-delegation apparatus — the reason the atlas
+has levels and neighbours — has never once dispatched work to a sphere. `lateralDecision` can still
+return `kind: 'lateral'`, but always with `executor: 'central'`.
+
+This is not a cone problem and centring will not touch it. It is a missing-artifact problem: the
+specialists were never built. Tagged **MEASURED**, and it re-frames every "routing accuracy" number
+in this document — accuracy has been measured on a decision whose *output* currently changes nothing
+downstream.
+
+## THE IMPORTANT PART: two of these defects mask each other
+
+`partitionBudget` clamps each share with `Math.max(POOL_FLOOR, …)` after computing a softmax whose
+mean is exactly `POOL_FLOOR` when no `pool` is supplied (`total = POOL_FLOOR * n`). Items below the
+floor are raised to it; items above are not lowered. **The allocated total therefore exceeds the
+pool, and the overshoot scales with how well the router discriminates:**
+
+| affinity spread | pool | allocated | overshoot |
+|---|---|---|---|
+| near-uniform (RAW, deployed) | 6144 | 6386 | **+3.9%** |
+| centred | 6144 | 6952 | **+13.2%** |
+| strongly discriminating (hypothetical) | 6144 | 7817 | **+27.2%** |
+
+**The cone is currently hiding this bug.** Uniform affinities keep the overshoot near 4%; the moment
+routing starts discriminating properly, the budget overrun triples. So the centring fix — the thing
+this whole document argues for — would make `partitionBudget` over-allocate by ~13%, and a genuinely
+good router by ~27%.
+
+⇒ **`partitionBudget` must be fixed before, or with, any further centring.** Either renormalise
+after clamping (iteratively, since re-normalising can push others below the floor), or accept
+`POOL_FLOOR` as a floor on the *pool* rather than on each share. This is a prerequisite, not a
+follow-up, and it would not have been visible without measuring the two together.
+
+Tagged **MEASURED**. Script: `scripts_budget.py`. Nothing applied.
+
+## What this does to the session's headline
+
+"Mean-centring lifts routing accuracy 0.227 → 0.621 in-sample" remains measured and true. But the
+value of that accuracy downstream is currently **zero**, because `decideDelegation` cannot route to
+a sphere, `profileKnobs` emits constants, and `partitionBudget` allocates uniformly. The routing
+decision is correct more often and consumed by nothing that varies.
+
+That is not a reason to undo the fix. It is a reason to stop measuring routing accuracy as if it
+were the outcome, and to state plainly what the ordered dependency actually is:
+
+1. `partitionBudget` conservation (else centring makes budgets worse)
+2. `profileKnobs` recalibration (else profile centring buys ±0.06 of temperature)
+3. at least one `elle-s*` specialist (else no routing decision reaches an executor)
+4. batch-16 (else none of 1–3 can be validated)
+
+---
+
+# partitionBudget: SOLVED IN DESIGN, VERIFIED WITHOUT A GPU (2026-09-09)
+
+Item 1 of the dependency chain. Pure arithmetic, no encoder, no model — so unlike the centring
+patches this one is **testable right now**, and it was tested.
+
+## First attempt was wrong, and failing it produced the actual result
+
+I wrote a water-filling clamp-and-redistribute fix. It failed 2421 of 4000 randomised cases and, in
+every hand regime, collapsed to a uniform floor. That is not an implementation bug. It is forced:
+
+> **If every share ≥ F and the shares sum to F·n, then every share = F exactly.**
+
+The deployed default is `total = POOL_FLOOR * n`. **Under that pool, no conserving allocation can
+discriminate at all** — the constraint set contains exactly one point. The current code appears to
+discriminate only because it violates conservation (+3.9% to +27.2%, scaling with affinity spread).
+
+So the defect is not the clamp. **`partitionBudget` is asked to distribute a pool that leaves nothing
+to distribute.**
+
+## The design that follows
+
+Guarantee the floor to everyone; allocate only the **surplus** above `F·n` by affinity:
+
+```js
+function partitionBudget(items, pool, tau) {
+  const n = items.length;
+  if (!n) return [];
+  const t = Math.max(1e-6, Number(tau) || 0.25);
+  const w = items.map((it) => Math.exp(((Number(it.affinity) || 0) * (Number.isFinite(it.kappa) ? it.kappa : 0.5)) / t));
+  // the floor is a guarantee, not a share: only the surplus above n*POOL_FLOOR is allocated
+  const total = Math.min(Math.max(POOL_FLOOR * n, Number(pool) || POOL_FLOOR * n), POOL_CAP * n);
+  let surplus = total - POOL_FLOOR * n;
+  const free = new Set(w.keys());
+  const extra = new Array(n).fill(0);
+  while (free.size && surplus > 1e-9) {
+    let z = 0; for (const i of free) z += w[i]; z = z || 1;
+    const over = [...free].filter((i) => POOL_FLOOR + (surplus * w[i]) / z > POOL_CAP);
+    if (!over.length) { for (const i of free) extra[i] = (surplus * w[i]) / z; break; }
+    for (const i of over) { extra[i] = POOL_CAP - POOL_FLOOR; free.delete(i); surplus -= POOL_CAP - POOL_FLOOR; }
+  }
+  const raw = extra.map((e) => POOL_FLOOR + e);
+  const fl = raw.map(Math.floor);                       // largest-remainder rounding, so the
+  let short = Math.round(total - fl.reduce((a, b) => a + b, 0));   // integer sum still equals the pool
+  [...fl.keys()].sort((a, b) => (raw[b] - fl[b]) - (raw[a] - fl[a])).slice(0, Math.max(0, short))
+    .forEach((i) => { fl[i] += 1; });
+  return fl;
+}
+```
+
+**Verification: 6000 randomised cases — n ∈ [1,12], affinities U(−1,3), kappa ∈ {null,0.2,0.5,1.0},
+pools ∈ {default, F·n, U(1,4)×F·n, C·n, 2×C·n} — 0 conservation failures, 0 bounds violations.**
+Script: `scripts_budget_fix.py`.
+
+## The sweep, which is the actionable part
+
+Allocation ratio (max/min within a partition) against pool size:
+
+| pool | RAW affinities | CENTRED affinities |
+|---|---|---|
+| 1× F·n **(the default)** | **1.00 — uniform, forced** | **1.00 — uniform, forced** |
+| 1.5× | 1.10 | 1.35 |
+| 2× | 1.16 | 1.57 |
+| 3× | 1.22 | **1.83** |
+| 4× (= C·n) | **1.00 — everyone at the cap** | **1.00** |
+
+Two independent constraints, and both must hold before budgets mean anything:
+
+1. **The pool must sit strictly between `F·n` and `C·n`.** At either end the allocation is uniform by
+   arithmetic, not by policy. The deployed default sits exactly at the lower end. ~3× is the sweet
+   spot; no caller currently supplies a pool at all.
+2. **Even with a good pool, raw affinities buy almost nothing** — 1.22× at best, against 1.83× centred.
+   The cone caps the achievable spread independently of the pool.
+
+⇒ Fixing the conservation bug alone changes nothing observable, because the default pool forces
+uniformity anyway. **All three of — conserving allocation, a pool above the floor, and centred
+affinities — are required together.** Any one or two alone leaves budgets flat.
+
+Tagged **DERIVED** (the impossibility) and **MEASURED** (the sweep). Patch written, not applied:
+git is blocked and this is the routing core.
+
+---
+
+# profileKnobs: RECALIBRATION DESIGNED AND MEASURED (2026-09-09)
+
+Item 2 of the chain. Also pure arithmetic on cached vectors, so also verifiable now.
+
+## Per-axis scale required
+
+Calibrated on batch-01's 66 centred coordinates. Scale to map ±2.5 sd onto ±1:
+
+| axis | mean | sd | scale needed |
+|---|---|---|---|
+| temporality | −0.00080 | 0.02905 | **13.8×** |
+| epistemic | −0.00097 | 0.03561 | 11.2× |
+| action_mode | +0.00056 | 0.04085 | 9.8× |
+| granularity | −0.00095 | 0.05277 | 7.6× |
+| risk | +0.00131 | 0.05422 | 7.4× |
+| formality | −0.00116 | 0.07091 | **5.6×** |
+
+**The required scale varies 2.5× across axes, so a single global constant will not work.** A uniform
+rescale would leave `temporality` nearly flat while saturating `formality`. It must be per-axis.
+
+## What it buys
+
+| knob | RAW (deployed) | centred only | **centred + per-axis z-rescale** |
+|---|---|---|---|
+| `temperature` | 3% of range | 13.0% | **95.0%** (0.05 – 1.00, 44 distinct) |
+| `num_predict` | 1.9% | 10.8% | **82.0%** (1551 – 4070, 65 distinct) |
+| `max_steps` | 0% (constant 8) | 0% (constant 8) | **50.0%** (6 – 10, 5 distinct) |
+| `review_max` | 0% (constant 2) | 0% (constant 2) | **100% — the `3` branch fires for the first time** |
+
+`max_steps` reaches only 50% because it averages two axes, and averaging two roughly independent
+z-scores halves the variance. That is inherent to the formula, not a calibration failure.
+
+## Design notes for whoever applies it
+
+1. **The calibration constants belong in the atlas, hashed into the F3 transcript**, exactly like
+   `centreMu` — `profileScale: {axis: {mean, sd}}` plus a `profileScale_meta` recording n, source
+   corpus and install time, carried forward by `assertCarryForward`. Otherwise this is a second set
+   of silent constants that a rebuild can eat, which is Trap 8 all over again.
+2. **Do not hardcode the numbers above.** They are estimated from 66 briefs of synthetic evaluation
+   traffic. Production traffic may be narrower or wider, and the sd is what sets the whole scale.
+3. **The circularity here is mild but real.** batch-01 is the development set. However this is a
+   12-parameter estimate (mean and sd per axis), not a decision rule fitted to labels, and batch-01
+   is the only genuinely diverse corpus that exists — estimating a scale is close to the one
+   legitimate use for it. Re-estimate on batch-16 once it passes the gate, and compare: if the two
+   scale vectors disagree by more than ~1.5× on any axis, the estimate is not stable and the knobs
+   should stay off.
+4. **This is a behavioural change, loudly.** `review_max` has been 2 for the life of the system and
+   would begin returning 3; `temperature` would move from a flat ≈0.48 to spanning 0.05–1.00. Nothing
+   downstream has ever seen those values. Ship it behind a flag, like centring was.
+
+Tagged **MEASURED**. Script: `scripts_knob_fix.py`. Not applied.
+
+## Chain status
+
+1. `partitionBudget` conservation + pool — **designed, verified (6000 cases, 0 failures)**
+2. `profileKnobs` per-axis rescale — **designed, measured**
+3. at least one `elle-s*` specialist — **blocked**, none exist; needs model building, not analysis
+4. batch-16 — **in progress** (parallel agent, gated by `brief_gate/`)
+
+1 and 2 were both solvable without the GPU because they are arithmetic defects, not encoder
+defects. Neither can be *validated end to end* until 4 exists, and neither changes anything a user
+sees until 3 does.
+
+---
+
+# ITEM 3 DIAGNOSED: 66% OF THE MAP IS AT THE CENTRE AND FOUR SPHERES ARE EMPTY (2026-09-09)
+
+`decideDelegation` needs an `elle-s<level>` specialist. None are served. But the deeper problem is
+that most of them could not be trained if someone tried, because the training data is not there.
+
+Live `atlas13.json` `levels`, read-only:
+
+| level | sphere | members |
+|---|---|---|
+| **0** | **centre (the self)** | **1227** |
+| 2 | Motor Praxis | 292 |
+| 4 | Language & Semiotics | 190 |
+| 7 | **Convergent Logic** | **90** |
+| 9 | Valuation & Salience | 24 |
+| 11 | Spatial Topography | 23 |
+| 10 | Social Cognition | 2 |
+| 5 | Episodic Memory | 1 |
+| 8 | Divergent Synthesis | 1 |
+| 1 | Sensory Perception | **0** |
+| 3 | Somatic / Interoception | **0** |
+| 6 | Predictive Simulation | **0** |
+| 12 | Metacognitive Regulation | **0** |
+
+Total in levels 1850; `map.json` holds 2764 nodes.
+
+## Three things this settles
+
+1. **The centre holds 1227 of 1850 assigned members — 66%.** The twelve spheres share 623 between
+   them. The librarian premise is that knowledge lives distributed in the MAP; in practice two
+   thirds of it is undifferentiated at the origin.
+
+2. **Only three spheres could plausibly train a specialist**: Motor Praxis (292), Language &
+   Semiotics (190), Convergent Logic (90). Four are **empty**, and three more have ≤2 members. So
+   item 3 is not "build twelve specialists" — it is "**seven of twelve have no data at all.**"
+
+3. **`convergent_logic` — the faculty with zero briefs in a 990-row corpus — is the third-largest
+   sphere in the map, with 90 members.** The corpus and the map disagree completely about whether
+   that faculty exists. One of them is wrong and this document cannot say which: the briefs were
+   authored by a generator that skipped it, and the map was populated by a different process.
+   **This is the single most under-examined inconsistency in the system.** Tagged **OPEN**.
+
+## The cone does NOT explain the map's distribution
+
+Worth stating because it is the obvious hypothesis and it fails. If proximity to μ drove sphere
+membership the way it drove routing, the member counts should track cos-to-μ. They do not:
+`metacognitive_regulation` is the **closest** faculty to μ (0.8481) and has **0** members;
+`language_semiotics` is **11th of 12** (0.7944) and has **190**. Spearman is not worth computing on
+counts this degenerate, but the two orderings plainly disagree.
+
+⇒ The map was populated by a different mechanism than the one `assign()` uses today — different
+process, possibly different embeddings, certainly a different time. **The routing measurements in
+this document describe `assign()`, not the map that already exists.** Nothing here has validated
+that the 2764 nodes sitting in the map were placed by anything resembling the current router.
+
+That is a larger open question than anything else in this file, and it should be the first thing
+examined after batch-16: **re-route a sample of the existing map through the current centred
+`assign()` and measure how much of it moves.** If most of it moves, the map is stale and every
+retrieval built on it inherits the pre-centring cone.
+
+Tagged **MEASURED** (the counts) and **OPEN** (what they imply). No script needed — the numbers are
+read directly from `~/.elle/hyper-map/atlas13.json`.

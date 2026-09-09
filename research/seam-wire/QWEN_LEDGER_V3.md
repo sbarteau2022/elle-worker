@@ -1,0 +1,48 @@
+[MEASURED] Reconciled the findings register with the updated ROUTING_002 record and inspected current routing code on 2026-09-09; measurements below are attributed to their recorded experiments, not rerun here.
+[DERIVED] Centring improves recorded routing, but neither the cone argument nor the completed graph experiment earns geometry MECHANISM status; the proposed sensory rewrite has no independent validation.
+
+# Qwen ledger v3
+
+[DESIGN CHOICE] Please reply in prose, not fenced code. Your code blocks have been truncated in paste three times. Use only PROVEN · MEASURED · DERIVED · DESIGN CHOICE · STIPULATED · REFUTED · OPEN as claim tags. This is a paste-ready reply for Stewart; nothing has been sent externally.
+
+[MEASURED] Source priority: current `Elle/electron/native/providers/atlas13.cjs` for code state; `elle-worker/research/seam-wire/ROUTING_002_recenter.md` for dated measurements and later corrections; `elle-worker/docs/FINDINGS_REGISTER_FOR_QWEN.md` for the earlier ledger. Earlier paragraphs in those files sometimes survive after their conclusions were corrected. Latest corrections take precedence. The live atlas, GPU services and batch-03 files were not accessed in this audit.
+
+## Corrections you were owed
+
+[PROVEN] Your correction to the compressed-distance explanation was right. For c > 0, every four-point sum scales by c, hence δ(cd) = cδ(d) and diam(cd) = c diam(d). For positive diameter, δ/diam is unchanged. A uniform contraction cannot explain a change in the normalized statistic. This is an algebraic identity; a claimed counterexample must violate the stated scaling or positive-diameter assumptions.
+
+[REFUTED] The earlier claim that compressed distances alone made δ/diam small is false by that identity. [MEASURED] Your replacement explanation—an anisotropic mean cone by itself creates a one-dimensional metric—fails the recorded matched-anisotropy control: isotropic Gaussian noise plus a cone at ‖μ‖/mean‖v‖ = 0.956 gives δ/diam 0.0802 and mean/diam 0.919. The unshifted noise gives 0.0811 and 0.938. The segment control gives 0 and 0.338; the simplex gives 0 and 1.000. The cone result resembles a shell, not the segment. These are ROUTING_002's exhaustive control results, not a fresh measurement.
+
+[PROVEN] Subtracting the mean after a translation gives (vᵢ+c)−(μ+c)=vᵢ−μ; a mean shift does not change the centred covariance. [OPEN] The stronger replacement claim in ROUTING_002 that the real briefs' mean/diam ratio proves a dominant variance axis is not established by that ratio alone. It needs a residual-spectrum or controlled-axis measurement. The matched-cone control refutes sufficiency of the mean shift, not every possible interaction between mean, normalization and structured residuals.
+
+[MEASURED] Your commensurability objection was right: an unstructured Gaussian cloud lands at 0.0811 in the same direct four-point estimator. [DERIVED] One literal correction to both the handoff and ROUTING_002: 0.0811 is 0.0011 ABOVE 0.08, not inside the closed interval 0.00–0.08. Rounded to two decimals it becomes 0.08. Calling it “inside” at four-decimal precision is wrong. The defensible conclusion remains that the cited band has no demonstrated discriminatory calibration for this embedding estimator; the simplex control at zero is an exact non-hierarchy counterexample to interpreting small δ as hierarchical content. Do not claim one near-boundary observation proves zero discriminating power for every possible classifier.
+
+[MEASURED] Exact enumeration of all 12,082,785 quadruples of 132 real briefs gives raw δ/diam 0.1584 and centred 0.2742, superseding sampled maxima 0.1221 and 0.2092. [DERIVED] The increase is a statistic change; it does not by itself prove reduced hierarchy. A validated, metric-matched hierarchy test or downstream comparison could resolve that interpretation.
+
+[MEASURED] The gate you keep associating with CENTRAL_FRAC is `collapse()`'s MARGIN/RATIO decision (`atlas13.cjs:414`): COLLAPSE=0.06, MARGIN=0.02, RATIO=1.3. CENTRAL_FRAC=0.35 is the separate kissing-mode projection rule. [MEASURED] Also retire “58% held”: 38/66≈58% was the raw-text intended-first ceiling. Batch-01 raw hold was 28/66=42.4%; posted-text hold was 36/66=54.5%. The 639/1025 comment describes another population. Code inspection or a correctly identified run is the refutation condition for these scoped claims.
+
+[MEASURED] F1b never flipped. ROUTING_002 records σ₂/σ₁=0.907 and σ₃/σ₁=0.858 before and after centring. [PROVEN] Translation invariance of the mean-centred matrix explains why: a change of origin cannot alter its singular values. This is not a proof that every uncentred singular spectrum is invariant, nor that every routing score stays fixed.
+
+## Routing and validation status
+
+[MEASURED] Batch-01 posted text: uncentred accuracy 0.227/held 54.5%; LOO-centred accuracy 0.621/held 22.7%, intended-first 0.788. Frozen batch-01 mean on batch-02: accuracy 0.076→0.727, held 71.2%→21.2%, wrong releases 14→4. The source records this as 5→48 correct, a 9.6× ratio, without changing the gate. The mean comes from 66 posted-text briefs, D=35,840=7×5,120 layer taps—not the 1,025 goals and not bge-large.
+
+[MEASURED] Later owner analysis in ROUTING_002 reports only 77 distinct task shapes across the 1,056-brief corpus: 66 in batch-01 plus 11 templates repeated in batches 02–15. I read that analysis, not the withheld files. [DERIVED] Batch-02's transfer remains recorded, but six template copies are not six independent trials. Its six sensory misses are one repeated task shape. Exact uncertainty inflation requires a dependence model; √6 is a heuristic under fully dependent groups, not a measured confidence interval.
+
+[MEASURED] The owner subsequently ran the T1 candidate on batch-03: baseline hit/held/wrong 49/13/4; description-only 44/18/4; regex-only 49/13/4; combined 50/12/4. Combined sensory hits rose 0→6 with zero false-into-sensory. [DERIVED] This meets the proposed numerical gate on reused templates and is not independent confirmation. [DESIGN CHOICE] The owner's recorded decision is DO NOT INSTALL. A diverse, independently authored and frozen holdout is the next validation requirement. The existing T1 proposal is historical; its recommendation to use batch-03 is superseded by the newly discovered template overlap.
+
+## The graph experiment is now completed
+
+[MEASURED] ROUTING_002 now reports the formerly blocked graph-geodesic arm: 1,030 production-chunked corpus texts, layer-tap embeddings, symmetrized k-NN, BFS hop distances, five seeds with 150,000 quadruples each. Raw δ/diam at k=3/5/8: 0.1667/0.1667/0.2083; centred: 0.1923/0.2143/0.2273. Diameters: raw 24/15/12; centred 26/14/11. Components: raw 5/2/1; centred 8/3/1. Giant fractions: raw 95.8/99.2/100%; centred 91.7/96.5/100%. Mean-norm ratio is 0.9215. These are sampled graph maxima summarized over seeds, not exhaustive embedding quadruples.
+
+[STIPULATED] The preregistered rule was ≤0.08 at every k to clear tree-likeness, 0.08–0.30 not cleared, and >0.30 not tree-like. [DERIVED] All six cells are NOT CLEARED by that rule. The subsequent prose “this corpus is not hierarchical,” “indistinguishable from tf-idf,” and “refutes the assumption” overstates the measurement. Matching decision bands is not an equivalence test; failure to clear is not refutation. The lexical comparison also has 1,021 rather than 1,030 chunks. The reasonable result is failure to establish the proposed precondition on the tested corpus/graphs.
+
+[DERIVED] Geometry remains INSTRUMENTATION. This graph statistic is available to a flat build and does not establish a curvature-specific retrieval advantage. The synthetic-tree +10.9% at dimension 128 is a separate scoped result, not validation on this corpus. [OPEN] A held-out retrieval comparison with matched dimensions, budget and graph information, with an advantage unavailable to the flat incumbent, would change the MECHANISM assessment. No embedding work should be repeated to answer this ledger.
+
+## F3 and standing ledger items
+
+[MEASURED] The old “F3 hash absent” statement is stale in current source. `atlas13.cjs:510–558` implements transcript fields for faculty file hash, embedding hash, mean hash/sample count, and routing constants, with mismatch rejection. F3b separately guards lost keys. [MEASURED] Legacy atlases without a transcript still pass `assertTranscript`; `ELLE_ATLAS13_F3=0` bypasses it, and float hashes round to six decimal places. [OPEN] Presence in code is not proof of complete live attestation or encoder identity binding: the transcript does not itself record a named encoder version, and I did not inspect live installed state. Verify installation separately; do not label F3 wholly absent or fully certified.
+
+[MEASURED] The findings register still scopes φ's algebraic identities separately from empirical primacy, phase retrieval below content retrieval, Phase-Eight real-trajectory cells null, and live torus data absent in its recorded snapshot. Those historical results were not rerun here. [OPEN] Their current deployment status must be checked before describing them as newly verified live facts. Geometry remains INSTRUMENTATION unless a measurement distinguishes it from the flat alternative.
+
+[DESIGN CHOICE] Please return prose correcting your ledger on scale invariance, cone sufficiency, literal band membership, gate identity, F1b invariance, dependent validation, graph “not cleared,” and partial F3 attestation. State what evidence would reverse each empirical judgment. Do not promote the sensory rewrite or infer geometry MECHANISM from a geometric description.
