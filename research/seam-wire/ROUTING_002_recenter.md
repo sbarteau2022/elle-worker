@@ -1904,3 +1904,61 @@ workflow agent and my reimplementation, purely from an unstated IDF-fitting scop
 have no free parameters — the pairs, the constants and the vectors are all fixed — and they
 replicate exactly. That contrast is the same lesson twice: **specification tightness predicts
 replication better than the statistic's separation power does.**
+
+---
+
+# THE REVIEWER BLOCKS CORRECT WORK — HAND-VERIFIED, NOT A RATE (2026-09-09)
+
+Follows from `BOARD_BLOCKED_TRIAGE.md` (parallel session), which found 709 blocked tasks with
+**467 (65.9%) terminating on κ sign-off** and flagged two cases where the *gate*, not the worker,
+looked wrong. Both check out, and the second is worse than reported.
+
+## Verified by reading the full event chain
+
+**#1058 — a correct answer permanently blocked.** GSM8K: 20 + 25 + 70 + 60.
+The coordinator's first two rejections were *right* — it caught "1/4 times more than 20 is 25, not
+35" and "'10 times more' than 60 is 70, not 150", and drove the worker from 150 to the correct 175.
+Then, on the third and terminal submission:
+
+> "The calculation is incorrect: … The correct total is **110 (20 + 25 + 70 + 60)**, not 175."
+
+It derived all four addends correctly and failed the addition. Three rejections is terminal, so the
+right answer is blocked forever.
+
+**#1158 — the same problem, a different wrong sum, in the opposite direction.**
+> "The answer of 150 rings happens to be arithmetically correct **(20 + 25 + 70 + 60 = 150)**"
+
+Here the reviewer *falsely accepted* the arithmetic of a wrong answer (150), then blocked the task on
+a formatting rule. So the identical sum defeated the reviewer twice, yielding 110 once and 150
+twice, never 175.
+
+**#1304** — "The final numeric answer of 9.0 hours is mathematically correct (210/70 + 240/80 =
+3.0 + 3.0)." That expression is **6**, not 9.
+
+**#1160** — "The calculation is correct (5 * 3 * 5 + 1 * 2 = 13)." That expression is **77**.
+
+## The failure mode is specific
+
+In every case the *component reasoning is sound* and the *final arithmetic is not*. The reviewer
+correctly identifies which quantities matter, correctly derives each one, then miscombines them —
+and its verdict is driven by the miscombination. That is a much narrower defect than "the reviewer
+is unreliable", and it suggests a cheap fix: **the coordinator should be required to emit its
+arithmetic through `run_code` rather than in prose**, which is the very rule it keeps blocking
+workers for not following.
+
+## RETRACTED: my own error rate
+
+I first reported **13.6%** of reviewer arithmetic assertions as wrong (11 of 81 by regex), then
+**11.4%** (8 of 70) with a chain-aware rewrite. **Both are wrong and both are withdrawn.** Free-prose
+extraction cannot separate a genuine chain `a+b = c = d` from a list of separate assertions
+`a*b=c, d*e=f`; the first parser mis-split chains, the second greedily merged lists. Every
+"inconsistency" in the second run's output is a parser artifact — hand-checking cleared all eight.
+
+**There is no defensible rate here, only an existence result:** at least four tasks carry
+demonstrably wrong reviewer arithmetic, one of which permanently blocked a correct answer. Tagged
+**MEASURED** for the four cases, **OPEN** for the prevalence.
+
+Getting a real rate needs the reviewer's arithmetic emitted in a machine-checkable form — which is
+the fix above. Until then the 467 κ-blocked tasks cannot be triaged automatically, and the
+`BOARD_BLOCKED_TRIAGE` proposal to cancel 75 duplicates should not be executed: if the gate errs,
+some of those blocked records are correct work.
