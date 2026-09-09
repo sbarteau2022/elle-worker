@@ -59,28 +59,11 @@ $\varepsilon = 10^{-5}$.
 
 ## 2. The encoder ψ: fingerprint → point
 
-Ripper reports are heterogeneous JSON (a PFAR spectrum, a vFAR field report, a
-PAMI index). The encoder makes them commensurable by **feature hashing over
-numeric leaves**:
+[MEASURED] `ripVector` produces 29-dimensional input features by default (`RIP_DIM = 29`). PAMI-like inputs use `pamiBridgeVector`, truncated or zero-padded to the requested feature width. Other reports contribute up to 512 finite numeric leaves in sorted-key order. Each path hashes to a unit direction; its value contributes `tanh(sign(v) * log(1 + abs(v)))` times that direction. If the resulting sum is u with finite norm n > 0, the feature vector is `u * tanh(n) / n`; the zero vector remains zero. This replaces the old hard clamp that erased radial variation.
 
-1. Flatten the report to its numeric leaves $\{(p_i, v_i)\}$, where $p_i$ is
-   the dotted JSON path (keys visited in sorted order, so the flattening is
-   canonical) and $v_i$ the finite value. Capped at 512 leaves.
-2. Each path hashes (FNV-1a → mulberry32 → Box–Muller) to a fixed
-   pseudo-random unit direction $e(p_i) \in \mathbb{R}^D$, $D = 16$.
-3. Values are squashed scale-robustly:
-   $s(v) = \tanh\big(\operatorname{sign}(v)\ln(1+|v|)\big) \in (-1, 1)$.
-4. The feature vector is the normalized superposition
-   $$f = \Big(\sum_i s(v_i)\, e(p_i)\Big) \Big/ \max\Big(1, \big\lVert \sum_i s(v_i)\, e(p_i) \big\rVert\Big) \in \overline{\mathbb{B}}^D_{\;\text{(tangent)}}.$$
-5. Placement in the ball: $\psi(f) = \exp_0(0.9 f)$, so pure-feature points
-   sit at depth $\le 2\operatorname{artanh}(\tanh 0.9) = 1.8$.
+[MEASURED] Input feature width and fitted manifold dimension are separate: `hyperMap` defaults to 128 manifold coordinates. A 1024-wide consumer must adapt at its own boundary. See `src/hyper.ts` and `PSI_ENCODER_FINDING.md`.
 
-Properties: deterministic (same structure → same point, always — an
-instrument, not an oracle), Lipschitz in each leaf value, and defined for
-*any* ripper output including future ones. This is the "neural" layer in its
-honest current form: a fixed random-feature encoder. The trained refinement is
-the optimization below; a learned $W$ replacing the hash directions is Open
-Question 3.
+[OPEN] These transformations are instrumentation. They do not establish geometry-specific retrieval benefit on real content; the old fixed-radius encoder's failure cannot be repaired by relabelling its dimensions.
 
 ## 3. The mapping: Riemannian optimization
 
@@ -139,7 +122,7 @@ at an id-hashed direction of radius 0.1. So features *place* and edges
 
 **Determinism and bounds.** No `Math.random` anywhere: seeded mulberry32
 throughout, so the same (nodes, edges, options) always yields the identical
-atlas. Caps: 256 nodes, 2048 edges, 1000 epochs, dim ∈ [2, 16] (default 2).
+atlas. Caps: 20,000 nodes, 200,000 edges, 1,000 epochs, dim ∈ [2, 512] (default 128). `hyperMapCapacity()` reports dropped input so callers can distinguish a complete atlas from clipped input.
 Cost is $O(\text{epochs} \cdot |E| \cdot (1 + \text{negs}) \cdot n)$ — bounded
 by construction, Worker-safe.
 
