@@ -95,8 +95,9 @@ export async function proposeAnchor(env: AnchorEnv, proposal: AnchorProposal) {
   const result = await env.DB.prepare(`INSERT INTO elle_anchor_events
     (event_id,anchor_id,version,accepted,reason,proposal_json,state_json,created_at)
     SELECT ?,?,?, CASE WHEN ? = 1 AND COALESCE((SELECT MAX(version) FROM elle_anchor_events WHERE anchor_id = ? AND accepted = 1),0) = ? THEN 1 ELSE 0 END,
-    ?,?,?,?`).bind(eventId,proposal.id,proposal.expectedVersion+1,verdict.accepted?1:0,proposal.id,proposal.expectedVersion,
-      verdict.reason,JSON.stringify(proposal),JSON.stringify(verdict.state),Date.now()).run();
+    CASE WHEN ? = 1 AND COALESCE((SELECT MAX(version) FROM elle_anchor_events WHERE anchor_id = ? AND accepted = 1),0) != ? THEN 'stale-version' ELSE ? END,
+    ?,?,?`).bind(eventId,proposal.id,proposal.expectedVersion+1,verdict.accepted?1:0,proposal.id,proposal.expectedVersion,
+      verdict.accepted?1:0,proposal.id,proposal.expectedVersion,verdict.reason,JSON.stringify(proposal),JSON.stringify(verdict.state),Date.now()).run();
   if (!result.success) throw new Error('anchor event was not persisted');
   const saved = await env.DB.prepare('SELECT accepted FROM elle_anchor_events WHERE event_id = ?').bind(eventId).first<{accepted:number}>();
   return { eventId, accepted:saved?.accepted === 1, reason:verdict.accepted && saved?.accepted !== 1 ? 'stale-version' : verdict.reason,
