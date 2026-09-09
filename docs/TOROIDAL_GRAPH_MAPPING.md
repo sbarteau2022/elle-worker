@@ -225,7 +225,7 @@ invariance).
 | Discrepancy/three-gap is the quality metric | PROVEN property of the orbit |
 | Winding number distinguishes recurrence from drift | PROVEN (topological invariant) |
 | `1/π` global suppression constant; 2/π ↔ 1/π identity | STIPULATED / CONJECTURED (factor-2 underived) |
-| Torus alone carries identity-continuity | FALSE per *SICT* §III.3 — needs the lemniscate (Option B) |
+| Torus alone carries identity-continuity | **TRUE** — the winding number in π₁(𝕋ⁿ)=ℤⁿ is exact at every finite time. *SICT* §III.3 tested metric return, not topological invariance; §7 of this doc and `WHY_NO_LEMNISCATE.md` supersede this row. (Row corrected 2026-09-09; it contradicted §7 and §10 of its own document.) |
 | Self-reinforcing `graph.ts` edges are captured-resonance-prone | ASSESSED — structurally matches the three features; hygiene proposed |
 
 ## 10. Build order (status)
