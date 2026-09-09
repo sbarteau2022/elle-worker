@@ -1,0 +1,181 @@
+{
+ "n": 66,
+ "placed": 66,
+ "hits": 15,
+ "routing_accuracy": 0.22727272727272727,
+ "over_lanes": 30,
+ "done": 1,
+ "approved": 0,
+ "blocked": 1,
+ "confusion": {
+  "sensory_perception": {
+   "n": 6,
+   "placed": 6,
+   "hit": 0,
+   "levels": {
+    "0": 4,
+    "7": 2
+   }
+  },
+  "motor_praxis": {
+   "n": 6,
+   "placed": 6,
+   "hit": 4,
+   "levels": {
+    "0": 2,
+    "2": 4
+   }
+  },
+  "somatic_interoception": {
+   "n": 6,
+   "placed": 6,
+   "hit": 1,
+   "levels": {
+    "0": 3,
+    "3": 1,
+    "7": 2
+   }
+  },
+  "language_semiotics": {
+   "n": 6,
+   "placed": 6,
+   "hit": 0,
+   "levels": {
+    "0": 5,
+    "2": 1
+   }
+  },
+  "episodic_memory": {
+   "n": 6,
+   "placed": 6,
+   "hit": 0,
+   "levels": {
+    "0": 4,
+    "7": 2
+   }
+  },
+  "predictive_simulation": {
+   "n": 6,
+   "placed": 6,
+   "hit": 2,
+   "levels": {
+    "0": 3,
+    "6": 2,
+    "7": 1
+   }
+  },
+  "divergent_synthesis": {
+   "n": 6,
+   "placed": 6,
+   "hit": 0,
+   "levels": {
+    "0": 5,
+    "7": 1
+   }
+  },
+  "valuation_salience": {
+   "n": 6,
+   "placed": 6,
+   "hit": 0,
+   "levels": {
+    "0": 5,
+    "7": 1
+   }
+  },
+  "social_cognition": {
+   "n": 6,
+   "placed": 6,
+   "hit": 4,
+   "levels": {
+    "0": 2,
+    "10": 4
+   }
+  },
+  "spatial_topography": {
+   "n": 6,
+   "placed": 6,
+   "hit": 0,
+   "levels": {
+    "0": 2,
+    "2": 1,
+    "7": 3
+   }
+  },
+  "metacognitive_regulation": {
+   "n": 6,
+   "placed": 6,
+   "hit": 4,
+   "levels": {
+    "0": 1,
+    "7": 1,
+    "12": 4
+   }
+  }
+ }
+}
+#1432 sensory_perception L1 → L0 ✗ central plain blocked
+#1433 sensory_perception L1 → L7 ✗ central lane claimed
+#1434 sensory_perception L1 → L0 ✗ central plain claimed
+#1435 sensory_perception L1 → L7 ✗ central lane open
+#1436 sensory_perception L1 → L0 ✗ central plain open
+#1437 sensory_perception L1 → L0 ✗ central plain open
+#1438 motor_praxis L2 → L0 ✗ central plain open
+#1439 motor_praxis L2 → L2 ✓ central lane open
+#1440 motor_praxis L2 → L0 ✗ central plain open
+#1441 motor_praxis L2 → L2 ✓ central lane open
+#1442 motor_praxis L2 → L2 ✓ central lane open
+#1443 motor_praxis L2 → L2 ✓ central lane open
+#1444 somatic_interoception L3 → L3 ✓ central lane open
+#1445 somatic_interoception L3 → L7 ✗ central lane open
+#1446 somatic_interoception L3 → L0 ✗ central plain open
+#1447 somatic_interoception L3 → L7 ✗ central lane open
+#1448 somatic_interoception L3 → L0 ✗ central plain open
+#1449 somatic_interoception L3 → L0 ✗ central plain open
+#1450 language_semiotics L4 → L0 ✗ central plain open
+#1451 language_semiotics L4 → L2 ✗ central lane open
+#1452 language_semiotics L4 → L0 ✗ central plain open
+#1453 language_semiotics L4 → L0 ✗ central plain open
+#1454 language_semiotics L4 → L0 ✗ central plain open
+#1455 language_semiotics L4 → L0 ✗ central plain open
+#1456 episodic_memory L5 → L7 ✗ central lane open
+#1457 episodic_memory L5 → L0 ✗ central plain open
+#1458 episodic_memory L5 → L7 ✗ central lane open
+#1459 episodic_memory L5 → L0 ✗ central plain open
+#1460 episodic_memory L5 → L0 ✗ central plain open
+#1461 episodic_memory L5 → L0 ✗ central plain open
+#1462 predictive_simulation L6 → L7 ✗ central lane open
+#1463 predictive_simulation L6 → L6 ✓ central lane open
+#1464 predictive_simulation L6 → L6 ✓ central lane open
+#1465 predictive_simulation L6 → L0 ✗ central plain open
+#1466 predictive_simulation L6 → L0 ✗ central plain open
+#1467 predictive_simulation L6 → L0 ✗ central plain open
+#1468 divergent_synthesis L8 → L0 ✗ central plain open
+#1469 divergent_synthesis L8 → L0 ✗ central plain open
+#1470 divergent_synthesis L8 → L0 ✗ central plain open
+#1471 divergent_synthesis L8 → L7 ✗ central lane open
+#1472 divergent_synthesis L8 → L0 ✗ central plain open
+#1473 divergent_synthesis L8 → L0 ✗ central plain open
+#1474 valuation_salience L9 → L0 ✗ central plain open
+#1475 valuation_salience L9 → L0 ✗ central plain open
+#1476 valuation_salience L9 → L7 ✗ central lane open
+#1477 valuation_salience L9 → L0 ✗ central plain open
+#1478 valuation_salience L9 → L0 ✗ central plain open
+#1479 valuation_salience L9 → L0 ✗ central plain open
+#1480 social_cognition L10 → L0 ✗ central plain open
+#1481 social_cognition L10 → L10 ✓ central lane open
+#1482 social_cognition L10 → L10 ✓ central lane open
+#1483 social_cognition L10 → L10 ✓ central lane open
+#1484 social_cognition L10 → L10 ✓ central lane open
+#1485 social_cognition L10 → L0 ✗ central plain open
+#1486 spatial_topography L11 → L0 ✗ central plain open
+#1487 spatial_topography L11 → L7 ✗ central lane open
+#1488 spatial_topography L11 → L0 ✗ central plain open
+#1489 spatial_topography L11 → L7 ✗ central lane open
+#1490 spatial_topography L11 → L2 ✗ central lane open
+#1491 spatial_topography L11 → L7 ✗ central lane open
+#1492 metacognitive_regulation L12 → L12 ✓ central lane open
+#1493 metacognitive_regulation L12 → L12 ✓ central lane open
+#1494 metacognitive_regulation L12 → L12 ✓ central lane open
+#1495 metacognitive_regulation L12 → L7 ✗ central lane open
+#1496 metacognitive_regulation L12 → L12 ✓ central lane open
+#1497 metacognitive_regulation L12 → L0 ✗ central plain open

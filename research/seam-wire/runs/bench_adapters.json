@@ -1,0 +1,63 @@
+{
+ "base": "/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/Elle/tools/mlx-serve/weights/Qwen3.8-27B-4bit",
+ "layers": "0-21,23,27,31,35,39,43-63",
+ "lora_layers": 21,
+ "rank": 16,
+ "seq": 1024,
+ "steps": 4,
+ "nora": false,
+ "results": {
+  "lora": {
+   "s_per_step": 25.11,
+   "first_step": 26.22,
+   "all": [
+    26.22,
+    25.38,
+    25.11,
+    25.07
+   ],
+   "peak_gb": 22.76,
+   "trainable_m": 10.3,
+   "vs_lora": 1.0
+  },
+  "cheap-dora": {
+   "s_per_step": 44.94,
+   "first_step": 44.95,
+   "all": [
+    44.95,
+    44.94,
+    44.93,
+    45.03
+   ],
+   "peak_gb": 22.78,
+   "trainable_m": 10.7,
+   "vs_lora": 1.79
+  },
+  "rosen-hypdora": {
+   "s_per_step": 77.42,
+   "first_step": 65.26,
+   "all": [
+    65.26,
+    66.24,
+    1129.88,
+    77.42
+   ],
+   "peak_gb": 22.79,
+   "trainable_m": 11.4,
+   "vs_lora": 3.08
+  },
+  "dora": {
+   "s_per_step": 1119.67,
+   "first_step": 1982.28,
+   "all": [
+    1982.28,
+    1119.67,
+    2054.14,
+    1030.44
+   ],
+   "peak_gb": 22.76,
+   "trainable_m": 10.7,
+   "vs_lora": 44.59
+  }
+ }
+}

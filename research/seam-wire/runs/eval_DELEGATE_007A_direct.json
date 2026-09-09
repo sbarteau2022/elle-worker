@@ -1,0 +1,218 @@
+{
+ "summary": {
+  "tag": "elle-s7",
+  "label": "DELEGATE_007A_direct",
+  "n": 20,
+  "offset": 540,
+  "correct": 0,
+  "accuracy": 0.0,
+  "accuracy_served": 0.0,
+  "server_errors": 0,
+  "no_number": 20,
+  "mean_tokens": 1024,
+  "seconds_per_row": 47.6,
+  "void": false
+ },
+ "rows": [
+  {
+   "row": 540,
+   "gold": 39.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 49.2
+  },
+  {
+   "row": 541,
+   "gold": 50.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.1
+  },
+  {
+   "row": 542,
+   "gold": 7.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.2
+  },
+  {
+   "row": 543,
+   "gold": 6.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 48.0
+  },
+  {
+   "row": 544,
+   "gold": 80.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.6
+  },
+  {
+   "row": 545,
+   "gold": 30.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 46.7
+  },
+  {
+   "row": 546,
+   "gold": 130.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.1
+  },
+  {
+   "row": 547,
+   "gold": 81.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 48.8
+  },
+  {
+   "row": 548,
+   "gold": 100.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.4
+  },
+  {
+   "row": 549,
+   "gold": 398.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.3
+  },
+  {
+   "row": 550,
+   "gold": 27.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.9
+  },
+  {
+   "row": 551,
+   "gold": 17.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 48.2
+  },
+  {
+   "row": 552,
+   "gold": 450.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.5
+  },
+  {
+   "row": 553,
+   "gold": 92.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.6
+  },
+  {
+   "row": 554,
+   "gold": 54.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.6
+  },
+  {
+   "row": 555,
+   "gold": 2.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.2
+  },
+  {
+   "row": 556,
+   "gold": 160.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.1
+  },
+  {
+   "row": 557,
+   "gold": 70.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.1
+  },
+  {
+   "row": 558,
+   "gold": 3.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 47.0
+  },
+  {
+   "row": 559,
+   "gold": 16.0,
+   "pred": null,
+   "correct": false,
+   "error": null,
+   "no_number": true,
+   "tokens": 1024,
+   "seconds": 48.6
+  }
+ ]
+}

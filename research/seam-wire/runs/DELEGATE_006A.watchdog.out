@@ -1,0 +1,5 @@
+[watchdog] 1 OOM row(s) → restart #1
+[watchdog] reopened 1; server up
+[watchdog] 1 OOM row(s) → restart #2
+[watchdog] reopened 1; server up
+[watchdog] all 20 rows done; restarts used 2

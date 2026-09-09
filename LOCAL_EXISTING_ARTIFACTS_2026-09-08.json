@@ -1,0 +1,235 @@
+{
+  "status": "Preserved existing local files. These are not reruns of the corrected architecture and do not certify corrected-model performance.",
+  "files": [
+    {
+      "path": "research/seam-wire/briefs/gemini-batch-01.jsonl.emb.json",
+      "bytes": 32244575,
+      "sha256": "f5e1170353296ec9b999e8a22841843a6b286f61e2333a428aef91991c174a46"
+    },
+    {
+      "path": "research/seam-wire/briefs/gemini-batch-01.jsonl.posted.emb.json",
+      "bytes": 32443761,
+      "sha256": "077f57383fd6bcf98f753402782520d8e07301392d44b03ae3821831c7b20288"
+    },
+    {
+      "path": "research/seam-wire/horizon_atlas.json",
+      "bytes": 56169,
+      "sha256": "a6db925c812cc596dd0328b44f17e435a84f713f79840d207958615c46a0993d"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_005.direct.out",
+      "bytes": 377,
+      "sha256": "674196e84db407ee86726ce8570879c09068d023866e78d39a4e5128407b6342"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_005.grade.out",
+      "bytes": 1160,
+      "sha256": "e23084d8b6870c95110ef95ef5d0df113e6eabf2dab1a1a2d1ad7493a6bbb483"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_005.post.out",
+      "bytes": 154,
+      "sha256": "8672f72dc3cb0fa2e8274bae30c9c5befb42fc26acfc6c454c555b5acee41b1a"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_005.posted_path",
+      "bytes": 116,
+      "sha256": "ad25435b1f64391eaacdb790fa5c126b60b7c5a765eb8e26b1e22736c6305456"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006A.direct.out",
+      "bytes": 408,
+      "sha256": "e6081e5093db009f94b1bd9f546a89c5a759feb62e00631823277b62cf725356"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006A.grade.out",
+      "bytes": 1300,
+      "sha256": "bce258a1b88a93b96072e453972d453259e4b959f59b93a97788132579225cda"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006A.post.out",
+      "bytes": 154,
+      "sha256": "5bd5f3b6cbe9506f7d9c3a6557e5a1abce3c2ec857b075321776f1e6290627c7"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006A.posted_path",
+      "bytes": 116,
+      "sha256": "cf8ed1b4462ac50ab5ae519f83cc623f27e813ed155963c1141655c977a463e4"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006A.watchdog.out",
+      "bytes": 189,
+      "sha256": "ff7b1aace778620a46d29160fc5d4ef3678d3d6b34deadbe41834a7c7191f317"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006B.direct.out",
+      "bytes": 456,
+      "sha256": "406f899ee1e1b0bff1a6dc7035dbc19e2b388b1473c9ae00e5d387edc9cbc788"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006B.post.out",
+      "bytes": 154,
+      "sha256": "b2f9194f4d2989c5bcf37052f07cc6f381359ec2c94d59c4306f2e07779e213b"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006B.posted_path",
+      "bytes": 116,
+      "sha256": "2f7077afe2285bbcfd9e4bedeccab26c47c685f214bf7f44171950abe76271c8"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_006B.watchdog.out",
+      "bytes": 72,
+      "sha256": "0d81b2e626c8e4634d3ead3a314a3132573e502b4b874b2958fac79793778a0d"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_007A.direct.out",
+      "bytes": 411,
+      "sha256": "2d8d29aefc5d9deab5cb8e3a4105e7076657cbcbf418cde9d285f2ab3b524a4a"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_007A.post.out",
+      "bytes": 154,
+      "sha256": "7a3cb0758f48431e2223738a9d4b57b5277f371860c047c8eebe19583b6de1ae"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_007A.posted_path",
+      "bytes": 116,
+      "sha256": "70cd32bd3f0f49b22a912e23f495c7cfb27744becc56720c81384f19b5dd2b97"
+    },
+    {
+      "path": "research/seam-wire/runs/DELEGATE_007A.watchdog.out",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "research/seam-wire/runs/bench_adapters.json",
+      "bytes": 1037,
+      "sha256": "ce779c5832d67456b6c33bf016cde5fb0e78a4d60af8c14b06688c691194ef76"
+    },
+    {
+      "path": "research/seam-wire/runs/bench_adapters.void1.json",
+      "bytes": 817,
+      "sha256": "2a4b14f55fe542af59470158eebd1a0b38ecc8d718da851f9c53e6369694c2a3"
+    },
+    {
+      "path": "research/seam-wire/runs/briefs.check.out",
+      "bytes": 5315,
+      "sha256": "f9b75b60c313aa776412a06fc21d7d5c2395cb74ab092f1b1c80bf33cd570c57"
+    },
+    {
+      "path": "research/seam-wire/runs/briefs.post.out",
+      "bytes": 374,
+      "sha256": "b285efd39fdfb734d9f6b5b4d5a1200a71cb53d6430b04f4c43f644aef9ef264"
+    },
+    {
+      "path": "research/seam-wire/runs/eval_DELEGATE_005_direct.json",
+      "bytes": 3434,
+      "sha256": "17154049b2f15c1ef9051a59d0ed0d70d4cddef18d376e9cd0fbbd17559960a2"
+    },
+    {
+      "path": "research/seam-wire/runs/eval_DELEGATE_006A_direct.json",
+      "bytes": 3415,
+      "sha256": "7e4e8698af9c36777877110b055040eec96c234d2d056530312e87b90c227941"
+    },
+    {
+      "path": "research/seam-wire/runs/eval_DELEGATE_006B_direct.json",
+      "bytes": 3656,
+      "sha256": "54aa364e64a7d56de684a6943e12528259cdcc89178c0bdc633d547232a67821"
+    },
+    {
+      "path": "research/seam-wire/runs/eval_DELEGATE_007A_direct.json",
+      "bytes": 3426,
+      "sha256": "b48d932fc7ebf0b52fdf444d50ec1e98b93eeda9ab63d38a9d3f80b6960ae3d9"
+    },
+    {
+      "path": "research/seam-wire/runs/g7_chain.grade.out",
+      "bytes": 1517,
+      "sha256": "653773ddda9fc516e267149209eb41652aeccd397c51cfe03a32ea649f47ba54"
+    },
+    {
+      "path": "research/seam-wire/runs/g7_chain.post.out",
+      "bytes": 154,
+      "sha256": "0a8a0eddf3d4441cdf83b00587e87d1a5e543fdf3661aeff589269e8456a48b4"
+    },
+    {
+      "path": "research/seam-wire/runs/g7_chain.posted_path",
+      "bytes": 116,
+      "sha256": "26d0bdcd6cbc7eec0a850bfb627c90fcd38310ba5234891f4c06f97707fb8a91"
+    },
+    {
+      "path": "research/seam-wire/runs/g7_chain.settling.out",
+      "bytes": 246,
+      "sha256": "e6843091e6c25d638db8c6df663029ca612869083c11ed29e3456a1605327af6"
+    },
+    {
+      "path": "research/seam-wire/runs/phase_eight_input/pooled.csv",
+      "bytes": 3425344,
+      "sha256": "d40ef4757052c898dc0ba044dbe2432bcfb5fcd6a7fbe2c826051ccb897a040e"
+    },
+    {
+      "path": "research/seam-wire/runs/phase_eight_input/task-1437.csv",
+      "bytes": 174001,
+      "sha256": "645eddfa2977d42ce99f20b984d87d6e55f69fb19ae333eb7579acf8b8bd8231"
+    },
+    {
+      "path": "research/seam-wire/runs/phase_eight_input/task-1447.csv",
+      "bytes": 167199,
+      "sha256": "795b02307f92c0a675cd887ae1286ab1c0521b18f741ea12c85ac6a98330c91c"
+    },
+    {
+      "path": "research/seam-wire/runs/phase_eight_input/task-1448.csv",
+      "bytes": 202397,
+      "sha256": "858340f6a842fda60358dc28b159ad0ace83e25e47c5a5d1758576c1b36360a3"
+    },
+    {
+      "path": "research/seam-wire/runs/phase_eight_input/task-1464.csv",
+      "bytes": 183253,
+      "sha256": "6bb2b0bde22b2c57856b41c4fc1b0775da5e4852a32d903c49b4a45d0a743fda"
+    },
+    {
+      "path": "research/seam-wire/runs/phase_eight_input/task-1498.csv",
+      "bytes": 208797,
+      "sha256": "649a80198fa27211b3d949913449dc105c4aff2381546d0f7d4907aa0069f8e1"
+    },
+    {
+      "path": "research/seam-wire/runs/specialists_DELEGATE_005.json",
+      "bytes": 281,
+      "sha256": "ca96f24e4d04ce59b6885b7e47ab5daec55ed8cadcdf6c0b05677bd6dc63b971"
+    },
+    {
+      "path": "research/seam-wire/runs/specialists_DELEGATE_006A.json",
+      "bytes": 290,
+      "sha256": "9287dd13878a4f05600eae8c54fdfc1dbb1ea4514d4b007934f1e65cda095030"
+    },
+    {
+      "path": "research/seam-wire/runs/specialists_DELEGATE_006B.json",
+      "bytes": 291,
+      "sha256": "507b30924d2d51b61a13e53a118d8a9251186228f55e523c72685f45b7fe8a6a"
+    },
+    {
+      "path": "research/seam-wire/runs/specialists_DELEGATE_007A.json",
+      "bytes": 293,
+      "sha256": "268fc1868db185947c3264e21f85af1438c5b457ec649077c83b5079bdecd813"
+    },
+    {
+      "path": "research/seam-wire/runs/surprisal_sidecar.jsonl",
+      "bytes": 5445654,
+      "sha256": "ba45252f530e0cbd285ee8b064fa5f586f9402bd600d529ee3371302e72ccadd"
+    },
+    {
+      "path": "research/seam-wire/runs/tit_vs_attention.json",
+      "bytes": 2113,
+      "sha256": "7bbf990dd3de2bf8526d2fff28afe8bfd6507c848a0c3a2a479e50de25c1befb"
+    },
+    {
+      "path": "research/seam-wire/seam_trajectories.json",
+      "bytes": 52348,
+      "sha256": "fe60c03aaf2988de8a17555cc17aa43333c3461a9e6568a2600a30161fff3bae"
+    },
+    {
+      "path": "test_surprisal_load.py",
+      "bytes": 1880,
+      "sha256": "478574e44e43c925b1551ca15f3aac38931c93c25c89bdc83c48a9859d08bf00"
+    }
+  ]
+}
