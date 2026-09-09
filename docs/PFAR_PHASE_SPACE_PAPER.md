@@ -1,13 +1,6 @@
 # PFAR → Phase-Space Memory: Implementation Companion
 
-**Status: implementation appendix.** The paper is `../../Elle/docs/pfar_phase_space.tex`
-("From pFAR Intake to Phase-Space Memory: A Measured Account of the
-Wavelet–Manifold–Recall Pipeline"). This document is *not* a second spec — per
-this repo's own convention (`CLAUDE.md`: "`docs/DUAL_ROUTER_ARCHITECTURE_SPEC.md`
-is THE spec... `atlas.tex` is a paper, not a spec"), the paper is a paper too.
-Audit code against `DUAL_ROUTER_ARCHITECTURE_SPEC.md`,
-`SWARM_INGESTION_AND_STORAGE_LIFECYCLE_PLAN.md`, and
-`COGNITIVE_MAPPING_IMPLEMENTATION_PLAN.md`, never against this file or the tex.
+**Status: historical implementation companion.** The previously cited `../../Elle/docs/pfar_phase_space.tex` is absent from the current checkout; its title and section references are historical, unverified references. This document is not an independent specification. Audit implementation against this repository's extant specification files and current source. Restore a verified paper path and version before treating its section citations as authoritative.
 
 This appendix exists so a reader working in `elle-worker` doesn't have to open
 a `.tex` file to find the line numbers behind each claim. Every citation below
@@ -36,19 +29,9 @@ ground truth).
 | 10. Persistent memory | §12 | `src/ingest-queue.ts`, D1 staging |
 | 11. 2-hop recall | §13 | `src/graph.ts` |
 
-## Corrections made to `CLAUDE.md`'s stated "Known state" while writing the paper
+## WASM bridge status, checked 2026-09-09
 
-`CLAUDE.md` currently says:
-
-> `wasm-bridge.ts` cannot load the WASM core: no `public/wasm/` artifact...
-> nothing imports the bridge.
-
-This is **stale**. During research for the paper, `wasm-bridge.ts` was
-confirmed live and exercised by `test/pfar-fft.test.ts` — the WASM FFT core is
-loaded and called from the decomposition stage in normal operation. `CLAUDE.md`
-should be updated by a maintainer; this document doesn't overwrite project
-memory unilaterally, it just flags the discrepancy the same way the paper does
-in its Stage 2 section.
+[MEASURED] `src/pfar.ts` imports `wasm-bridge` lazily and `src/pfar-fft.test.ts` exercises the path. The old claim that nothing imports it was wrong. The local checkout has no `public/wasm/` artifact, so this inspection does not support the earlier statement that a deployed WASM FFT core is confirmed live. `CLAUDE.md` now records the missing artifact and export-shape issue; keep implementation presence, test coverage and deployed execution separate.
 
 ## §7 seam disambiguation (re-verified this session)
 

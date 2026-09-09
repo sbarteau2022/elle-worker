@@ -263,47 +263,11 @@ The 8 relative phase angles $\theta_k = \operatorname{Arg}(W(s_k, t)) \in [0, 2\
 
 ---
 
-### 2.2 Leaf Encoder $\psi$: Multimodal Tokenization to Tangent Space
+### 2.2 Compact input features and fitted coordinates
 
-To ensure that heterogeneous sensory reports (e.g., acoustic spectral stats, visual GLCM tables, textual embeddings) map into a unified manifold without loss of structural identity, the Leaf Encoder $\psi$ operates as a deterministic, Lipschitz-continuous hashing projector:
+[MEASURED] The B^1024 hard-clamp leaf encoder formerly described here is retired; `PSI_ENCODER_FINDING.md` records its constant-radius and cosine-equivalent retrieval failure. Current `src/hyper.ts` uses `RIP_DIM = 29`: PAMI inputs use the phase-aware bridge and other numeric-leaf reports use deterministic hashing followed by radial tanh squash with a zero-norm guard.
 
-```
-[ Arbitrary JSON / Tensor Leaves ]
-               │
-               ▼
-1. Canonical Flattening: Sorted dotted keys { (p_i, v_i) }, max 512 leaves
-               │
-               ▼
-2. Scale-Robust Squashing: s(v_i) = tanh( sign(v_i) * ln(1 + |v_i|) ) in (-1, 1)
-               │
-               ▼
-3. Deterministic Hashing: FNV-1a(p_i) -> Mulberry32 -> Box-Muller -> Unit e(p_i) in R^1024
-               │
-               ▼
-4. Tangent Superposition: f = sum_i s(v_i) e(p_i) / max(1, ||sum_i s(v_i) e(p_i)||)
-               │
-               ▼
-5. Conformal Exponential Mapping: psi(x) = exp_0( 0.9 * f ) in B^1024
-```
-
-#### Mathematical Formulation:
-1. **Leaf Extraction & Value Normalization:**
-   Given a sensory report $R$, extract all leaf keypaths $p_i$ and numerical values $v_i \in \mathbb{R}$. Values undergo scale-invariant logarithmic squashing:
-   $$s(v_i) = \tanh\big(\operatorname{sign}(v_i) \cdot \ln(1 + |v_i|)\big) \in (-1, 1)$$
-2. **Deterministic Pseudorandom Direction Assignment:**
-   The keypath string $p_i$ is mapped to a high-dimensional unit vector $e(p_i) \in \mathbb{S}^{D-1} \subset \mathbb{R}^D$ ($D = 1024$) via FNV-1a hashing seeding a Mulberry32 PRNG and standard Box-Muller Gaussian projection:
-   $$e(p_i) = \frac{\mathbf{g}(p_i)}{\|\mathbf{g}(p_i)\|_2}, \quad \mathbf{g}(p_i) \sim \mathcal{N}(0, I_D)$$
-3. **Tangent Space Aggregation:**
-   The intermediate tangent feature vector $f \in \overline{\mathbb{B}}^D \subset T_{\mathbf{0}}\mathbb{B}^D$ is assembled:
-   $$f = \frac{\sum_{i=1}^{M} s(v_i) e(p_i)}{\max\left(1, \left\| \sum_{i=1}^{M} s(v_i) e(p_i) \right\|_2\right)}$$
-4. **Riemannian Exponential Placement:**
-   The leaf embedding is mapped from the flat tangent space $T_{\mathbf{0}}\mathbb{B}^D$ into the interior of the Poincaré ball $\mathbb{B}^D$:
-   $$\psi(R) = \exp_{\mathbf{0}}(\kappa_{\text{scale}} \cdot f) = \tanh\left(\kappa_{\text{scale}} \|f\|_2\right) \frac{f}{\|f\|_2}$$
-   where $\kappa_{\text{scale}} = 0.90$. This guarantees that pure ungrounded feature points sit at bounded radial depth:
-   $$\rho(\psi(R)) \le 2 \operatorname{artanh}(\tanh(0.90)) = 1.80$$
-5. **Boundary Retraction Invariant:**
-   To guarantee numeric stability and avoid division by zero on manifold boundaries, all coordinates are projected via retraction $\Pi_{\varepsilon}$:
-   $$\Pi_{\varepsilon}(x) = \begin{cases} x & \text{if } \|x\|_2 \le 1 - \varepsilon \\ \frac{1 - \varepsilon}{\|x\|_2} x & \text{if } \|x\|_2 > 1 - \varepsilon \end{cases}, \quad \text{with } \varepsilon = 10^{-5}$$
+[MEASURED] Input feature dimension is distinct from fitted manifold dimension: `hyperMap` defaults to 128 coordinates and permits dimensions 2–512. A 1024-dimensional storage/index boundary does not require a 1024-dimensional leaf encoder.
 
 ---
 
@@ -1039,4 +1003,4 @@ This implementation plan represents the complete, binding technical specificatio
 
 *Certified by:* Worker M6 (Cognitive Mapping Protocol & Literature Synthesis Author)  
 *Attestation Date:* 2026-08-29  
-*Integrity Mode:* Production Validated  
+*Integrity Mode:* Instrumentation — source-inspected 2026-09-09; not a runtime or deployment validation  

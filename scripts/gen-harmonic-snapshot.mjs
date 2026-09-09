@@ -8,10 +8,10 @@
 //   npx tsx scripts/gen-harmonic-snapshot.mjs > \
 //     ../EthicalIntelligenceProject/src/data/harmonic-snapshot.json
 //
-// Everything below is read from the actual modules — scaffold (pillars + the
-// hubless bridge fabric + privilege), regulator (free energy + coherence),
-// phase-vessel (golden ellipse, φ·1/φ=1). The renderer never re-derives any of
-// it; it only draws this output. This IS the source of truth, locked.
+// Module-derived inputs: scaffold, fabric, privilege, regulator, phase-vessel,
+// and cognitive-obliquity. Stipulated fixture inputs: flower layout/radii,
+// phase snapshot time, relational=0.86 and harmonic=0.78. This generator is
+// reproducible rendering input, not a claim that every value is measured.
 // ============================================================
 import { pentagonPillars, egalitarianFabric, privilegeReport } from '../src/scaffold.ts';
 import { regulate, freeEnergy, PHI, PHI_INV } from '../src/regulator.ts';
@@ -40,6 +40,7 @@ const fabric = egalitarianFabric(P.total, 4, 0.3, 7);
 const fabricEdges = fabric.map((e) => [Number(e.a), Number(e.b)]);
 const priv = privilegeReport(fabric);
 
+// STIPULATED: flower layout and radii are display fixtures, not a measured topology.
 // ── the relational flower / lobes: 1 + 6 + 12 = 19 (centered hexagonal) ──
 const flowerNodes = [{ id: 0, ring: 0, pos: [0, -1.28, 0] }];
 let fid = 1;
@@ -57,6 +58,7 @@ const tSnap = 0.31830988618; // the phase snapshot of time (1/π — a fixed, st
 const mth = 2 * Math.PI * tSnap;
 const molecule = { plus: [PHI * Math.cos(mth), PHI_INV * Math.sin(mth)], minus: [-PHI * Math.cos(mth), -PHI_INV * Math.sin(mth)] };
 
+// STIPULATED: relational=0.86 and harmonic=0.78 are fixture inputs, not observed telemetry.
 // ── the regulator: the unified function's coherence + free energy at rest ──
 const reg = regulate({ structural: 1 - priv.degree_gini, relational: 0.86, harmonic: 0.78 }, { perturb: 0 });
 const fe = freeEnergy(reg.final.coherence, 0.5);
@@ -82,7 +84,7 @@ const snapshot = {
     title: 'Harmonic Atlas — locked phase snapshot',
     phi: PHI, phiInv: PHI_INV, goldenWinding: GOLDEN_WINDING,
     phaseSnapshotTime: tSnap,
-    source: 'generated from elle-worker/src (scaffold, regulator, phase-vessel) — the single source of truth',
+    source: 'generated from scaffold, regulator, phase-vessel and cognitive-obliquity modules plus explicitly stipulated layout and regulator inputs',
     note: 'One locked snapshot of the unified function at t=1/π. Structures carry their own coordinates; the globe renderer maps them. Nothing here is re-derived by the renderer.',
   },
   unifiedFunction: {

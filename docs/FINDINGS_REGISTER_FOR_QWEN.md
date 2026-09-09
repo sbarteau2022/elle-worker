@@ -229,7 +229,7 @@ golden φ-orbit, N=40:  metricReturn 0.0827 (asymptotic)   winding 15 (exact int
 
 Verbatim: *"Geometry is retained instrumentally, not ontologically."* The identity carrier is b₁ = E − V + C and `homologyClass(walk, edges)` in `structure.ts`.
 
-**One stale contradiction to know about:** `TOROIDAL_GRAPH_MAPPING.md §9` still has the row *"Torus alone carries identity-continuity → FALSE, needs the lemniscate"*, contradicted by §7 of the same document and by `WHY_NO_LEMNISCATE`. The §9 table was not updated. `torus.ts:25–29` carries the same stale note.
+**Correction 2026-09-09:** `TOROIDAL_GRAPH_MAPPING.md` §9 and `torus.ts` now state the finite-time winding invariant correctly. Their former lemniscate-necessity notes have been repaired; retain the historical disagreement only as dated history.
 
 ---
 
@@ -318,15 +318,15 @@ Ratio √2/√(2/3) = √3 identically (residual 6.7e-16); hexagon offset exactl
 
 ## 14. Known documentation defects — so you don't trip on them
 
-- `CLAUDE.md` says `wasm-bridge.ts` cannot load; stale — it is imported by `pfar.ts` and exercised by tests.
-- `HYPERBOLIC_GRAPH_MAPPING.md` states RIP_DIM 16, default dim 2, caps 256/2048; code has 29, 128, 20000/200000.
-- `DUAL_ROUTER_ARCHITECTURE_SPEC §2.10` describes 16-band eGeMAPS, spectral flux, scene cuts, 8-orientation Gabor; code has none of the first three and **4** orientations.
-- `COGNITIVE_MAPPING_IMPLEMENTATION_PLAN §2.2` specifies a B¹⁰²⁴ encoder stamped "Production Validated"; it is dead (§6 above), and §2.4 of the same doc says ℍ¹²⁸.
-- `Elle/docs/pfar_phase_space.tex` is cited as "the paper" by two companion docs and **does not exist**.
-- Fries 2015 is cited as *Trends Cogn. Sci.* in one paper and *Neuron* in another.
+- `CLAUDE.md` was corrected on 2026-09-09: the bridge is imported and tested, while the local WASM artifact is absent. `PFAR_PHASE_SPACE_PAPER.md` overstated deployed WASM execution and was corrected on 2026-09-09.
+- REPAIRED 2026-09-09: `HYPERBOLIC_GRAPH_MAPPING.md` §2 and its caps sentence now state RIP_DIM 29, default dim 128, caps 20,000/200,000.
+- REPAIRED 2026-09-09: `DUAL_ROUTER_ARCHITECTURE_SPEC` items 2 and 3 now describe the implemented PFAR proxies and four Gabor orientations, and state that spectral flux and scene-cut detection are not implemented.
+- REPAIRED 2026-09-09: `COGNITIVE_MAPPING_IMPLEMENTATION_PLAN` §2.2 now describes the compact 29-feature input and 128-coordinate fit, and the "Production Validated" stamp is qualified as source-inspected instrumentation.
+- REPAIRED 2026-09-09: both `PFAR_PHASE_SPACE_PAPER.md` companions now label the absent `pfar_phase_space.tex` as a historical, unverified reference.
+- REPAIRED 2026-09-09: `THE_GEOMETRY_OF_COHERENT_MEMORY.md` ref 10 now cites Neuron 88(1), 220–235, matching the publisher record.
 - `tit.py:353` sets `h1 = h2 = None` immediately before serialising them — the hypothesis verdicts in its JSON are always null.
-- Invariant S1 (PQC forward secrecy) is asserted while `wrangler.toml:263` has `ELLE_LANE_PROTOCOL = "v2"` commented out; live traffic is v1.
-- `gen-harmonic-snapshot.mjs` calls itself *"the ONE LOCKED SNAPSHOT … the source of truth"*, but computes obliquity as `0.5·sin(2π/π)·180/π = 26.049°` while the deployed snapshot holds **38.669°** with a bisection derivation the script does not contain (analytic ideal 38.1727° = arcsin(1/φ)). Running the script overwrites the better number. Its flower (1+6+12) is hand-placed literals; its `relational: 0.86, harmonic: 0.78` are magic numbers.
+- S1 is stated unconditionally, but the checked-in v2 setting is commented out. `session-bus.ts` enables the hybrid path for v2 or v3; unset configuration falls back to v1. Deployed traffic protocol was not verified by this file inspection. The spec row was made conditional on 2026-09-09.
+- `gen-harmonic-snapshot.mjs` now has working relative imports and a golden-crossing bisection for obliquity. Its flower layout and relational/harmonic inputs remain stipulated fixtures; header and metadata say so as of 2026-09-09. Do not repeat the superseded claim that the current script computes the 26.049° drift schedule as obliquity.
 
 ---
 
