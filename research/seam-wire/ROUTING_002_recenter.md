@@ -2179,3 +2179,67 @@ cited as router performance.
 
 This does not disturb the lockstep result — that measures which faculty a brief is *nearest*, which
 is a property of the geometry and correctly computed by argmax. batch-16 remains a valid holdout.
+
+---
+
+# THE κ GATE ASKED THE WRONG QUESTION — FIXED, AND 57 TASKS REOPENED (2026-09-09)
+
+467 of 709 blocked tasks terminated on κ sign-off. **92.4% of the ungrounded claims driving them
+(667 of 722) were bare numbers** — 12, 100, 60, 18, 30 — GSM8K intermediate and final values.
+
+## The defect
+
+`groundClaims` asked *"does this number **appear** in an observation?"* That is a **provenance**
+question, and a derived answer never appears in an observation — that is what derived means. So a
+worker reasoning correctly in prose took one strain per derived number, three strain capped the run,
+κ fell below ½, and a correct answer was refused sign-off. Whether a task passed depended on whether
+it happened to run code that printed its intermediates; identical reasoning written out did not.
+
+**Task #453/#475 is the defect in its purest form.** Brief: *McKenna has 34 stuffed animals, Kenley
+twice as many, Tenly 5 more than Kenley.* The worker wrote:
+
+```
+McKenna=34. Kenley=2*34=68. Tenly=68+5=73. Total=34+68+73=175.
+#### 175
+```
+
+Every step correct. Blocked at **κ=0, 3 strain, ungrounded claims `68, 73, 175`** — precisely the
+three numbers whose derivation it had just shown.
+
+## The fix: `shownWork()` (Elle `0f4d96e`)
+
+Asks the right question — *is the number correctly **derived**?* It scans the summary's own
+equalities and returns only values whose arithmetic verifies. This is **strictly stronger** than
+substring recurrence, not a weakening: `20 + 25 + 70 + 60 = 175` grounds 175, and `= 110` grounds
+nothing. Chains are accepted only when every evaluable segment agrees.
+
+Note this is the same checker that catches the *reviewer* defect recorded above — the coordinator
+that asserted `20 + 25 + 70 + 60 = 110` and permanently blocked the correct 175. Both failures were
+the system trusting an assertion it could have evaluated.
+
+## Measured against the real board — the gate was NOT broken in general
+
+| category | count | verdict |
+|---|---|---|
+| shows arithmetic that **verifies** | **184 (39.0%)** | **falsely blocked** |
+| shows arithmetic that does not verify | 167 (35.4%) | correctly blocked — work is wrong |
+| shows no arithmetic at all | 121 (25.6%) | correctly blocked — asserted without deriving |
+
+Roughly **61% of these blocks were correct.** The gate was asking the wrong question for one large
+class, and that class is most of GSM8K.
+
+## Remediation — 57 reopened, deliberately not 184
+
+Reopened only the tasks where **every recorded ungrounded claim now grounds**, i.e. the recorded
+block reason is provably invalid. 57 tasks, moved to `changes_requested` (claimable) via
+`bridge_review`, each carrying the reason and the fixing commit. Board: `blocked` 709 → **652**,
+`changes_requested` 0 → **57**. Backup at `~/agent-bridge/data/board.json.bak-kappa-193803`.
+
+The other 127 of the 184 show *some* verifying arithmetic but their specific recorded claims do not
+all ground — weaker evidence, so they were left alone rather than swept in.
+
+**No GPU was spent:** no swarm worker is running (only `bridge-server.js`), so reopened tasks sit
+claimable until a swarm is started. The remediation is reversible from the backup.
+
+Tagged **MEASURED** for the categories and the fix; **OPEN** for whether the 57 now pass, which
+requires actually re-running them.
