@@ -1,3 +1,5 @@
+import { buildAtlas } from '../../Dynanic-Hyperbolic-Neural-Graph/src/cartographer';
+import { serializeAtlas } from '../../Dynanic-Hyperbolic-Neural-Graph/src/publish';
 import { describe, it, expect } from 'vitest';
 import { ingestAtlas, getLatestAtlas, atlasRoute, listAtlasHistory, getAtlasByHash, type AtlasIngestEnv } from './atlas';
 
@@ -67,7 +69,7 @@ function fakeEnv() {
 
 function snapshot(overrides: Record<string, unknown> = {}) {
   return {
-    hash: 'abc123', version: '1', created_at: 1000,
+    hash: 'abcdef0123456789', version: '1', created_at: 1000,
     nodes: ['a', 'b', 'c'],
     edges: [{ src: 'a', dst: 'b', kind: 'assoc', weight: 1 }, { src: 'b', dst: 'c', kind: 'derived', weight: 1 }],
     hyper: { dim: 3, points: { a: [0, 0, 0], b: [0.1, 0, 0], c: [0.2, 0, 0] }, stats: {} },
@@ -82,9 +84,9 @@ describe('ingestAtlas (the ONLY write path — never reachable from the router)'
   it('stores the full snapshot in R2 and an index row in D1', async () => {
     const { env, r2, d1Rows } = fakeEnv();
     const result = await ingestAtlas(env, { snapshot: snapshot() });
-    expect(result).toMatchObject({ hash: 'abc123', version: '1', node_count: 3, edge_count: 2, truncated: false });
-    expect(r2.has('atlas/abc123.json')).toBe(true);
-    expect(JSON.parse(r2.get('atlas/abc123.json')!).hash).toBe('abc123');
+    expect(result).toMatchObject({ hash: 'abcdef0123456789', version: '1', node_count: 3, edge_count: 2, truncated: false });
+    expect(r2.has('atlas/abcdef0123456789.json')).toBe(true);
+    expect(JSON.parse(r2.get('atlas/abcdef0123456789.json')!).hash).toBe('abcdef0123456789');
     expect(d1Rows.length).toBe(1);
   });
 
@@ -93,7 +95,7 @@ describe('ingestAtlas (the ONLY write path — never reachable from the router)'
     const result = await ingestAtlas(env, { snapshot: snapshot() });
     expect(result.embedded_nodes).toBe(3);
     const first = upserts[0] as { id: string; values: number[]; metadata: Record<string, unknown> };
-    expect(first.id).toMatch(/^atlas-abc123-/);
+    expect(first.id).toMatch(/^atlas-abcdef0123456789-/);
     expect(Array.isArray(first.values)).toBe(true);
     expect(JSON.parse(first.metadata.ball as string)).toEqual(expect.any(Array));
   });
@@ -130,7 +132,7 @@ describe('getLatestAtlas / atlasRoute (Elle\'s ENTIRE surface onto the graph —
     await ingestAtlas(env, { snapshot: snapshot() });
     const out = JSON.parse(await atlasRoute(env, {}));
     expect(out.mode).toBe('stats');
-    expect(out.hash).toBe('abc123');
+    expect(out.hash).toBe('abcdef0123456789');
     expect(out.nodes).toBe(3);
     expect(out.note).toMatch(/no write\/edit\/embed access/);
   });
@@ -199,4 +201,52 @@ describe('listAtlasHistory / getAtlasByHash (the replay reads)', () => {
     expect(await getAtlasByHash(env, 'ABCDEF0123456789')).toBeNull(); // uppercase = not the CLI's address form
     expect(await getAtlasByHash(env, '')).toBeNull();
   });
+});
+
+
+describe('atlas ingestion readiness', () => {
+  it('rejects broken chart/edge references and invalid coordinates before storage', async () => {
+    const changes = [
+      { nodes: ['a', 'a', 'c'] },
+      { edges: [{ src: 'a', dst: 'missing', kind: 'assoc', weight: 1 }] },
+      { hyper: { dim: 3, points: { a: [0, 0, 0], b: [NaN, 0, 0], c: [0, 0, 0] } } },
+      { hyper: { dim: 3, points: { a: [0, 0, 0], b: [1, 0, 0], c: [0, 0, 0] } } },
+      { torus: { dim: 8, points: {} } },
+      { created_at: NaN },
+      { hash: '../invalid' },
+    ];
+    for (const change of changes) {
+      const { env, r2, d1Rows, upserts } = fakeEnv();
+      await expect(ingestAtlas(env, { snapshot: snapshot(change) })).rejects.toThrow(/malformed/);
+      expect(r2.size).toBe(0); expect(d1Rows).toHaveLength(0); expect(upserts).toHaveLength(0);
+    }
+  });
+  it('reports incomplete embedding as failed while preserving the durable snapshot', async () => {
+    const { env, r2, upserts } = fakeEnv();
+    env.AI = { run: async () => ({ data: [[1, 2]] }) } as unknown as Ai;
+    const result = await ingestAtlas(env, { snapshot: snapshot() });
+    expect(result.embedding_status).toBe('failed');
+    expect(result.embedding_error).toMatch(/incomplete/);
+    expect(result.embedded_nodes).toBe(0);
+    expect(upserts).toHaveLength(0); expect(r2.size).toBe(1);
+  });
+});
+
+
+it('real cartographer snapshot crosses worker ingestion and reads both charts', async () => {
+  const core = buildAtlas([
+    { kind: 'assoc', src: 'source', dst: 'claim', weight: 1, ts: 1000 },
+    { kind: 'derived', src: 'claim', dst: 'procedure', weight: 1, ts: 2000 },
+    { kind: 'contradicts', src: 'procedure', dst: 'source', weight: 0.5, ts: 3000 },
+  ], { epochs: 5 });
+  const snap = serializeAtlas(core, { version: 'integration-1', created_at: 4000 });
+  const { env } = fakeEnv();
+  const receipt = await ingestAtlas(env, { snapshot: snap });
+  expect(receipt.embedding_status).toBe('complete');
+  const stored = await getLatestAtlas(env);
+  expect(stored).toEqual(snap);
+  expect(await getAtlasByHash(env, snap.hash)).toEqual(snap);
+  const read = JSON.parse(await atlasRoute(env, { mode: 'neighbors', id: 'claim', k: 2 }));
+  expect(read.ball_neighbors).toHaveLength(2);
+  expect(read.phase_neighbors).toHaveLength(2);
 });

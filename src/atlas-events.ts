@@ -35,9 +35,9 @@ export interface AtlasEventRow {
 const MAX_BATCH = 64;      // pairwise cap⁵ is 10 rows; headroom, not an invitation
 const MAX_PULL = 2000;     // one device pull page
 
-let schemaReady = false;
+const schemaReady = new WeakSet<D1Database>();
 async function ensureSchema(env: AtlasEventsEnv): Promise<void> {
-  if (schemaReady) return;
+  if (schemaReady.has(env.DB)) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_atlas_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -46,7 +46,7 @@ async function ensureSchema(env: AtlasEventsEnv): Promise<void> {
     weight REAL NOT NULL DEFAULT 1,
     ts INTEGER NOT NULL
   )`).run();
-  schemaReady = true;
+  schemaReady.add(env.DB);
 }
 
 export interface AtlasEventIn { kind: string; src: string; dst: string; weight?: number }
