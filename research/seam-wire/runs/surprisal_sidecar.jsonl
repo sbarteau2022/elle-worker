@@ -4511,3 +4511,4 @@
 {"ts": 1788994934.6774132, "tag": "qwen3.8:27b", "ns": null, "sha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df", "eval_count": 2, "prompt_eval_count": 17, "surprisal": [-0.0, -0.0]}
 {"ts": 1788999212.517323, "tag": "qwen3.8:27b", "ns": null, "sha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df", "eval_count": 2, "prompt_eval_count": 14, "surprisal": [-0.0, -0.0]}
 {"ts": 1788999405.109445, "tag": "qwen3.8:27b", "ns": null, "sha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df", "eval_count": 2, "prompt_eval_count": 14, "surprisal": [-0.0, -0.0]}
+{"ts": 1789089883.935107, "tag": "qwen3.8:27b", "ns": null, "sha256": "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969", "eval_count": 2, "prompt_eval_count": 18, "surprisal": [-0.0, -0.0]}
