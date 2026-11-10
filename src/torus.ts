@@ -22,11 +22,13 @@
 //   • no center — homogeneous, so it cannot be fooled into inventing a root for
 //                 flat data the way the ball's optimizer will.
 //
-// SCOPE (design decision A, see docs/TOROIDAL_GRAPH_MAPPING.md): this factor
-// carries PERIODIC STRUCTURE only — winding, phase kinship, discrepancy. It
-// claims nothing about identity/recognition; per the Substrate Identity
-// Continuity Theorem a plain torus gives only asymptotic identity-return, so
-// the exact-recognition (lemniscate) layer is deliberately NOT built here.
+// SCOPE (design decision A, see docs/TOROIDAL_GRAPH_MAPPING.md §7): this factor
+// carries PERIODIC STRUCTURE — winding, phase kinship, discrepancy. The winding
+// number in π₁(𝕋ⁿ) = ℤⁿ IS an exact recognition invariant: an integer, exact at
+// every finite time. The Substrate Identity Continuity Theorem's elimination of
+// the torus tested METRIC return (a φ-winding orbit returns only asymptotically),
+// which is the wrong test — see docs/WHY_NO_LEMNISCATE.md and product.ts's header.
+// The lemniscate is therefore SUFFICIENT BUT NOT NECESSARY and is not built here.
 //
 // Everything below the router is PURE and deterministic — same graph, same
 // atlas — and validated against docs/tit/ (the φ-orbit discrepancy numbers).

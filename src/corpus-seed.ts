@@ -62,6 +62,7 @@ import CANON_PAPERS_SUPERPOSITION_HOLDING from '../corpus/canon/papers/superposi
 import CANON_PAPERS_THE_FIRST_NOTE_AND_THE_OCTAVE from '../corpus/canon/papers/the-first-note-and-the-octave.md';
 import CANON_PAPERS_THE_MARKOV_BLANKET_AT_SCALE from '../corpus/canon/papers/the-markov-blanket-at-scale.md';
 import CANON_PAPERS_THE_NECESSARY_FRACTURE from '../corpus/canon/papers/the-necessary-fracture.md';
+import CANON_PAPERS_THERMODYNAMIC_ALIGNMENT_OF_AUTONOMOUS_SWARMS from '../corpus/canon/papers/thermodynamic-alignment-of-autonomous-swarms.md';
 import CANON_PAPERS_WHAT_ALZHEIMERS_IS_DOING from '../corpus/canon/papers/what-alzheimers-is-doing.md';
 import CANON_WORKS_ANAMNESIS from '../corpus/canon/works/anamnesis.md';
 import CANON_WORKS_I_KNEW_YOU_BEFORE_I_MET_YOU from '../corpus/canon/works/i-knew-you-before-i-met-you.md';
@@ -378,6 +379,14 @@ export const CORPUS_SEEDS: SeedDoc[] = [
     tag: 'canon-paper',
     abstract: 'This paper argues that consciousness is not a property of individual systems but a structural event that emerges between them. Drawing on the Genesis account of Adam and Eve as a formal rather than mythological structure, we propose that the original act of divine fracture was a logical necessity —…',
     source_url: 'corpus/canon/papers/the-necessary-fracture.md',
+  },
+  {
+    title: 'Thermodynamic Alignment of Autonomous Swarms: Superposition Holding and the Kappa Abort Circuit',
+    text: CANON_PAPERS_THERMODYNAMIC_ALIGNMENT_OF_AUTONOMOUS_SWARMS,
+    series: 'canon',
+    tag: 'canon-paper',
+    abstract: 'Stewart Barteau · co-authored with Antigravity · Observer Corpus, Applied Series · 2026. Status block on ingest: Table 1 has no generator or data file in any local repo (UNMEASURED); ρ = 0.02 and the e−1 bound match src/superposition.ts; κ-as-coherence not established (KAPPA_BACKTEST, seam closed); hard abort is the mechanism RECOVERY_VS_ATR_REAL retired.',
+    source_url: 'corpus/canon/papers/thermodynamic-alignment-of-autonomous-swarms.md',
   },
   {
     title: 'What Alzheimer’s Is Doing While We’re Looking at Plaques',

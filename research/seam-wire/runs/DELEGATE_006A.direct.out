@@ -1,0 +1,3 @@
+[eval] elle-s7 row 559: wrong pred=38.0 gold=16.0 8.9s
+{"tag": "elle-s7", "label": "DELEGATE_006A_direct", "n": 20, "offset": 540, "correct": 2, "accuracy": 0.1, "accuracy_served": 0.1, "server_errors": 0, "no_number": 0, "mean_tokens": 513, "seconds_per_row": 23.6, "void": false}
+→ /Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/research/seam-wire/runs/eval_DELEGATE_006A_direct.json

@@ -2,18 +2,21 @@
 // gen-harmonic-snapshot.mjs — the reproducible path from the real math to the
 // ONE LOCKED SNAPSHOT the Harmonic Atlas renders.
 //
-// Run from the elle-worker repo root (imports are relative to ./src):
+// Run from anywhere; imports resolve relative to THIS FILE (../src), not to cwd.
+// (Until 2026-09-09 they read './src' and resolved to scripts/src/ — the documented
+//  command could never have run. That is how the deployed snapshot drifted unchecked.)
 //   npx tsx scripts/gen-harmonic-snapshot.mjs > \
 //     ../EthicalIntelligenceProject/src/data/harmonic-snapshot.json
 //
-// Everything below is read from the actual modules — scaffold (pillars + the
-// hubless bridge fabric + privilege), regulator (free energy + coherence),
-// phase-vessel (golden ellipse, φ·1/φ=1). The renderer never re-derives any of
-// it; it only draws this output. This IS the source of truth, locked.
+// Module-derived inputs: scaffold, fabric, privilege, regulator, phase-vessel,
+// and cognitive-obliquity. Stipulated fixture inputs: flower layout/radii,
+// phase snapshot time, relational=0.86 and harmonic=0.78. This generator is
+// reproducible rendering input, not a claim that every value is measured.
 // ============================================================
-import { pentagonPillars, egalitarianFabric, privilegeReport } from './src/scaffold.ts';
-import { regulate, freeEnergy, PHI, PHI_INV } from './src/regulator.ts';
-import { GOLDEN_WINDING } from './src/phase-vessel.ts';
+import { pentagonPillars, egalitarianFabric, privilegeReport } from '../src/scaffold.ts';
+import { regulate, freeEnergy, PHI, PHI_INV } from '../src/regulator.ts';
+import { GOLDEN_WINDING } from '../src/phase-vessel.ts';
+import { runObliquity } from '../src/cognitive-obliquity.ts';
 
 // ── the architecture: pillars (apex + 5×4 = 21), flat order matches the fabric ──
 const P = pentagonPillars(4);
@@ -37,6 +40,7 @@ const fabric = egalitarianFabric(P.total, 4, 0.3, 7);
 const fabricEdges = fabric.map((e) => [Number(e.a), Number(e.b)]);
 const priv = privilegeReport(fabric);
 
+// STIPULATED: flower layout and radii are display fixtures, not a measured topology.
 // ── the relational flower / lobes: 1 + 6 + 12 = 19 (centered hexagonal) ──
 const flowerNodes = [{ id: 0, ring: 0, pos: [0, -1.28, 0] }];
 let fid = 1;
@@ -54,19 +58,33 @@ const tSnap = 0.31830988618; // the phase snapshot of time (1/π — a fixed, st
 const mth = 2 * Math.PI * tSnap;
 const molecule = { plus: [PHI * Math.cos(mth), PHI_INV * Math.sin(mth)], minus: [-PHI * Math.cos(mth), -PHI_INV * Math.sin(mth)] };
 
+// STIPULATED: relational=0.86 and harmonic=0.78 are fixture inputs, not observed telemetry.
 // ── the regulator: the unified function's coherence + free energy at rest ──
 const reg = regulate({ structural: 1 - priv.degree_gini, relational: 0.86, harmonic: 0.78 }, { perturb: 0 });
 const fe = freeEnergy(reg.final.coherence, 0.5);
 
-// ── obliquity θ at the snapshot instant (slow orientation) ──
-const thetaDeg = 0.5 * Math.sin(2 * Math.PI * tSnap) * 180 / Math.PI;
+// ── obliquity θ: the GOLDEN CROSSING of the measured cos²θ reallocation ──
+// Was `0.5·sin(2π·tSnap)·180/π` = 26.0495° — that is `timescaleSeparation()`'s slow
+// DRIFT SCHEDULE sampled at t=1/π, a different quantity, and it predated
+// cognitive-obliquity.ts. It disagreed with the deployed snapshot's 38.669184° and
+// would have overwritten it on any run (an unattested-constant drift, F3's defect class).
+// θ is now bisected on the measured curve to integrated_preferred(θ) = integrated_preferred(0°)·φ⁻¹.
+// Reproduces the deployed value exactly: 38.669184, aligned 0.000999, at_theta 0.000618.
+const oblAt = (deg) => runObliquity(() => (deg * Math.PI) / 180, { structured: true }).integrated_preferred;
+const oblAligned = oblAt(0);
+const oblTarget = oblAligned * PHI_INV;
+let oblLo = 0, oblHi = 90;
+for (let i = 0; i < 60; i++) { const mid = (oblLo + oblHi) / 2; if (oblAt(mid) > oblTarget) oblLo = mid; else oblHi = mid; }
+const thetaDeg = (oblLo + oblHi) / 2;
+// closed form of the same crossing under an exact cos²θ law: cos²θ = 1/φ
+const oblAnalyticDeg = Math.acos(Math.sqrt(PHI_INV)) * 180 / Math.PI;
 
 const snapshot = {
   meta: {
     title: 'Harmonic Atlas — locked phase snapshot',
     phi: PHI, phiInv: PHI_INV, goldenWinding: GOLDEN_WINDING,
     phaseSnapshotTime: tSnap,
-    source: 'generated from elle-worker/src (scaffold, regulator, phase-vessel) — the single source of truth',
+    source: 'generated from scaffold, regulator, phase-vessel and cognitive-obliquity modules plus explicitly stipulated layout and regulator inputs',
     note: 'One locked snapshot of the unified function at t=1/π. Structures carry their own coordinates; the globe renderer maps them. Nothing here is re-derived by the renderer.',
   },
   unifiedFunction: {
@@ -83,7 +101,14 @@ const snapshot = {
   fabric: { edges: fabricEdges, privilege: { degree_gini: priv.degree_gini, betweenness_spread: priv.betweenness_spread, articulation_points: priv.articulation_points, no_privileged_node: priv.no_privileged_node } },
   flower: { nodes: flowerNodes, edges: flowerEdges, count: flowerNodes.length },
   vessel: { phiSide: PHI, invSide: PHI_INV, product: Number((PHI * PHI_INV).toFixed(12)), orbit, molecule, snapshotAngleRad: mth },
-  obliquity: { thetaDeg: Number(thetaDeg.toFixed(4)) },
+  obliquity: {
+    thetaDeg: Number(thetaDeg.toFixed(6)),
+    law: 'cos²θ reallocation (measured sweep, runObliquity)',
+    derivation: 'bisection on the measured integration curve to the golden crossing: integrated_preferred(θ) = integrated_preferred(0°)·(1/φ)',
+    aligned: oblAligned,
+    at_theta: oblAt(thetaDeg),
+    analytic_ideal_deg: Number(oblAnalyticDeg.toFixed(6)),
+  },
 };
 
 process.stdout.write(JSON.stringify(snapshot));

@@ -2,7 +2,11 @@ node_modules/
 .wrangler/
 dist/
 .dev.vars
-*.local__pycache__/
+*.local
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
 *.pyc
 
 # local protocol harness output (machine-specific measurements, never committed)
@@ -18,3 +22,7 @@ crates/**/target/
 
 .swarm/laneA.out
 .swarm/laneB.out
+*.log
+
+# Brief embedding caches — 31-37 MB each, regenerate with research/seam-wire/embed-briefs.mjs
+research/seam-wire/briefs/*.emb.json

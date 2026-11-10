@@ -1,0 +1,659 @@
+{
+ "at": "2026-09-07T00:46:35Z",
+ "rows": [
+  300,
+  300
+ ],
+ "tags": {
+  "elle": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x00": {
+   "sums": 0,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x01": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x02": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x03": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x04": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x05": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x06": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x07": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x08": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x09": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x10": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x11": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x12": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x13": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x14": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x15": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x16": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x17": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x18": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x19": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x20": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x21": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x22": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x23": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x24": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x25": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x26": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x27": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x28": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x29": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x30": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x31": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x32": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x33": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x34": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x35": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x36": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x37": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x38": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x39": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x40": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x41": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x42": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x43": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x44": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x45": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x46": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x47": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x48": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x49": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x50": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x51": {
+   "sums": 9,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x52": {
+   "sums": 13,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x53": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x54": {
+   "sums": 14,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x55": {
+   "sums": 14,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x56": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x57": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x58": {
+   "sums": 15,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x59": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x60": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x61": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x62": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  },
+  "elle-x63": {
+   "sums": 16,
+   "sums_n": 16,
+   "gsm8k_correct": 0,
+   "gsm8k_n": 0,
+   "gen_tokens": 0,
+   "tok_per_s": null,
+   "wall_s": 0.0,
+   "rows": []
+  }
+ }
+}

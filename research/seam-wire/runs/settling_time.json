@@ -1,0 +1,1426 @@
+{
+ "at": "2026-09-11T01:45:21.372Z",
+ "tau": 0.1,
+ "n": 133,
+ "skipped": [
+  {
+   "task": "task-1366",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1434",
+   "why": "1 turn(s) with a direction"
+  },
+  {
+   "task": "task-1441",
+   "why": "1 turn(s) with a direction"
+  },
+  {
+   "task": "task-1507",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1508",
+   "why": "1 turn(s) with a direction"
+  },
+  {
+   "task": "task-1509",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1510",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1511",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1512",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1513",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1514",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1515",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1516",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1517",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1518",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1519",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1520",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1521",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1522",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1523",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1524",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1525",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1526",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1527",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1528",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1529",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1530",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1531",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1532",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1533",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1534",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1535",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1536",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1537",
+   "why": "no anchor"
+  },
+  {
+   "task": "task-1539",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1542",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1545",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1557",
+   "why": "1 turn(s) with a direction"
+  },
+  {
+   "task": "task-1558",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1561",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1562",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1563",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1566",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1567",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1568",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1569",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1570",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1571",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1572",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1573",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1574",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1575",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1576",
+   "why": "0 turn(s) with a direction"
+  },
+  {
+   "task": "task-1577",
+   "why": "0 turn(s) with a direction"
+  }
+ ],
+ "median_ratio": 1,
+ "mean_ratio": 0.9962406015037594,
+ "frac_meeting_phi_inv": 0.007518796992481203,
+ "phi_inv": 0.6180339887498948,
+ "tasks": [
+  {
+   "task": "task-1367",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1368",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1369",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1370",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1371",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1372",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1373",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1374",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1375",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1376",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.916,
+   "region": 7
+  },
+  {
+   "task": "task-1377",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1378",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1379",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1380",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1381",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1382",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1383",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1384",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1385",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.874,
+   "region": 7
+  },
+  {
+   "task": "task-1386",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1387",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1388",
+   "turns": 2,
+   "tL": 1,
+   "tE": 2,
+   "ratio": 0.5,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1389",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1390",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1391",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1392",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1393",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1394",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1395",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1396",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1397",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1398",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1399",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1400",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1401",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1402",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1403",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1404",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1405",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1406",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1407",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1408",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1409",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1410",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1411",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1412",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1413",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1414",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1415",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1416",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1417",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1418",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1419",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1420",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1422",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 0
+  },
+  {
+   "task": "task-1423",
+   "turns": 7,
+   "tL": 5,
+   "tE": 5,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1424",
+   "turns": 8,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.998,
+   "region": 7
+  },
+  {
+   "task": "task-1425",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 0
+  },
+  {
+   "task": "task-1426",
+   "turns": 7,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1427",
+   "turns": 7,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1428",
+   "turns": 7,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1429",
+   "turns": 7,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1430",
+   "turns": 7,
+   "tL": 5,
+   "tE": 5,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 7
+  },
+  {
+   "task": "task-1431",
+   "turns": 7,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.996,
+   "region": 0
+  },
+  {
+   "task": "task-1432",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
+  },
+  {
+   "task": "task-1433",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1435",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1436",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
+  },
+  {
+   "task": "task-1437",
+   "turns": 10,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.999,
+   "region": 0
+  },
+  {
+   "task": "task-1438",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.874,
+   "region": 0
+  },
+  {
+   "task": "task-1442",
+   "turns": 15,
+   "tL": 15,
+   "tE": 15,
+   "ratio": 1,
+   "kappaEnd": 1,
+   "region": 2
+  },
+  {
+   "task": "task-1443",
+   "turns": 4,
+   "tL": 4,
+   "tE": 4,
+   "ratio": 1,
+   "kappaEnd": 0.947,
+   "region": 2
+  },
+  {
+   "task": "task-1444",
+   "turns": 8,
+   "tL": 8,
+   "tE": 8,
+   "ratio": 1,
+   "kappaEnd": 0.958,
+   "region": 3
+  },
+  {
+   "task": "task-1445",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1446",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.874,
+   "region": 0
+  },
+  {
+   "task": "task-1447",
+   "turns": 7,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.938,
+   "region": 7
+  },
+  {
+   "task": "task-1448",
+   "turns": 6,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.864,
+   "region": 0
+  },
+  {
+   "task": "task-1449",
+   "turns": 16,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 1,
+   "region": 0
+  },
+  {
+   "task": "task-1450",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.874,
+   "region": 0
+  },
+  {
+   "task": "task-1451",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 2
+  },
+  {
+   "task": "task-1452",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
+  },
+  {
+   "task": "task-1453",
+   "turns": 16,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 1,
+   "region": 0
+  },
+  {
+   "task": "task-1454",
+   "turns": 9,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.917,
+   "region": 0
+  },
+  {
+   "task": "task-1455",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.874,
+   "region": 0
+  },
+  {
+   "task": "task-1456",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1457",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
+  },
+  {
+   "task": "task-1458",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1459",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
+  },
+  {
+   "task": "task-1460",
+   "turns": 12,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 1,
+   "region": 0
+  },
+  {
+   "task": "task-1461",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
+  },
+  {
+   "task": "task-1462",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1463",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 6
+  },
+  {
+   "task": "task-1464",
+   "turns": 6,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 6
+  },
+  {
+   "task": "task-1465",
+   "turns": 5,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.947,
+   "region": 0
+  },
+  {
+   "task": "task-1466",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 0
+  },
+  {
+   "task": "task-1467",
+   "turns": 16,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 1,
+   "region": 0
+  },
+  {
+   "task": "task-1468",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.874,
+   "region": 0
+  },
+  {
+   "task": "task-1469",
+   "turns": 4,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.947,
+   "region": 0
+  },
+  {
+   "task": "task-1472",
+   "turns": 8,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.974,
+   "region": 0
+  },
+  {
+   "task": "task-1473",
+   "turns": 8,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.112,
+   "region": 0
+  },
+  {
+   "task": "task-1498",
+   "turns": 8,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1499",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1500",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1501",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1502",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1503",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1504",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1505",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1506",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1538",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.071,
+   "region": 7
+  },
+  {
+   "task": "task-1540",
+   "turns": 3,
+   "tL": 3,
+   "tE": 3,
+   "ratio": 1,
+   "kappaEnd": 0.006,
+   "region": 7
+  },
+  {
+   "task": "task-1541",
+   "turns": 3,
+   "tL": 3,
+   "tE": 3,
+   "ratio": 1,
+   "kappaEnd": 0.006,
+   "region": 7
+  },
+  {
+   "task": "task-1543",
+   "turns": 8,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.09,
+   "region": 7
+  },
+  {
+   "task": "task-1544",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.071,
+   "region": 7
+  },
+  {
+   "task": "task-1546",
+   "turns": 6,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0,
+   "region": 7
+  },
+  {
+   "task": "task-1547",
+   "turns": 6,
+   "tL": 6,
+   "tE": 6,
+   "ratio": 1,
+   "kappaEnd": 0.001,
+   "region": 7
+  },
+  {
+   "task": "task-1548",
+   "turns": 3,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.071,
+   "region": 7
+  },
+  {
+   "task": "task-1549",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.071,
+   "region": 7
+  },
+  {
+   "task": "task-1550",
+   "turns": 4,
+   "tL": 4,
+   "tE": 4,
+   "ratio": 1,
+   "kappaEnd": 0.001,
+   "region": 7
+  },
+  {
+   "task": "task-1551",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.071,
+   "region": 7
+  },
+  {
+   "task": "task-1552",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1553",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1554",
+   "turns": 3,
+   "tL": 3,
+   "tE": 3,
+   "ratio": 1,
+   "kappaEnd": 0.167,
+   "region": 7
+  },
+  {
+   "task": "task-1555",
+   "turns": 2,
+   "tL": 2,
+   "tE": 2,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1556",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.727,
+   "region": 7
+  },
+  {
+   "task": "task-1559",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1560",
+   "turns": 3,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1564",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1565",
+   "turns": 2,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1578",
+   "turns": 6,
+   "tL": 1,
+   "tE": 1,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1579",
+   "turns": 6,
+   "tL": 5,
+   "tE": 5,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1580",
+   "turns": 6,
+   "tL": 4,
+   "tE": 4,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  },
+  {
+   "task": "task-1581",
+   "turns": 5,
+   "tL": 5,
+   "tE": 5,
+   "ratio": 1,
+   "kappaEnd": 0.5,
+   "region": 7
+  }
+ ]
+}

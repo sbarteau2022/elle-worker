@@ -136,7 +136,7 @@ The architecture is governed by five foundational pillars:
 | **C2** | Conductor | Tasks with $\ge 6$ consecutive no-change ticks transition to `stalled` state and are removed from the schedule. | `src/conductor.ts:73`, `src/conductor.ts:371–381` |
 | **C3** | Autonomy | Production code modification is restricted to `elle/*` branches; merge endpoints are structurally non-existent. | `src/forge.ts:28, 59` |
 | **A1** | Adversary | Consequential writes in privileged scope undergo an adversarial challenger second-opinion pass (`devilTool`). | `src/router.ts:1586`, `src/adversary.ts:26` |
-| **S1** | Swarm | Local-to-Cloud session bus packets use PQC hybrid forward secrecy (X25519 + ML-KEM-768 / FIPS 203). | `src/lane-handshake.ts`, `src/pqc-hybrid.ts` |
+| **S1** | Swarm | Conditional: the PQC hybrid handshake path requires `ELLE_LANE_PROTOCOL=v2` or `v3`; the unset/default v1 path does not establish the claimed PQC forward secrecy. Verify negotiated protocol and deployed configuration before asserting this property for traffic. | `src/session-bus.ts`, `src/lane-handshake.ts`, `src/pqc-hybrid.ts` |
 | **T1** | Tool Tree | Categorical tool hierarchy forms an exact partition of all registered tools: $\bigcup C_i \equiv \text{TOOL\_LINES}, \; C_i \cap C_j = \emptyset$. | `src/router.ts:483–495` |
 
 ---
@@ -354,7 +354,7 @@ export interface ModalityProfile {
   text?: boolean;    // Semantic transcript / ASR — builds the graph nodes & derivation edges
   timing?: boolean;  // Real timestamps — sync & rate channels
   audio?: boolean;   // Acoustic prosody (PFAR): pitch, energy, stress — world channel 1
-  vision?: boolean;  // Visual field (vFAR): scene cuts, text, motion — world channel 2
+  vision?: boolean;  // Visual field (vFAR): spatial statistics and texture — world channel 2
 }
 ```
 
@@ -392,8 +392,8 @@ $$\text{rank}(\text{incoherent}) = 0 < \text{rank}(\text{consistent\_only}) = 1 
 
 Physical signal convergence combines three independent perceptual rippers:
 1. **Semantic Channel:** Sentence segmentation (`textToSegments`) generating derivation edges ($A \to B$) and recognition shortcut edges ($B \to A$).
-2. **Acoustic Prosody Channel (PFAR, `src/pfar.ts`):** 16-band eGeMAPS acoustic feature ripper extracting fundamental frequency ($F_0$), spectral flux, jitter, and harmonic-to-noise ratio (HNR).
-3. **Visual Field Channel (vFAR, `src/vfar.ts`):** Spatial luma tensors extracting scene cuts, 8-orientation Gabor texture energy, and Gray-Level Co-occurrence Matrix (GLCM) contrast.
+2. **Acoustic Prosody Channel (PFAR, `src/pfar.ts`):** Autocorrelation F0 estimates, pitch statistics, frame-granular jitter/shimmer/HNR proxies, voiced fraction, pauses, alpha ratio, Hammarberg index and spectral centroid. These are selected eGeMAPS-related features, not a validated complete eGeMAPS implementation. This module does not implement the previously claimed 16-band eGeMAPS or spectral-flux extractor.
+3. **Visual Field Channel (vFAR, `src/vfar.ts`):** Luma-field and Sobel statistics, structure-tensor orientation, Gabor texture energy at four orientations (0°, 45°, 90°, 135°) and two wavelengths (4, 8 pixels), and GLCM features. Scene-cut detection is not implemented in this module.
 
 ### 2.11 Harmonic Coherence Metric ($r(a,b,k)$ Cross-Correlation) & Non-Inflating Corpus Corroboration Axis
 

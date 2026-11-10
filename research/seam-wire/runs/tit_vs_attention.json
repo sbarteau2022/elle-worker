@@ -1,0 +1,132 @@
+{
+ "config": {
+  "steps": 30,
+  "seq": 64,
+  "dims": 64,
+  "vocab": 24,
+  "layers": 2,
+  "taps": 8,
+  "batch": 32,
+  "lr": 0.003,
+  "seeds": 1,
+  "recall_steps": 0,
+  "kinds": "attn,tit,tit+local",
+  "out": "/Users/stewartbarteau/Desktop/ELLE_STACK__CURRENT_WORK/elle-worker/research/seam-wire/runs/tit_vs_attention.json"
+ },
+ "rows": [
+  {
+   "kind": "attn",
+   "task": "local",
+   "seed": 0,
+   "params": 77824,
+   "final_loss": 0.0004050231946166605,
+   "val_acc": 1.0,
+   "seconds": 0.2
+  },
+  {
+   "kind": "tit",
+   "task": "local",
+   "seed": 0,
+   "params": 47120,
+   "final_loss": 0.6954353451728821,
+   "val_acc": 0.5234375,
+   "seconds": 0.5
+  },
+  {
+   "kind": "tit+local",
+   "task": "local",
+   "seed": 0,
+   "params": 47894,
+   "final_loss": 0.6948801875114441,
+   "val_acc": 0.5234375,
+   "seconds": 0.6
+  },
+  {
+   "kind": "attn",
+   "task": "recall",
+   "seed": 0,
+   "params": 77824,
+   "final_loss": 2.578631639480591,
+   "val_acc": 0.0703125,
+   "seconds": 0.2
+  },
+  {
+   "kind": "tit",
+   "task": "recall",
+   "seed": 0,
+   "params": 47120,
+   "final_loss": 2.6124753952026367,
+   "val_acc": 0.0703125,
+   "seconds": 0.5
+  },
+  {
+   "kind": "tit+local",
+   "task": "recall",
+   "seed": 0,
+   "params": 47894,
+   "final_loss": 2.559007167816162,
+   "val_acc": 0.0703125,
+   "seconds": 0.6
+  }
+ ],
+ "summary": {
+  "local_attn": {
+   "mean_acc": 1.0,
+   "accs": [
+    1.0
+   ],
+   "params": 77824
+  },
+  "local_tit": {
+   "mean_acc": 0.5234375,
+   "accs": [
+    0.5234375
+   ],
+   "params": 47120
+  },
+  "local_tit+local": {
+   "mean_acc": 0.5234375,
+   "accs": [
+    0.5234375
+   ],
+   "params": 47894
+  },
+  "recall_attn": {
+   "mean_acc": 0.0703125,
+   "accs": [
+    0.0703125
+   ],
+   "params": 77824
+  },
+  "recall_tit": {
+   "mean_acc": 0.0703125,
+   "accs": [
+    0.0703125
+   ],
+   "params": 47120
+  },
+  "recall_tit+local": {
+   "mean_acc": 0.0703125,
+   "accs": [
+    0.0703125
+   ],
+   "params": 47894
+  }
+ },
+ "H1_local_tit_ge_attn": null,
+ "H2_recall_tit_lt_attn": null,
+ "taps": [
+  6,
+  15,
+  21,
+  30,
+  40,
+  45,
+  55,
+  60
+ ],
+ "three_gap": [
+  0.090169944,
+  0.145898034
+ ]
+}

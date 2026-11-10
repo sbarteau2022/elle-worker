@@ -1,0 +1,67 @@
+# CLOUD_CONFIG.yaml
+# ------------------------------------------------------------
+# Configuration for `cache_cloud_teacher_embeddings.py`
+# ------------------------------------------------------------
+# Adjust the fields below to match the cloud providers you have
+# API access to.  All sensitive keys should be stored in environment
+# variables; do NOT commit them to version control.
+
+# ------------------------------------------------------------------
+# 1. Dataset to use for distillation (GSM8K train split is assumed)
+# ------------------------------------------------------------------
+# Path to the JSONL file containing training examples.  Each line must
+# be a JSON object with a "question" field (the prompt) and a unique "id"
+# (or "question_id").
+
+dataset: "/Users/stewartbarteau/Desktop/hybrid-HNPA-active-inference-LLM/benchmarks/gsm8k/train.jsonl"
+
+# ------------------------------------------------------------------
+# 2. Output location for the cached embeddings
+# ------------------------------------------------------------------
+output: "./research/cloud-distillation/teacher_embeddings.jsonl"
+
+# ------------------------------------------------------------------
+# 3. Rate‑limit configuration (requests per second)
+# ------------------------------------------------------------------
+max_rps: 2   # e.g., 2 requests per second – tune to respect provider quotas
+
+# ------------------------------------------------------------------
+# 4. Teacher definitions – one entry per cloud model you wish to use.
+# ------------------------------------------------------------------
+# Required keys per teacher:
+#   name:        short identifier used in the cache file
+#   provider:    one of "openai", "gemini", "anthropic"
+#   model_id:    the model name as understood by the provider (e.g.
+#                "gpt-4-turbo" for OpenAI)
+#   api_key_env: name of the environment variable that holds the API key
+#   probe_path:  (optional) path to a 21‑dim linear probe checkpoint.
+#                If omitted the script expects the provider to already
+#                return a 21‑dim vector; otherwise a probe is applied.
+# ------------------------------------------------------------------
+teachers:
+  - name: "openai_gpt4"
+    provider: "openai"
+    model_id: "text-embedding-3-large"   # 1536‑dim embedding model
+    api_key_env: "OPENAI_API_KEY"
+    probe_path: null   # use a 21‑dim probe you will train separately
+
+  - name: "gemini_pro"
+    provider: "gemini"
+    model_id: "models/gemini-1.5-pro"
+    api_key_env: "GEMINI_API_KEY"
+    probe_path: null
+
+  - name: "anthropic_opus"
+    provider: "anthropic"
+    model_id: "claude-3-opus-20240229"
+    api_key_env: "ANTHROPIC_API_KEY"
+    probe_path: null
+
+# ------------------------------------------------------------------
+# 5. Optional: path to a small validation set on which you will train
+#    the 21‑dim probe for each teacher.  The training script is not part
+#    of this repo – see the README for instructions.
+# ------------------------------------------------------------------
+# probe_training_set: "./research/cloud-distillation/probe_train.jsonl"
+
+# End of file

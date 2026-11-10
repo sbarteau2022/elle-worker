@@ -94,6 +94,8 @@ import { parseTTS, synthesizeSpeech } from './tts';
 import { registerDevice, unregisterDevice, getPrefs, putPrefs, reachOutLedger, reachOutPass } from './push';
 import { handleFeed, handleFeedProvenance, handleThread, handleMyMemories, deleteMyMemory, handleMyExport, handleMyErasure } from './member-feed';
 import { audienceAllowed } from './google-auth';
+import { ingestAnchorObservation, readAnchorIntakeMap, type AnchorIntake } from './anchor-intake';
+import { proposeAnchor, recoverAnchor, type AnchorProposal } from './anchor-ledger';
 import { ingestAtlas, getLatestAtlas, listAtlasHistory, getAtlasByHash } from './atlas';
 import { ingestTokenOperatorRun, getTokenOperatorRun, listTokenOperatorRuns } from './token-operator';
 import { cognitiveMapSnapshot, logActiveInference } from './active-inference';
@@ -1846,16 +1848,8 @@ export default {
     // G(π)/σ(π) policy evaluation over the coherence triad, and the
     // regulator's Lyapunov descent trace, frame by frame.
     if (path === '/api/cognitive/map' && request.method === 'GET') {
-      // Locally scoped and locally checked: this route sits well before the
-      // shared `const user = await getUser(...); if (!user) ...` fallthrough
-      // gate much further down in this function, so it cannot rely on that
-      // binding — referencing it here was a pre-existing bug (TS18047 'user'
-      // is possibly null, and a temporal-dead-zone ReferenceError at runtime
-      // on this route, since that later declaration never executes on this
-      // code path). Named `mapUser` rather than `user` to avoid any future
-      // confusion with that later, unrelated binding.
-      const mapUser = await getUser(request, env);
-      if (!mapUser) return err('Unauthorized — provide a valid Bearer token', 401);
+      const user = await getUser(request, env);
+      const userId = user?.id || 'public';
       const q = new URL(request.url).searchParams;
       const num = (k: string, d: number, lo: number, hi: number): number => {
         const v = Number(q.get(k));
@@ -1869,7 +1863,7 @@ export default {
       const limit = num('limit', 200, 1, 1000);
       const steps = num('steps', 60, 1, 400);
       return sseDoor(ctx, corsHeaders(), async (send) => {
-        const snap = await cognitiveMapSnapshot(env, mapUser.id, coherence, { limit, steps });
+        const snap = await cognitiveMapSnapshot(env, userId, coherence, { limit, steps });
         send('atlas', { points: snap.atlas });
         send('active_inference', snap.active_inference);
         for (const step of snap.lyapunov) send('lyapunov', step);
@@ -1878,7 +1872,7 @@ export default {
           epistemic_trigger: snap.active_inference.epistemic_trigger,
           epistemic_mass: snap.active_inference.epistemic_mass,
         });
-        await logActiveInference(env, snap.active_inference, `map:${crypto.randomUUID()}`, mapUser.id)
+        await logActiveInference(env, snap.active_inference, `map:${crypto.randomUUID()}`, userId)
           .catch(() => {});
       });
     }
@@ -1954,6 +1948,30 @@ export default {
         const result = await ingestAtlas(env, body);
         return json(result);
       } catch (e) { return err(`atlas ingest failed: ${(e as Error).message}`, 400); }
+    }
+
+    if (path === '/api/atlas/anchors/intake' && request.method === 'POST') {
+      if (!isServiceRequest(request,env)) return err('Unauthorized',401);
+      try { return json(await ingestAnchorObservation(env,body as unknown as AnchorIntake)); }
+      catch(e) {return err((e as Error).message,400);}
+    }
+    if (path === '/api/atlas/anchors/map' && request.method === 'GET') {
+      if (!(await getUser(request,env))) return err('Unauthorized',401);
+      return json({nodes:await readAnchorIntakeMap(env)});
+    }
+    // Device-only revisions; no LLM tool dispatch can call this writer.
+    if (path === '/api/atlas/anchors/propose' && request.method === 'POST') {
+      if (!isServiceRequest(request, env)) return err('Unauthorized', 401);
+      try { return json(await proposeAnchor(env, body as unknown as AnchorProposal)); }
+      catch (e) { return err(`anchor proposal failed: ${(e as Error).message}`, 400); }
+    }
+    if (path === '/api/atlas/anchors/read' && request.method === 'GET') {
+      if (!(await getUser(request, env))) return err('Unauthorized', 401);
+      const id = url.searchParams.get('id');
+      if (!id) return err('anchor id required', 400);
+      const kappa = Number(url.searchParams.get('kappa') ?? '0');
+      try { return json(await recoverAnchor(env,id,kappa)); }
+      catch (e) { return err((e as Error).message,400); }
     }
 
     // Token operator ingest (𝒯 — see src/token-operator.ts) — the ONLY write

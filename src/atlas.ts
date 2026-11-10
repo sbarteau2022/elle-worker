@@ -40,9 +40,9 @@ export interface AtlasIngestEnv {
 // the response says so (`truncated: true`) rather than truncating silently.
 const MAX_EMBED_NODES = 300;
 
-let schemaReady = false;
+const schemaReady = new WeakSet<D1Database>();
 async function ensureSchema(env: AtlasIngestEnv): Promise<void> {
-  if (schemaReady) return;
+  if (schemaReady.has(env.DB)) return;
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS elle_atlas_snapshots (
     id TEXT PRIMARY KEY,
     version TEXT NOT NULL,
@@ -57,7 +57,7 @@ async function ensureSchema(env: AtlasIngestEnv): Promise<void> {
     r2_key TEXT NOT NULL,
     embedded_nodes INTEGER DEFAULT 0
   )`).run();
-  schemaReady = true;
+  schemaReady.add(env.DB);
 }
 
 // Same model + batching as the corpus embedder (index.ts's embedBatch); kept
@@ -97,23 +97,38 @@ export interface AtlasSnapshotShape {
   product: { mix: { hyperbolic: number; toroidal: number }; disagreements: unknown };
 }
 
-// Minimal structural validation — trust the device's own 79-test suite for
-// the geometry itself; this only checks the shape ingest actually reads.
+// Validate the shared snapshot boundary before any durable write.
 function validSnapshot(s: unknown): s is AtlasSnapshotShape {
-  const o = s as Record<string, unknown> | null;
-  if (!o || typeof o.hash !== 'string' || typeof o.version !== 'string' || !Array.isArray(o.nodes) || !Array.isArray(o.edges)) return false;
-  const hyper = o.hyper as Record<string, unknown> | undefined;
-  const torus = o.torus as Record<string, unknown> | undefined;
-  const structure = o.structure as Record<string, unknown> | undefined;
-  const product = o.product as Record<string, unknown> | undefined;
-  return !!hyper?.points && typeof hyper.points === 'object'
-    && !!torus?.points && typeof torus.points === 'object'
-    && !!structure?.invariants && !!product?.mix;
+  const obj = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (!obj(s) || typeof s.hash !== 'string' || !/^[a-f0-9]{16}$/.test(s.hash)
+      || typeof s.version !== 'string' || !s.version || !Number.isFinite(s.created_at)
+      || s.created_at < 0 || !Array.isArray(s.nodes) || !Array.isArray(s.edges)) return false;
+  if (!s.nodes.every((id: unknown) => typeof id === 'string' && id.length > 0)) return false;
+  const ids = new Set<string>(s.nodes);
+  if (ids.size !== s.nodes.length) return false;
+  const chart = (c: unknown, ball: boolean) => {
+    if (!obj(c) || !Number.isInteger(c.dim) || c.dim < 1 || !obj(c.points)) return false;
+    if (Object.keys(c.points).length !== ids.size) return false;
+    return [...ids].every(id => {
+      const v = c.points[id];
+      return Array.isArray(v) && v.length === c.dim && v.every(Number.isFinite)
+        && (!ball || Math.hypot(...v) < 1);
+    });
+  };
+  if (!chart(s.hyper, true) || !chart(s.torus, false)) return false;
+  if (!s.edges.every((e: unknown) => obj(e) && ids.has(e.src) && ids.has(e.dst)
+      && typeof e.kind === 'string' && e.kind.length > 0 && Number.isFinite(e.weight) && e.weight >= 0)) return false;
+  if (!obj(s.structure) || !obj(s.structure.invariants) || !obj(s.product) || !obj(s.product.mix)) return false;
+  const { hyperbolic: h, toroidal: t } = s.product.mix;
+  return Number.isFinite(h) && Number.isFinite(t) && h >= 0 && t >= 0 && Math.abs(h + t - 1) < 1e-6
+    && Number.isInteger(s.structure.invariants.cycle_rank) && s.structure.invariants.cycle_rank >= 0;
 }
 
 export interface AtlasIngestResult {
   hash: string; version: string; node_count: number; edge_count: number;
   embedded_nodes: number; truncated: boolean;
+  embedding_status: 'complete' | 'partial' | 'failed';
+  embedding_error?: string;
 }
 
 export async function ingestAtlas(env: AtlasIngestEnv, body: unknown): Promise<AtlasIngestResult> {
@@ -129,10 +144,13 @@ export async function ingestAtlas(env: AtlasIngestEnv, body: unknown): Promise<A
   const nodeIds = snapshot.nodes.slice(0, MAX_EMBED_NODES);
   const truncated = snapshot.nodes.length > nodeIds.length;
   let embedded = 0;
+  let embeddingError: string | undefined;
   if (nodeIds.length) {
     const texts = nodeIds.map((id) => nodeText(id, snapshot.hyper.points[id], snapshot.torus.points[id], snapshot.product.mix));
     try {
       const vectors = await embedTexts(env, texts);
+      if (vectors.length !== nodeIds.length || vectors.some(v => !Array.isArray(v) || !v.length || !v.every(Number.isFinite)))
+        throw new Error('atlas embed: incomplete or invalid embedding batch');
       const upserts = nodeIds.map((id, i) => ({
         id: `atlas-${snapshot.hash}-${id}`,
         values: vectors[i],
@@ -144,7 +162,7 @@ export async function ingestAtlas(env: AtlasIngestEnv, body: unknown): Promise<A
       }));
       await env.VECTORIZE.upsert(upserts);
       embedded = upserts.length;
-    } catch { /* R2 + D1 rows are the durable record; a failed embed pass can be re-ingested */ }
+    } catch (e) { embeddingError = e instanceof Error ? e.message : String(e); }
   }
 
   await env.DB.prepare(
@@ -160,7 +178,9 @@ export async function ingestAtlas(env: AtlasIngestEnv, body: unknown): Promise<A
     r2Key, embedded,
   ).run();
 
-  return { hash: snapshot.hash, version: snapshot.version, node_count: snapshot.nodes.length, edge_count: snapshot.edges.length, embedded_nodes: embedded, truncated };
+  return { hash: snapshot.hash, version: snapshot.version, node_count: snapshot.nodes.length, edge_count: snapshot.edges.length, embedded_nodes: embedded, truncated,
+    embedding_status: embeddingError ? 'failed' : truncated ? 'partial' : 'complete',
+    ...(embeddingError ? { embedding_error: embeddingError } : {}) };
 }
 
 export async function getLatestAtlas(env: AtlasIngestEnv): Promise<AtlasSnapshotShape | null> {

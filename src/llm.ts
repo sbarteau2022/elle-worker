@@ -62,6 +62,9 @@ export interface LLMEnv {
   // Self-hosted Ollama last resort (optional). When LLM_OLLAMA_URL is unset the
   // fallback is skipped and the original hosted-provider error is surfaced.
   LLM_OLLAMA_URL?:     string;
+  // LLM_LOCAL_ONLY=1: sovereign run — ONLY the self-hosted lane (LLM_OLLAMA_URL, i.e.
+  // mlx-serve). Never Workers AI, never a hosted provider; failure surfaces as an error.
+  LLM_LOCAL_ONLY?:     string;
   LLM_OLLAMA_KEY?:     string;
   LLM_MODEL_OLLAMA?:   string;
   // Cloudflare Workers AI binding — an INDEPENDENT free inference pool bound
@@ -639,6 +642,13 @@ export async function callLLM(
   // A single flag so one exhausted Workers AI pool is only ever paid for once
   // per call — whichever block tried it first, the later blocks skip it.
   let workersAITried = false;
+  if (env.LLM_LOCAL_ONLY === '1') {
+    if (!env.LLM_OLLAMA_URL) throw new Error('LLM_LOCAL_ONLY=1 but LLM_OLLAMA_URL is not set');
+    try {
+      const r = await callOllama(MODEL.ollama(env), system, messages, maxTokens, env, temperature ?? 0.7);
+      record(r, true); return r;
+    } catch (e) { record(null, false, 'ollama', MODEL.ollama(env)); throw e; }
+  }
   if (opts.prefer === 'local') {
     if (env.LLM_OLLAMA_URL) {
       try {
@@ -986,7 +996,7 @@ export async function runLLM(
     opts.task ?? 'conversation',
     opts.system ?? '',
     [{ role: 'user', content: userPrompt }],
-    opts.maxTokens ?? 4000,
+    opts.maxTokens ?? 32768,
     env,
     { temperature: opts.temperature ?? 0.7, prefer: opts.prefer }
   );

@@ -25,6 +25,7 @@ const SERVICE = 'service-key-value-fedcba9876543210';
 // keeps the test honest about touching no real storage.
 function mkEnv(over: Partial<Env> = {}): Env {
   return {
+    ENVIRONMENT: 'production',
     DB: { prepare: () => { throw new Error('no db in this test'); } },
     AUTH_TOKENS: { get: async () => null },
     JWT_SECRET: 'jwt-secret',

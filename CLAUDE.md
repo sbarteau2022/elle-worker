@@ -62,9 +62,16 @@ coding harness a door. Only works from a session executing ON the laptop;
 127.0.0.1:11434 from a cloud container is that container's loopback.
 
 ## Known state
-- `wasm-bridge.ts` cannot load the WASM core: no `public/wasm/` artifact; `initWasm()`
-  destructures `instance.exports` but wasm-pack's `init()` returns `InitOutput` (which *is*
-  the exports); and nothing imports the bridge. Target C Phase 1 depends on this crate.
+- `wasm-bridge.ts` cannot load the WASM core: **no `public/wasm/` artifact** (verified
+  2026-09-09 — the directory does not exist), and `initWasm()` destructures
+  `instance.exports` but wasm-pack's `init()` returns `InitOutput` (which *is* the
+  exports). Target C Phase 1 depends on this crate.
+  Corrected 2026-09-09: the clause "nothing imports the bridge" was **wrong** —
+  `src/pfar.ts` imports it lazily (`import('./wasm-bridge')`) and `src/pfar-fft.test.ts`
+  exercises it. But `docs/PFAR_PHASE_SPACE_PAPER.md` §"Corrections" overcorrected in the
+  other direction, calling the bridge "confirmed live": with no artifact the fast path
+  cannot engage in production, so the float-DFT fallback is what runs. Both halves of the
+  record were wrong; this is the measured state.
 - `test/m2-cordic-adversarial.spec.ts` 100k-step geodesic walk fails on slow hardware —
   5000ms default vs ~5.6s. Pre-existing on `main`, not a regression. Needs `testTimeout`.
 - `ingest-queue.ts` rejects at depth 100 with no dead-letter path (§6.1 specifies one).
