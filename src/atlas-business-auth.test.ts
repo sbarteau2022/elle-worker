@@ -5,7 +5,13 @@ import {
   consumeState,
   decodeIdentity,
   buildIntakePayload,
+  storeCredentials,
+  decryptGcred,
   BUSINESS_SCOPES,
+  oauthCsrfCookie,
+  oauthCsrfCookieClear,
+  readCookie,
+  OAUTH_CSRF_COOKIE,
   type BusinessAuthEnv,
   type GoogleIdentity,
 } from './atlas-business-auth';
@@ -13,11 +19,16 @@ import {
 // ── a KV stub good enough for state + credential storage ────────────────
 function fakeKV() {
   const store = new Map<string, string>();
+  const ttls = new Map<string, number | undefined>();
   return {
     store,
+    ttls,
     kv: {
       get: async (k: string) => store.get(k) ?? null,
-      put: async (k: string, v: string) => { store.set(k, v); },
+      put: async (k: string, v: string, opts?: { expirationTtl?: number }) => {
+        store.set(k, v);
+        ttls.set(k, opts?.expirationTtl);
+      },
       delete: async (k: string) => { store.delete(k); },
     } as unknown as KVNamespace,
   };
@@ -90,6 +101,79 @@ describe('startBusinessAuth', () => {
     const e = env();
     const { state } = await startBusinessAuth(e, { returnTo: '/start?step=2' });
     expect((await consumeState(e, state))!.returnTo).toBe('https://rapidai.pages.dev/start?step=2');
+  });
+});
+
+// ── CSRF cookie: binds state to the browser that started the flow ───────
+describe('oauth CSRF cookie', () => {
+  it('binds the state value, is HttpOnly/Secure/SameSite=Lax, and scoped to the oauth path', () => {
+    const header = oauthCsrfCookie('abc123');
+    expect(header).toMatch(/^atlas_oauth_csrf=abc123;/);
+    expect(header).toContain('HttpOnly');
+    expect(header).toContain('Secure');
+    expect(header).toContain('SameSite=Lax');
+    expect(header).toContain('Path=/api/atlas/oauth');
+  });
+
+  it('the clear cookie expires immediately and carries no value', () => {
+    const header = oauthCsrfCookieClear();
+    expect(header).toMatch(/^atlas_oauth_csrf=;/);
+    expect(header).toContain('Max-Age=0');
+  });
+
+  it('readCookie extracts one named cookie among several', () => {
+    const header = `foo=bar; ${OAUTH_CSRF_COOKIE}=the-state-value; baz=qux`;
+    expect(readCookie(header, OAUTH_CSRF_COOKIE)).toBe('the-state-value');
+  });
+
+  it('readCookie returns null when the cookie is absent', () => {
+    expect(readCookie('foo=bar', OAUTH_CSRF_COOKIE)).toBeNull();
+    expect(readCookie('', OAUTH_CSRF_COOKIE)).toBeNull();
+  });
+});
+
+// ── stored credentials: bounded retention + opt-in encryption ───────────
+describe('storeCredentials', () => {
+  it('bounds retention with a TTL on both KV keys — no code path re-reads this today', async () => {
+    const { kv, ttls } = fakeKV();
+    const e = env({ AUTH_TOKENS: kv });
+    const ref = await storeCredentials(e, 'sub-1', { access_token: 'at', refresh_token: 'rt', scope: BUSINESS_SCOPES });
+    expect(ttls.get(`atlas_gcred:${ref}`)).toBeGreaterThan(0);
+    expect(ttls.get('atlas_gcred_by_sub:sub-1')).toBeGreaterThan(0);
+  });
+
+  it('stores the refresh token in plaintext when ATLAS_TOKEN_ENC_KEY is unset (unchanged, opt-in)', async () => {
+    const { kv, store } = fakeKV();
+    const e = env({ AUTH_TOKENS: kv });
+    const ref = await storeCredentials(e, 'sub-1', { access_token: 'at', refresh_token: 'rt', scope: BUSINESS_SCOPES });
+    const stored = JSON.parse(store.get(`atlas_gcred:${ref}`)!);
+    expect(stored.refresh_token).toBe('rt');
+  });
+
+  it('encrypts the refresh token at rest when ATLAS_TOKEN_ENC_KEY is configured, and decryptGcred round-trips it', async () => {
+    const { kv, store } = fakeKV();
+    const encKey = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+    const e = env({ AUTH_TOKENS: kv, ATLAS_TOKEN_ENC_KEY: encKey });
+    const ref = await storeCredentials(e, 'sub-1', { access_token: 'at', refresh_token: 'rt', scope: BUSINESS_SCOPES });
+    const stored = JSON.parse(store.get(`atlas_gcred:${ref}`)!);
+    expect(stored.refresh_token).not.toBe('rt');
+    expect(stored.refresh_token).toMatch(/^enc:/);
+    expect(await decryptGcred(stored.refresh_token, e)).toBe('rt');
+  });
+
+  it('decryptGcred reads a legacy plaintext value unchanged, even with a key configured', async () => {
+    const encKey = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+    const e = env({ ATLAS_TOKEN_ENC_KEY: encKey });
+    expect(await decryptGcred('a-plaintext-refresh-token', e)).toBe('a-plaintext-refresh-token');
+  });
+
+  it('decryptGcred throws rather than returning garbage when the key is missing', async () => {
+    const { kv, store } = fakeKV();
+    const encKey = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+    const e = env({ AUTH_TOKENS: kv, ATLAS_TOKEN_ENC_KEY: encKey });
+    const ref = await storeCredentials(e, 'sub-1', { access_token: 'at', refresh_token: 'rt', scope: BUSINESS_SCOPES });
+    const stored = JSON.parse(store.get(`atlas_gcred:${ref}`)!);
+    await expect(decryptGcred(stored.refresh_token, env())).rejects.toThrow(/ATLAS_TOKEN_ENC_KEY/);
   });
 });
 

@@ -19,6 +19,14 @@ describe('parseCsv', () => {
   it('drops fully blank lines', () => {
     expect(parseCsv('a,b\n\n1,2\n  ,\n')).toEqual([['a', 'b'], ['1', '2']]);
   });
+  it('treats a quote mid-field as a literal character, not a field delimiter', () => {
+    // A bare quote that doesn't OPEN the field (real restaurant data: 12" Pizza)
+    // used to flip the parser into quoted mode and silently swallow every
+    // subsequent comma/newline until another stray quote or EOF — merging or
+    // dropping an unbounded number of later rows with no error.
+    const grid = parseCsv('Item,Qty\n12" Pizza,3\nWings,10\n');
+    expect(grid).toEqual([['Item', 'Qty'], ['12" Pizza', '3'], ['Wings', '10']]);
+  });
 });
 
 describe('field normalizers', () => {
@@ -34,6 +42,15 @@ describe('field normalizers', () => {
     expect(toIsoDate('7/4/26')).toBe('2026-07-04');
     expect(toIsoDate('2026-07-04')).toBe('2026-07-04');
     expect(toIsoDate('Total')).toBeNull();
+  });
+  it('toIsoDate: rejects an out-of-range month or day rather than emitting an invalid ISO string', () => {
+    // 13/02/2026 used to produce the literal string "2026-13-02" — not caught
+    // by the "no usable rows" guard (it's a non-null string), and written
+    // straight into a TEXT column with no CHECK constraint.
+    expect(toIsoDate('13/02/2026')).toBeNull();
+    expect(toIsoDate('02/32/2026')).toBeNull();
+    expect(toIsoDate('2026-13-02')).toBeNull();
+    expect(toIsoDate('2026-02-32')).toBeNull();
   });
 });
 
@@ -104,6 +121,14 @@ describe('normalizeCsv', () => {
     expect(n.daily[0].net_sales_cents).toBe(10000);
     expect(n.daily[0].tax_cents).toBe(0);
   });
+
+  it('fails loud on two rows for the same date in a daily-close export', () => {
+    // pos_daily_close is UNIQUE(venue_id, reporting_date) — two rows for one
+    // date in a single file is an exporter anomaly, not something to silently
+    // sum or silently drop one of.
+    expect(() => normalizeCsv('Date,Gross Sales\n07/01/2026,$100.00\n07/01/2026,$50.00'))
+      .toThrow(/duplicate rows for 2026-07-01/);
+  });
 });
 
 // ── landing: fake RAPID_DB capturing prepared statements + batch ─────────
@@ -131,7 +156,13 @@ describe('ingestAtlasCsv', () => {
     for (const d of deletes) expect(d.binds[0]).toBe('venue-77'); // never another tenant's rows
     const inserts = execs.filter(e => /^INSERT INTO pos_daily_close/.test(e.sql));
     expect(inserts).toHaveLength(2);
-    expect(inserts[0].binds[0]).toBe('venue-77');
+    // id, venue_id, reporting_date, ... — venue_id is bound, not just present
+    // in closure scope, and a real id/created_at/updated_at are supplied (the
+    // NOT NULL columns pos_daily_close requires with no column default).
+    expect(inserts[0].binds).toContain('venue-77');
+    expect(typeof inserts[0].binds[0]).toBe('string');
+    expect(inserts[0].binds[0]).not.toBe('venue-77'); // id, a fresh UUID
+    expect(inserts[0].binds.at(-1)).toMatch(/^\d{4}-\d{2}-\d{2}T/); // updated_at ISO string
     expect(batches).toEqual([4]); // one atomic batch: 2 deletes + 2 inserts
   });
 
@@ -139,7 +170,9 @@ describe('ingestAtlasCsv', () => {
     const { env, execs } = fakeRapidDb();
     const out = await ingestAtlasCsv(env, 'venue-77', ITEMS_CSV);
     expect(out.kind).toBe('pos_items');
-    expect(execs.filter(e => /^INSERT INTO pos_item_sale/.test(e.sql))).toHaveLength(2);
+    const inserts = execs.filter(e => /^INSERT INTO pos_item_sale/.test(e.sql));
+    expect(inserts).toHaveLength(2);
+    expect(inserts[0].binds).toContain('venue-77');
     expect(execs.filter(e => /^DELETE FROM pos_item_sale/.test(e.sql))).toHaveLength(1); // one date
   });
 

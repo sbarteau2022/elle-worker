@@ -31,7 +31,17 @@ export function parseCsv(text: string): string[][] {
         if (src[i + 1] === '"') { field += '"'; i++; }
         else inQuotes = false;
       } else field += c;
-    } else if (c === '"') inQuotes = true;
+    } else if (c === '"' && field === '') {
+      // Only a quote that OPENS a field starts quoted mode (RFC 4180: a field
+      // is either wholly quoted or wholly unquoted). A quote appearing after
+      // other characters have already been written to this field — e.g. a
+      // menu item like `12" Pizza` — is realistic restaurant data, not a
+      // field delimiter; treating it as one used to desync the parser for
+      // the rest of the file (every subsequent comma/newline read as literal
+      // content until a later stray quote or EOF), silently merging or
+      // dropping an unbounded number of rows with no error.
+      inQuotes = true;
+    }
     else if (c === ',') { row.push(field); field = ''; }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && src[i + 1] === '\n') i++;
@@ -56,13 +66,27 @@ export function moneyToCents(v: string): number | null {
   return Math.round(n * 100) * (negative ? -1 : 1);
 }
 
-// MM/DD/YYYY · M/D/YY · YYYY-MM-DD → ISO YYYY-MM-DD (rapid_* sorts on it)
+// MM/DD/YYYY · M/D/YY · YYYY-MM-DD → ISO YYYY-MM-DD (rapid_* sorts on it).
+// A month outside 1-12 or day outside 1-31 is rejected (not silently accepted
+// into an invalid ISO string like "2026-13-02") — the caller counts this as a
+// skipped row rather than writing a bogus reporting_date. This does not (and
+// cannot, without an explicit format hint) resolve the inherent MM/DD-vs-DD/MM
+// ambiguity when both components are <=12; it only closes the case that used
+// to produce a string SQLite would happily store as-is.
+function validDateParts(month: number, day: number): boolean {
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
 export function toIsoDate(v: string): string | null {
   const s = String(v ?? '').trim();
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  if (m) {
+    if (!validDateParts(Number(m[2]), Number(m[3]))) return null;
+    return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  }
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (m) {
+    if (!validDateParts(Number(m[1]), Number(m[2]))) return null;
     const yyyy = m[3].length === 2 ? `20${m[3]}` : m[3];
     return `${yyyy}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
   }
@@ -172,6 +196,22 @@ export function normalizeCsv(csvText: string, kindHint?: string): Normalized {
   }
   const rows = kind === 'pos_daily' ? daily.length : items.length;
   if (!rows) throw new Error(`no usable rows — ${skipped} row(s) skipped (unparseable dates/amounts or summary lines)`);
+  // pos_daily_close is one row per (venue, reporting_date) — a second row for
+  // the same date in one file is an exporter anomaly (a concatenated
+  // multi-location export, a re-run total, a duplicated line), not a case
+  // this ingest can safely guess how to combine. Fail loud and name the date,
+  // matching this file's "never a silent partial import" design, rather than
+  // silently summing (assuming the caller meant to combine two partial days)
+  // or silently dropping one (assuming the other row is garbage).
+  if (kind === 'pos_daily') {
+    const seen = new Set<string>();
+    for (const r of daily) {
+      if (seen.has(r.reporting_date)) {
+        throw new Error(`duplicate rows for ${r.reporting_date} — a daily-close export has one row per date; remove the duplicate and re-upload`);
+      }
+      seen.add(r.reporting_date);
+    }
+  }
   return { kind, daily, items, skipped };
 }
 
@@ -198,19 +238,24 @@ export async function ingestAtlasCsv(
   for (const d of dates) {
     stmts.push(db.prepare(`DELETE FROM ${table} WHERE venue_id = ? AND reporting_date = ?`).bind(venueId, d));
   }
+  // rapid2ai-db's convention throughout (see RAPIDAi's schema/migrations) is
+  // an app-generated TEXT PRIMARY KEY plus NOT NULL created_at/updated_at with
+  // no column default — pos_daily_close (and the new pos_item_sale) follow
+  // that same convention, so both must be supplied here rather than omitted.
+  const now = new Date().toISOString();
   if (n.kind === 'pos_daily') {
     for (const r of n.daily) {
       stmts.push(db.prepare(
-        `INSERT INTO pos_daily_close (venue_id, reporting_date, gross_sales_cents, net_sales_cents, tax_cents, tips_cents, transaction_count)
-         VALUES (?,?,?,?,?,?,?)`
-      ).bind(venueId, r.reporting_date, r.gross_sales_cents, r.net_sales_cents, r.tax_cents, r.tips_cents, r.transaction_count));
+        `INSERT INTO pos_daily_close (id, venue_id, reporting_date, gross_sales_cents, net_sales_cents, tax_cents, tips_cents, transaction_count, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`
+      ).bind(crypto.randomUUID(), venueId, r.reporting_date, r.gross_sales_cents, r.net_sales_cents, r.tax_cents, r.tips_cents, r.transaction_count, now, now));
     }
   } else {
     for (const r of n.items) {
       stmts.push(db.prepare(
-        `INSERT INTO pos_item_sale (venue_id, reporting_date, item_name, category, qty, gross_sales_cents)
-         VALUES (?,?,?,?,?,?)`
-      ).bind(venueId, r.reporting_date, r.item_name, r.category, r.qty, r.gross_sales_cents));
+        `INSERT INTO pos_item_sale (id, venue_id, reporting_date, item_name, category, qty, gross_sales_cents, created_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      ).bind(crypto.randomUUID(), venueId, r.reporting_date, r.item_name, r.category, r.qty, r.gross_sales_cents, now));
     }
   }
   await db.batch(stmts);

@@ -111,6 +111,7 @@ import { readAtlasEvents } from './atlas-events';
 import {
   businessAuthConfigured, startBusinessAuth, consumeState, exchangeCode, decodeIdentity,
   fetchBusinessProfile, buildIntakePayload, postIntake, storeCredentials, lookupMembership,
+  oauthCsrfCookie, oauthCsrfCookieClear, readCookie, OAUTH_CSRF_COOKIE,
 } from './atlas-business-auth';
 import { enqueueContextualBackfill, handleReembedMessage, type ReembedEnv } from './retrieval/reembed';
 import { runJudgeBatch, kappaCorrelationReport } from './judge';
@@ -260,6 +261,12 @@ export interface Env extends LLMEnv {
   // just without the email courtesy. Set with: wrangler secret put RESEND_API_KEY
   RESEND_API_KEY?: string;
   ENVIRONMENT:      string;
+  // Gates getUser's local-dev convenience identity (see getUser below). Never
+  // set in wrangler.toml's committed [vars] — only via `wrangler secret put
+  // DEV_AUTH_BYPASS` on an actual local/dev deployment, or in .dev.vars — so a
+  // dropped ENVIRONMENT var or a future [env.preview] block can't silently
+  // reopen it.
+  DEV_AUTH_BYPASS?: string;
   // Alpaca — paper trading
   ALPACA_API_KEY?:    string;
   ALPACA_SECRET_KEY?: string;
@@ -440,7 +447,11 @@ async function hashPassword(password: string, salt: string): Promise<string> {
   return btoa(String.fromCharCode(...new Uint8Array(bits)));
 }
 
-async function signJWT(payload: Record<string, unknown>, secret: string): Promise<string> {
+export async function signJWT(payload: Record<string, unknown>, secret: string): Promise<string> {
+  // An unset secret must throw, not silently sign with the literal string
+  // "undefined" — that would make every session token forgeable by anyone who
+  // knows JWT_SECRET was never configured.
+  if (!secret) throw new Error('JWT_SECRET not configured');
   const enc  = (o: unknown) => btoa(JSON.stringify(o)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const data = `${enc({ alg: 'HS256', typ: 'JWT' })}.${enc(payload)}`;
   const key  = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
@@ -448,7 +459,8 @@ async function signJWT(payload: Record<string, unknown>, secret: string): Promis
   return `${data}.${btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')}`;
 }
 
-async function verifyJWT(token: string, secret: string): Promise<Record<string, unknown> | null> {
+export async function verifyJWT(token: string, secret: string): Promise<Record<string, unknown> | null> {
+  if (!secret) return null; // same fail-closed rule as signJWT — never verify against an unset/empty secret
   try {
     const [h, b, s] = token.split('.');
     if (!h || !b || !s) return null;
@@ -461,17 +473,33 @@ async function verifyJWT(token: string, secret: string): Promise<Record<string, 
   } catch { return null; }
 }
 
-async function getUser(request: Request, env: Env): Promise<{ id: string; email: string; tier: string } | null> {
-  const fallback = () => env.ENVIRONMENT !== 'production' ? { id: 'local-dev', email: 'dev@localhost', tier: 'admin' } : null;
+export async function getUser(request: Request, env: Env): Promise<{ id: string; email: string; tier: string } | null> {
+  // Local-dev convenience identity. Two things matter here:
+  //   1. It requires DEV_AUTH_BYPASS, a dedicated secret, not just
+  //      `ENVIRONMENT !== 'production'` — an unauthenticated caller must not
+  //      be able to reach this identity just because ENVIRONMENT was left
+  //      unset or misconfigured on a reachable deployment.
+  //   2. It never grants tier:'admin'. isAdmin() below trusts this tier field
+  //      directly (ADMIN_TIERS.has(u.tier)) to unlock every internal/admin
+  //      route in this file, so a "no credentials, just developing locally"
+  //      identity must not double as an admin bypass.
+  const fallback = () =>
+    env.ENVIRONMENT !== 'production' && env.DEV_AUTH_BYPASS
+      ? { id: 'local-dev', email: 'dev@localhost', tier: 'standard' }
+      : null;
   const auth = request.headers.get('Authorization');
   if (!auth?.startsWith('Bearer ') || auth.length < 8) return fallback();
+  // Past this point a credential WAS presented. An invalid signature, expired
+  // token, missing subject, or revoked jti is "declined" — a distinct failure
+  // from "no token sent" — and must return null directly rather than falling
+  // through to the dev identity above.
   try {
     const pl = await verifyJWT(auth.slice(7), env.JWT_SECRET);
-    if (!pl?.sub || typeof pl.sub !== 'string') return fallback();
-    if (!await env.AUTH_TOKENS.get(`token:${pl.jti}`)) return fallback();
+    if (!pl?.sub || typeof pl.sub !== 'string') return null;
+    if (!await env.AUTH_TOKENS.get(`token:${pl.jti}`)) return null;
     return { id: pl.sub, email: pl.email as string, tier: (pl.tier as string) || 'standard' };
   } catch {
-    return fallback();
+    return null;
   }
 }
 
@@ -515,7 +543,7 @@ function timingSafeEqualStr(a: string, b: string): boolean {
 // Privileged caller: the master service key (break-glass) OR a valid, unrevoked
 // admin/superadmin-tier user JWT. This is the single gate for every internal/admin
 // endpoint, so the dev console can run on an admin JWT instead of the raw key.
-async function isAdmin(request: Request, env: Env): Promise<boolean> {
+export async function isAdmin(request: Request, env: Env): Promise<boolean> {
   if (isServiceRequest(request, env)) return true;
   const u = await getUser(request, env);
   return !!u && ADMIN_TIERS.has(u.tier);
@@ -2052,28 +2080,47 @@ export default {
         return err('Google business sign-in is not configured on this deploy ' +
           '(needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_OAUTH_REDIRECT)', 503);
       }
-      const { url: consent } = await startBusinessAuth(env, {
+      const { url: consent, state } = await startBusinessAuth(env, {
         returnTo: url.searchParams.get('return_to') || undefined,
       });
+      // Bind `state` to this browser (see oauthCsrfCookie's doc comment) —
+      // required back at /oauth/callback so a captured code+state pair can't
+      // be completed by a different browser.
+      const csrfHeader = { 'Set-Cookie': oauthCsrfCookie(state) };
       // A browser hitting this directly should just go; an XHR caller gets the
       // URL to navigate itself.
-      if ((url.searchParams.get('mode') || '') === 'json') return json({ url: consent });
-      return Response.redirect(consent, 302);
+      if ((url.searchParams.get('mode') || '') === 'json') {
+        return new Response(JSON.stringify({ url: consent }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(), ...csrfHeader },
+        });
+      }
+      return new Response(null, { status: 302, headers: { Location: consent, ...csrfHeader } });
     }
 
     // The consent screen returns here. Always ends in a redirect back to the
     // funnel — with a token on success, or an error code on failure — because
     // the operator is sitting in a browser, not reading JSON.
     if (path === '/api/atlas/oauth/callback' && request.method === 'GET') {
+      // The CSRF cookie is single-use in intent (like `state` itself), so
+      // every exit from this route clears it — success, failure, or refusal.
       const backTo = (target: string, params: Record<string, string>) => {
         const u = new URL(target);
         for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
-        return Response.redirect(u.toString(), 302);
+        return new Response(null, { status: 302, headers: { Location: u.toString(), 'Set-Cookie': oauthCsrfCookieClear() } });
       };
       const fallback = `${env.ATLAS_APP_URL || 'https://rapidai.pages.dev'}/start`;
       if (!businessAuthConfigured(env)) return err('Google business sign-in is not configured', 503);
 
       const stateParam = url.searchParams.get('state') || '';
+      // The browser completing the callback must be the one that started the
+      // flow (see oauthCsrfCookie's doc comment on atlas-business-auth.ts) —
+      // checked BEFORE consuming `state` so a mismatch from an unrelated
+      // browser doesn't burn the legitimate browser's one-time state token.
+      const csrfCookie = readCookie(request.headers.get('Cookie') || '', OAUTH_CSRF_COOKIE);
+      if (!csrfCookie || csrfCookie !== stateParam) {
+        return backTo(fallback, { atlas_error: 'state_mismatch' });
+      }
       const stored = await consumeState(env, stateParam);
       // No matching state ⇒ forged or replayed callback. Refuse before we
       // spend a code exchange on it.
